@@ -28,6 +28,8 @@ fun ShowerScreen(
     location: String,
     remaining: String,
     elapsedSec: Int,
+    autoDisConSec: Int = 0,
+    isStopping: Boolean = false,
     onStopClick: () -> Unit
 ) {
     val minutes = elapsedSec / 60
@@ -99,17 +101,56 @@ fun ShowerScreen(
                 }
             }
 
+            // 自动关停倒计时
+            if (autoDisConSec > 0) {
+                val dMin = autoDisConSec / 60
+                val dSec = autoDisConSec % 60
+                val countdownText = if (dMin > 0) "${dMin}分${dSec}秒" else "${dSec}秒"
+                Spacer(Modifier.height(12.dp))
+                Surface(
+                    modifier = Modifier.clip(RoundedCornerShape(12.dp))
+                        .background(AppColors.Warning.copy(alpha = 0.12f)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("⏳", fontSize = 18.sp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("闲置约 $countdownText 后自动关闭",
+                            fontSize = 13.sp,
+                            color = AppColors.Warning)
+                    }
+                }
+            }
+
             Spacer(Modifier.height(48.dp))
 
             Button(
                 onClick = onStopClick,
                 modifier = Modifier.fillMaxWidth().height(56.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE53935)),
+                enabled = !isStopping,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFE53935),
+                    disabledContainerColor = Color(0xFFE53935).copy(alpha = 0.4f)
+                ),
                 shape = CircleShape,
                 elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
             ) {
-                Text("结 束 使 用", color = Color.White, fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
+                if (isStopping) {
+                    CircularProgressIndicator(
+                        Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("正在关闭...", color = Color.White, fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
+                } else {
+                    Text("结 束 使 用", color = Color.White, fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
+                }
             }
 
             Spacer(Modifier.height(16.dp))

@@ -126,7 +126,8 @@ class MainActivity : ComponentActivity() {
                             confirmButton = {
                                 Button(onClick = {
                                     showKickedDialog = false; mainViewModel.kickedOut = false
-                                    mainViewModel.stopShower(); PrefsHelper.clear()
+                                    // skipNetwork：loginCode 已失效，只清本地，不再发请求，避免重登后又触发挤号
+                                    mainViewModel.stopShower(skipNetwork = true); PrefsHelper.clear()
                                     isLoggedIn = false; userPhone = ""
                                 }, modifier = Modifier.fillMaxWidth()) { Text("确定") }
                             }

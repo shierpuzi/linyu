@@ -5,6 +5,8 @@ import com.google.gson.JsonParser
 import com.hualala.linyu.model.BaseResponse
 import com.hualala.linyu.model.BillDetail
 import com.hualala.linyu.model.BillItem
+import com.hualala.linyu.model.CloseOrderResult
+import com.hualala.linyu.model.DownRateResult
 import com.hualala.linyu.model.DeviceInfo
 import com.hualala.linyu.model.LoginData
 import com.hualala.linyu.model.OrderStatus
@@ -92,13 +94,30 @@ suspend fun QzxyService.downRateSafe(
     xfModel: Int = 0,
     snCode: String,
     auth: Map<String, String>
-): BaseResponse<Unit> = parse(downRate(xfModel, snCode, auth).awaitString(), Unit::class.java)
+): BaseResponse<DownRateResult> = parse(downRate(xfModel, snCode, auth).awaitString(), DownRateResult::class.java)
 
 suspend fun QzxyService.closeOrderSafe(
     snCode: String,
     orderNo: String,
     auth: Map<String, String>
 ): BaseResponse<Unit> = parse(closeOrder(snCode, orderNo, auth).awaitString(), Unit::class.java)
+
+suspend fun QzxyService.downRateResultSafe(
+    snCode: String,
+    auth: Map<String, String>
+): BaseResponse<DownRateResult> = parse(downRateResult(snCode, auth).awaitString(), DownRateResult::class.java)
+
+suspend fun QzxyService.closeOrderResultSafe(
+    snCode: String,
+    orderNo: String,
+    auth: Map<String, String>
+): BaseResponse<CloseOrderResult> = parse(closeOrderResult(snCode, orderNo, auth).awaitString(), CloseOrderResult::class.java)
+
+suspend fun QzxyService.consumeOrderResultSafe(
+    snCode: String,
+    orderNo: String,
+    auth: Map<String, String>
+): BaseResponse<CloseOrderResult> = parse(consumeOrderResult(snCode, orderNo, auth).awaitString(), CloseOrderResult::class.java)
 
 suspend fun QzxyService.queryUsingSafe(
     xfModel: Int = 0,

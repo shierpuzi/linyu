@@ -46,6 +46,29 @@ interface QzxyService {
     ): Call<ResponseBody>
 
     @FormUrlEncoded
+    @POST("/order/tcpDevice/query/downRateResult")
+    fun downRateResult(
+        @Field("snCode") snCode: String,
+        @FieldMap auth: Map<String, String>
+    ): Call<ResponseBody>
+
+    @FormUrlEncoded
+    @POST("/order/tcpDevice/closeOrder/result/query")
+    fun closeOrderResult(
+        @Field("snCode") snCode: String,
+        @Field("orderNo") orderNo: String,
+        @FieldMap auth: Map<String, String>
+    ): Call<ResponseBody>
+
+    @FormUrlEncoded
+    @POST("/order/consumeOrder/result/query")
+    fun consumeOrderResult(
+        @Field("snCode") snCode: String,
+        @Field("orderNo") orderNo: String,
+        @FieldMap auth: Map<String, String>
+    ): Call<ResponseBody>
+
+    @FormUrlEncoded
     @POST("/order/tcpDevice/query/rateOrder/using")
     fun queryUsing(
         @Field("xfModel") xfModel: Int = 0,

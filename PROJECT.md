@@ -8,7 +8,7 @@
 |---|---|
 | 应用名称 | 淋浴 |
 | 包名 | `com.hualala.linyu` |
-| 版本 | v1.1.0 |
+| 版本 | v1.2.0 |
 | 技术栈 | Kotlin + Jetpack Compose + Material 3 |
 | 最低 Android 版本 | Android 8.0 (API 26) |
 | 目标 Android 版本 | Android 16 (API 36) |
@@ -265,6 +265,17 @@ buildTypes {
 ---
 
 ## 版本历史
+
+### v1.2.0
+
+- 开阀确认（开始洗澡时确认开阀成功）
+- 自动关停倒计时与确认弹窗
+- 消费金额结算（账单接口，异步获取）
+- 主页扫码绑定设备 + 扫码手电筒
+- 绑定寝室与设备列表筛选
+- 加密存储（EncryptedSharedPreferences）
+- 退出登录闪退修复
+- 挤号重登触发优化
 
 ### v1.1.0
 

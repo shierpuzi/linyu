@@ -75,3 +75,15 @@
 # ── Compose ──
 -dontwarn androidx.compose.**
 -keep class androidx.compose.** { *; }
+
+# ── CameraX ──
+-keep class androidx.camera.** { *; }
+-dontwarn androidx.camera.**
+
+# ── ML Kit ──
+-keep class com.google.mlkit.** { *; }
+-dontwarn com.google.mlkit.**
+
+# ── Jetpack Security (EncryptedSharedPreferences) ──
+-keep class androidx.security.** { *; }
+-dontwarn androidx.security.**

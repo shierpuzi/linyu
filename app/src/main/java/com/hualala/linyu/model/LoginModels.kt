@@ -82,3 +82,50 @@ data class BillDetail(
     val orderNo: String? = null,
     val preDeductMoney: Double = 0.0
 )
+
+/**
+ * 开阀结果查询 (/order/tcpDevice/query/downRateResult)
+ *
+ * 用于确认 downRate 开阀是否真正成功，同时可携带 autoDisConTime（自动关停秒数）。
+ */
+data class DownRateResult(
+    /** 订单号 */
+    val orderNo: String? = null,
+    /** 自动关停时间（秒），如 600 = 10 分钟 */
+    val autoDisConTime: Int? = null,
+    /** 状态码，0 通常表示开阀成功 */
+    val state: Int? = null,
+    val result: Int? = null,
+    /** 预扣金额 */
+    val preDeductMoney: Double? = null,
+    val preDeductMoneySend: Double? = null,
+    /** 费率 */
+    val rate: Double? = null,
+    /** 设备序列号 */
+    val snCode: String? = null
+)
+
+/**
+ * 关阀结果查询 (/order/tcpDevice/closeOrder/result/query)
+ *
+ * 用于确认 closeOrder 是否真正执行成功。服务器对成功/失败的字段
+ * 命名可能因学校而异，故用 @SerializedName 做多字段容错。
+ */
+data class CloseOrderResult(
+    /** 订单号 */
+    val orderNo: String? = null,
+    /** 订单状态：1=使用中，0=已关闭（部分服务器用 state） */
+    val state: Int? = null,
+    /** 订单状态（部分服务器用 status） */
+    val status: Int? = null,
+    /** 操作结果码，0 通常表示成功 */
+    val result: Int? = null,
+    /** 最终消费金额（元，数字形式） */
+    val consumeMoney: Double? = null,
+    /** 最终消费金额（元，字符串形式，部分学校返回） */
+    @SerializedName("consumeMoneyStr") val consumeMoneyStr: String? = null,
+    /** 结算时间 */
+    val consumeTime: String? = null,
+    /** 设备序列号 */
+    val deviceSnCode: String? = null
+)
