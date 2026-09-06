@@ -3,7 +3,12 @@
 [![Platform](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com)
 [![Language](https://img.shields.io/badge/Language-Kotlin-blue.svg)](https://kotlinlang.org)
 [![UI](https://img.shields.io/badge/UI-Jetpack%20Compose-purple.svg)](https://developer.android.com/jetpack/compose)
+[![Version](https://img.shields.io/badge/Version-v1.2.0-orange.svg)](https://github.com/yehu-imei/linyu/releases/latest)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+**⬇️ [下载最新 APK (v1.2.0)](https://github.com/yehu-imei/linyu/releases/latest)**
+
+趣智校园第三方 Android 客户端，用于控制校园热水器（淋浴设备）。相比官方 App，提供更简洁的界面和更流畅的操作体验。
 
 趣智校园第三方 Android 客户端，用于控制校园热水器（淋浴设备）。相比官方 App，提供更简洁的界面和更流畅的操作体验。
 
@@ -32,9 +37,9 @@
 ## 🏗 架构
 
 ```
-UI (Compose) → ViewModel → Repository → Retrofit API
+UI (Compose) → ViewModel → Repository → Retrofit API (v3-api.china-qzxy.cn)
                               ↓
-                    MQTT / BLE / PrefsHelper
+          MQTT / BLE 扫描 / 扫码(CameraX) / 账单结算 / 加密存储
 ```
 
 | 层级 | 技术 |
@@ -43,7 +48,8 @@ UI (Compose) → ViewModel → Repository → Retrofit API
 | 状态管理 | ViewModel + StateFlow |
 | HTTP | Retrofit 2.9 + OkHttp |
 | 实时推送 | Eclipse Paho MQTT |
-| 蓝牙 | Android BLE API |
+| 蓝牙 / 扫码 | Android BLE API / CameraX + ML Kit |
+| 加密存储 | EncryptedSharedPreferences |
 | 混淆 | R8 Full Mode |
 
 ## 📁 项目结构
@@ -113,7 +119,8 @@ KEY_PASSWORD=你的密码
 ./gradlew assembleDebug
 
 # Release (混淆 + 压缩 + 签名)
-./gradlew assembleRelease
+# 若因网络无法下载 lint 依赖而失败，可跳过 lint 检查：
+./gradlew assembleRelease -x lintVitalRelease
 ```
 
 ## 📖 文档
