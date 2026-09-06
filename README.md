@@ -9,7 +9,7 @@
 
 ## 📱 预览
 
-<img src="assets/screenshots.png" width="280" alt="淋浴 App 截图" />
+<img src="assets/screenshots.png" width="600" alt="淋浴 App 截图" />
 
 ## ✨ 功能
 
