@@ -37,13 +37,18 @@
 | 钱包余额 | GET | `/account/wallet` | ✅ | 获取趣智校园钱包余额 |
 | 设备信息 | GET | `/device/info/mac` | ✅ | 通过 MAC 地址获取设备详情 |
 | 开始洗澡 | POST | `/order/tcpDevice/downRate/rateOrder` | ✅ | 开启热水器 |
+| 开阀结果确认 | POST | `/order/tcpDevice/query/downRateResult` | ✅ | 确认开阀是否成功（v1.2.0 新增） |
 | 停止洗澡 | POST | `/order/tcpDevice/closeOrder` | ✅ | 关闭热水器 |
+| 关阀结果确认 | POST | `/order/tcpDevice/closeOrder/result/query` | ✅ | 确认关阀是否成功（v1.2.0 新增） |
+| 消费结果查询 | POST | `/order/consumeOrder/result/query` | ✅ | 查询消费结算结果 |
 | 查询进行中 | POST | `/order/tcpDevice/query/rateOrder/using` | ✅ | 查询设备是否有进行中的订单 |
 | 账单列表 | GET | `/order/query/account/bill/list` | ✅ | 获取月度账单 |
 | 账单详情 | GET | `/order/query/account/bill/detail` | ✅ | 获取单笔账单详情 |
 | 获取使用码 | GET | `/account/useCode/new` | ✅ | 获取当前使用码 |
 | 生成使用码 | POST | `/account/useCode/new/generate` | ✅ | 生成新的使用码 |
 | 使用码开关 | POST | `/account/useCode/new/status/update` | ✅ | 开启/关闭使用码 |
+| 发送短信验证码 | GET | `/user/verification/code/get` | ❌ | 发送验证码，需 secret |
+| 短信验证码登录 | POST | `/user/registerAndLogin` | ❌ | 用验证码注册/登录 |
 
 ---
 
@@ -633,8 +638,31 @@ interface QzxyService {
     ): Call<ResponseBody>
 
     @FormUrlEncoded
+    @POST("/order/tcpDevice/query/downRateResult")
+    fun downRateResult(
+        @Field("snCode") snCode: String,
+        @FieldMap auth: Map<String, String>
+    ): Call<ResponseBody>
+
+    @FormUrlEncoded
     @POST("/order/tcpDevice/closeOrder")
     fun closeOrder(
+        @Field("snCode") snCode: String,
+        @Field("orderNo") orderNo: String,
+        @FieldMap auth: Map<String, String>
+    ): Call<ResponseBody>
+
+    @FormUrlEncoded
+    @POST("/order/tcpDevice/closeOrder/result/query")
+    fun closeOrderResult(
+        @Field("snCode") snCode: String,
+        @Field("orderNo") orderNo: String,
+        @FieldMap auth: Map<String, String>
+    ): Call<ResponseBody>
+
+    @FormUrlEncoded
+    @POST("/order/consumeOrder/result/query")
+    fun consumeOrderResult(
         @Field("snCode") snCode: String,
         @Field("orderNo") orderNo: String,
         @FieldMap auth: Map<String, String>
@@ -673,6 +701,25 @@ interface QzxyService {
     @FormUrlEncoded
     @POST("/account/useCode/new/generate")
     fun generateUseCode(@FieldMap auth: Map<String, String>): Call<ResponseBody>
+
+    // ── 短信验证码（secret 绑定账号，未完善） ──
+    @GET("/user/verification/code/get")
+    fun getVerificationCode(
+        @Query("telephone") telephone: String,
+        @Query("typeId") typeId: Int = 3,
+        @Query("platform") platform: Int = 1,
+        @Query("secret") secret: String
+    ): Call<ResponseBody>
+
+    @FormUrlEncoded
+    @POST("/user/registerAndLogin")
+    fun registerAndLogin(
+        @Field("telephone") telephone: String,
+        @Field("smsCode") smsCode: String,
+        @Field("type") type: Int = 5,
+        @Field("phoneSystem") phoneSystem: String = "android",
+        @Field("version") version: String = "6.5.24"
+    ): Call<ResponseBody>
 
     companion object {
         const val BASE_URL = "https://v3-api.china-qzxy.cn"

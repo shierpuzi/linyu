@@ -24,11 +24,16 @@
 
 | 功能 | 说明 |
 |---|---|
-| 登录/登出 | 手机号 + 密码登录，MD5 加密，loginCode 持久化，挤号检测 |
+| 登录/登出 | 手机号 + 密码登录，MD5 加密，loginCode 加密持久化，挤号检测 |
 | 蓝牙扫描设备 | BLE 低功耗蓝牙扫描附近热水器，按信号强度显示（强/中/弱） |
-| 开始洗澡 | 选择设备后调用 downRate API 开启热水器 |
-| 停止洗澡 | 调用 closeOrder API 关闭热水器 |
+| 扫码绑定设备 | 扫描热水器二维码，直接弹出设备详情（无需蓝牙） |
+| 绑定寝室 | 绑定寝室关键词，设备列表只显示寝室内的设备 |
+| 开始洗澡 | 调用 downRate API 开启热水器，并轮询确认开阀成功 |
+| 停止洗澡 | 调用 closeOrder API 关闭热水器，确认关闭成功，失败有提示 |
 | 洗澡中界面 | 全屏沉浸式界面，显示计时器、预扣金额、设备位置 |
+| 自动关停倒计时 | 解析 autoDisConTime 显示闲置自动关闭倒计时 |
+| 自动关停确认弹窗 | 设备自动关闭时弹确认框（设备名 + 时长 + 消费金额） |
+| 消费结算 | 关阀后通过账单接口异步获取并显示本次消费金额 |
 | MQTT 实时推送 | 连接 MQTT 服务器接收实时消费金额更新 |
 | 使用码启动检测 | 通过物理键盘使用码启动设备后，刷新可自动发现使用中的设备 |
 | 多设备支持 | 支持同时管理多个活跃设备订单 |
@@ -55,6 +60,8 @@
 | 功能 | 说明 |
 |---|---|
 | 深浅主题 | 手动切换浅色/深色模式，设置持久化保存 |
+| 扫码手电筒 | 扫码界面提供手电筒，光线不足时补光 |
+| 加密存储 | 登录凭证用 EncryptedSharedPreferences 加密存储 |
 | 学校名称编辑 | 用户可手动修改学校名称 |
 | 网络异常提示 | 断网时显示友好提示（自定义 Toast，带应用图标） |
 | 挤号检测 | 在其他设备登录同一账号时弹出强制下线提示 |
@@ -70,9 +77,10 @@ app/src/main/
 ├── AndroidManifest.xml                    # 应用清单，权限声明
 ├── java/com/hualala/linyu/
 │   ├── MainActivity.kt                    # 主 Activity，导航、弹窗、主题管理
+│   ├── QrScanActivity.kt                  # 扫码界面（CameraX + ML Kit + 手电筒）
 │   │
 │   ├── api/                               # 网络层
-│   │   ├── QzxyService.kt                 # Retrofit 接口定义（11 个 API）
+│   │   ├── QzxyService.kt                 # Retrofit 接口定义（16 个 API）
 │   │   ├── NetworkModule.kt               # OkHttp + Retrofit 单例，认证拦截器
 │   │   └── SafeApi.kt                     # 扩展函数，手动 JSON 解析（绕开 R8 泛型问题）
 │   │
@@ -82,7 +90,8 @@ app/src/main/
 │   ├── model/                             # 数据模型
 │   │   ├── LoginModels.kt                 # BaseResponse<T>、LoginData、UserAccount、
 │   │   │                                  # WalletData、OrderStatus、BillItem、BillDTO、
-│   │   │                                  # UseCodeData、BillDetail
+│   │   │                                  # UseCodeData、BillDetail、DownRateResult、
+│   │   │                                  # CloseOrderResult
 │   │   ├── DeviceModels.kt                # DeviceInfo、NearbyDevice
 │   │   ├── ActiveOrder.kt                 # 活跃订单模型
 │   │   └── MqttModels.kt                  # MQTT 消息模型
@@ -90,24 +99,28 @@ app/src/main/
 │   ├── ui/                                # UI 层
 │   │   ├── LoginScreen.kt                 # 登录页面（渐变背景 + 卡片式表单）
 │   │   ├── LoginViewModel.kt              # 登录 ViewModel（网络异常友好提示）
-│   │   ├── MainScreen.kt                  # 主页（设备列表、蓝牙扫描、余额显示）
-│   │   ├── MainViewModel.kt               # 主 ViewModel（蓝牙、MQTT、洗澡控制、
-│   │   │                                  # 钱包、账单、设备发现、挤号检测）
-│   │   ├── ShowerScreen.kt                # 洗澡中界面（计时器、预扣金额、深色适配）
+│   │   ├── MainScreen.kt                  # 主页（设备列表、扫码、寝室筛选、余额显示）
+│   │   ├── MainViewModel.kt               # 主 ViewModel（蓝牙、MQTT、洗澡控制、开阀/
+│   │   │                                  # 关阀确认、消费结算、挤号检测）
+│   │   ├── ShowerScreen.kt                # 洗澡中界面（计时器、自动关停倒计时）
 │   │   ├── WalletScreen.kt                # 钱包页面（余额估算、账单列表、下拉刷新）
-│   │   ├── UserScreen.kt                  # 我的页面（账号信息、使用码、主题切换）
+│   │   ├── UserScreen.kt                  # 我的页面（账号信息、使用码、绑定寝室、主题）
 │   │   ├── DeviceDetailDialog.kt          # 设备详情弹窗（SN、MAC、预扣金额、状态）
 │   │   ├── LinYuToast.kt                  # 自定义 Toast 组件（应用图标 + 深色背景）
 │   │   └── theme/
 │   │       └── Theme.kt                   # 深浅主题配色方案
 │   │
 │   └── utils/                             # 工具层
-│       ├── PrefsHelper.kt                 # SharedPreferences 工具（认证、设备、余额、主题）
+│       ├── PrefsHelper.kt                 # 加密存储（EncryptedSharedPreferences，认证、
+│       │                                  # 设备、余额、主题、寝室绑定、倒计时）
 │       ├── MqttManager.kt                 # MQTT 连接管理（Paho 客户端）
 │       ├── BluetoothScanner.kt            # BLE 蓝牙扫描（过滤 KLCXKJ-Water 设备）
 │       └── MD5Utils.kt                    # 密码加密（MD5 取后 10 位）
 │
 └── res/
+    ├── drawable/
+    │   ├── app_logo.png                   # 应用 logo（Toast 图标）
+    │   └── ic_flashlight.xml              # 扫码手电筒图标
     ├── xml/
     │   ├── network_security_config.xml    # 网络安全配置（仅允许 MQTT 明文）
     │   ├── backup_rules.xml               # 备份规则
@@ -161,6 +174,9 @@ app/src/main/
 | Gson | Retrofit 内置 | JSON 序列化/反序列化 |
 | OkHttp Logging | 4.12.0 | HTTP 日志（仅 Debug） |
 | Eclipse Paho MQTT | 1.2.5 / 1.1.1 | MQTT 客户端 |
+| Jetpack Security Crypto | 1.1.0-alpha06 | EncryptedSharedPreferences 加密存储 |
+| CameraX | 1.4.2 | 相机预览（扫码） |
+| ML Kit Barcode | 17.3.0 | 二维码识别 |
 
 ### R8 混淆兼容方案
 
@@ -184,8 +200,8 @@ R8 full mode 会擦除 Kotlin suspend 函数的泛型签名，导致 Gson 无法
 
 ### 环境要求
 
-- Android Studio Hedgehog 或更高版本
-- JDK 11+
+- Android Studio（推荐自带 JBR/JDK 21）
+- JDK 17+（本项目实测使用 Android Studio 自带 JBR/JDK 21 构建）
 - Android SDK 36
 - Gradle 9.4.1
 
@@ -251,9 +267,7 @@ buildTypes {
 | 限制 | 说明 |
 |---|---|
 | 测试范围 | 仅在金华职业技术大学（projectId=905）男生宿舍测试过几次，其他学校未测试 |
-| 短信登录 | SMS 验证码接口需要 secretKey，每台设备不同，需自行抓包获取 |
-| 自动关停 | 热水器闲置超时后自动关闭，App 不会检测，洗澡界面会一直保持 |
-| 关闭失败 | 网络波动时 closeOrder 可能失败但无错误提示，用户以为关了实际还开着 |
+| 短信登录 | 短信验证码接口需要 secret，且 secret 绑定账号（未完善，请用密码登录） |
 | 实时扣费 | MQTT 仅在订单结束时推送消费金额，洗澡中无实时扣费（官方 App 也是如此） |
 | 一卡通余额 | 无法获取真实余额（易校园 API 有签名保护），仅支持手动估算 |
 | MQTT 明文 | 趣智校园 MQTT 服务器不支持 TLS，通信内容未加密 |

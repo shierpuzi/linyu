@@ -9,17 +9,23 @@
 
 ## 📱 预览
 
-![淋浴 App 截图](assets/screenshots.jpg)
+<img src="assets/screenshots.png" width="280" alt="淋浴 App 截图" />
 
 ## ✨ 功能
 
 - 🔐 **手机号登录** — 支持登录状态持久化和自动恢复
 - 📡 **蓝牙扫描** — BLE 扫描附近热水器，按信号强度排序
-- 🚿 **一键洗澡** — 选择设备即可开始，支持停止和恢复
+- 📷 **扫码绑定** — 扫描热水器二维码，直接弹出设备详情，无需蓝牙
+- 🔦 **扫码手电筒** — 光线不足时扫码补光
+- 🏠 **绑定寝室** — 绑定寝室关键词，设备列表只显示寝室内的设备
+- 🚿 **一键洗澡** — 选择设备即可开始，支持停止和恢复；开阀确认，失败有提示
+- ⏳ **自动关停倒计时** — 显示闲置自动关闭倒计时，关闭时弹出确认框
+- 💰 **消费结算** — 关阀后通过账单自动显示本次消费金额
 - 💰 **余额估算** — 手动输入初始余额，根据账单自动扣减
 - 📋 **账单查询** — 查看当月消费记录和详情
 - 🔢 **使用码** — 显示/远程开关热水器使用码
 - 🌓 **深浅主题** — 手动切换，设置自动保存
+- 🔐 **加密存储** — 登录凭证加密存储（EncryptedSharedPreferences）
 - 📶 **断网提示** — 网络异常时友好提示
 - 👥 **挤号检测** — 多设备登录自动提醒
 
@@ -44,8 +50,10 @@ UI (Compose) → ViewModel → Repository → Retrofit API
 
 ```
 app/src/main/java/com/hualala/linyu/
+├── MainActivity.kt         # 主 Activity
+├── QrScanActivity.kt       # 扫码界面 (CameraX + ML Kit + 手电筒)
 ├── api/                    # 网络层
-│   ├── QzxyService.kt      # Retrofit 接口 (11 个 API)
+│   ├── QzxyService.kt      # Retrofit 接口 (16 个 API)
 │   ├── NetworkModule.kt    # OkHttp + 认证拦截器
 │   └── SafeApi.kt          # 手动 JSON 解析 (避 R8 泛型擦除)
 ├── data/                   # 数据层
@@ -57,24 +65,26 @@ app/src/main/java/com/hualala/linyu/
 │   └── MqttModels.kt
 ├── ui/                     # 界面
 │   ├── LoginScreen.kt      # 登录
-│   ├── MainScreen.kt       # 主页 + 设备列表
-│   ├── ShowerScreen.kt     # 洗澡中
+│   ├── MainScreen.kt       # 主页 + 设备列表 + 扫码
+│   ├── ShowerScreen.kt     # 洗澡中 (含自动关停倒计时)
 │   ├── WalletScreen.kt     # 钱包 + 账单
-│   ├── UserScreen.kt       # 用户 + 使用码
+│   ├── UserScreen.kt       # 用户 + 使用码 + 绑定寝室
 │   └── theme/Theme.kt      # 主题
 └── utils/                  # 工具
-    ├── PrefsHelper.kt      # 本地存储
+    ├── PrefsHelper.kt      # 加密存储 (EncryptedSharedPreferences)
     ├── MqttManager.kt      # MQTT 管理
     ├── BluetoothScanner.kt # 蓝牙扫描
     └── MD5Utils.kt         # 密码加密
 ```
 
+res/ 额外包含 `drawable/ic_flashlight.xml`（扫码手电筒图标）、`drawable/app_logo.png`（应用 logo）。
+
 ## 🚀 构建
 
 ### 环境要求
 
-- Android Studio Hedgehog+
-- JDK 11+
+- Android Studio（推荐自带 JBR/JDK 21）
+- JDK 17+（实测使用 Android Studio 自带 JBR/JDK 21 构建）
 - Android SDK 36
 - Gradle 9.4.1
 
@@ -118,19 +128,24 @@ KEY_PASSWORD=你的密码
 
 本项目仅在**金华职业技术大学（projectId=905）**的男生宿舍测试过，其他学校使用前需要修改以下内容：
 
-### 1. 获取 SecretKey（短信验证码登录需要）
+### 1. 短信登录 secretKey（未完善功能）
 
-代码中 `QzxyService.kt` 的 `getVerificationCode` 接口硬编码了 `secret` 参数，这个值每台设备不同，需要你自己抓包获取：
+⚠️ **短信验证码登录目前是「未完善功能」**：`getVerificationCode` 接口的 `secret` 参数（`QzxyService.kt` 硬编码）经测试**绑定账号**，其他手机号无法用同一 secret 发验证码。
+
+- 默认请使用**手机号 + 密码登录**（密码登录不需要 secret，已验证正常）
+- 短信登录需自行逆向官方 App 获取与自己账号匹配的 secret 后替换（见下）
+
+如需尝试，获取 secret 的方法：
 
 ```
 1. 安装 Reqable + LSPosed + TrustMeAlready（绕过 SSL Pinning）
 2. 打开官方趣智校园 App，点击"发送验证码"
 3. 在 Reqable 中找到 /user/verification/code/get 请求
 4. 复制 URL 中 secret 参数的值
-5. 替换 QzxyService.kt 第 90 行的 secret 默认值
+5. 替换 QzxyService.kt 第 113 行的 secret 默认值
 ```
 
-> 💡 密码登录**可能**不需要 secretKey，但未充分验证。
+> 💡 由于 secret 绑定账号，此方式仅对抓包者本人的账号有效，不是通用的短信登录方案。
 
 ### 2. 修改 projectId
 
@@ -162,7 +177,7 @@ KEY_PASSWORD=你的密码
 | 问题 | 说明 |
 |---|---|
 | **仅在一所学校测试** | 只在金华职业技术大学（projectId=905）男生宿舍测试过几次，其他学校能否使用未知 |
-| **SMS 登录需 secretKey** | 短信验证码接口的 `secret` 参数每台设备不同，需要自己抓包获取 |
+| **短信登录未完善** | 短信验证码接口的 `secret` 绑定账号，其他人无法使用同一 secret；请用密码登录 |
 | **一卡通余额无法获取** | 易校园 API 有 HMAC-SHA256 native 签名保护，只能手动估算余额 |
 
 ### 🔒 安全
