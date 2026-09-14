@@ -8,14 +8,26 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
+/** 发行版里的一个附件（这里主要用 APK） */
+data class GithubAsset(
+    val name: String,
+    /** 浏览器直链，OkHttp 下载也走这个 */
+    val downloadUrl: String,
+    val sizeBytes: Long
+)
+
 /** GitHub 最新 Release 信息 */
 data class GithubRelease(
     val tagName: String,
     val name: String,
     val body: String,
     val publishedAt: String,
-    val htmlUrl: String
-)
+    val htmlUrl: String,
+    val assets: List<GithubAsset> = emptyList()
+) {
+    /** 发行版里的 APK 附件，取第一个 */
+    val apkAsset: GithubAsset? get() = assets.firstOrNull { it.name.endsWith(".apk", true) }
+}
 
 /** GitHub 仓库信息 */
 data class GithubRepoInfo(
@@ -69,14 +81,7 @@ object GithubApi {
     suspend fun fetchLatestRelease(): GithubRelease? {
         val json = getJson("/repos/$REPO/releases/latest") ?: return null
         return try {
-            val o = JsonParser.parseString(json).asJsonObject
-            GithubRelease(
-                tagName = o.get("tag_name")?.asString ?: "",
-                name = o.get("name")?.asString ?: "",
-                body = o.get("body")?.asString ?: "",
-                publishedAt = o.get("published_at")?.asString ?: "",
-                htmlUrl = o.get("html_url")?.asString ?: ""
-            )
+            parseRelease(JsonParser.parseString(json).asJsonObject)
         } catch (e: Exception) {
             AppLogger.e("解析 GitHub release 失败", e)
             null
@@ -87,21 +92,28 @@ object GithubApi {
     suspend fun fetchReleases(): List<GithubRelease> {
         val json = getJson("/repos/$REPO/releases?per_page=10") ?: return emptyList()
         return try {
-            JsonParser.parseString(json).asJsonArray.map { el ->
-                val o = el.asJsonObject
-                GithubRelease(
-                    tagName = o.get("tag_name")?.asString ?: "",
-                    name = o.get("name")?.asString ?: "",
-                    body = o.get("body")?.asString ?: "",
-                    publishedAt = o.get("published_at")?.asString ?: "",
-                    htmlUrl = o.get("html_url")?.asString ?: ""
-                )
-            }
+            JsonParser.parseString(json).asJsonArray.map { el -> parseRelease(el.asJsonObject) }
         } catch (e: Exception) {
             AppLogger.e("解析 GitHub releases 失败", e)
             emptyList()
         }
     }
+
+    private fun parseRelease(o: com.google.gson.JsonObject): GithubRelease = GithubRelease(
+        tagName = o.get("tag_name")?.asString ?: "",
+        name = o.get("name")?.asString ?: "",
+        body = o.get("body")?.asString ?: "",
+        publishedAt = o.get("published_at")?.asString ?: "",
+        htmlUrl = o.get("html_url")?.asString ?: "",
+        assets = o.getAsJsonArray("assets")?.mapNotNull { el ->
+            val a = el.asJsonObject
+            val url = a.get("browser_download_url")?.asString
+            val name = a.get("name")?.asString
+            // 没有下载直链的附件直接跳过——没它就没法下载
+            if (url.isNullOrEmpty() || name.isNullOrEmpty()) null
+            else GithubAsset(name, url, a.get("size")?.asLong ?: 0L)
+        } ?: emptyList()
+    )
 
     /** 仓库信息；失败返回 null */
     suspend fun fetchRepoInfo(): GithubRepoInfo? {

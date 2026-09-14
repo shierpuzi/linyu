@@ -8,7 +8,7 @@
 |---|---|
 | 应用名称 | 淋浴 |
 | 包名 | `com.hualala.linyu` |
-| 版本 | v2.2.0 |
+| 版本 | v2.2.1 |
 | 技术栈 | Kotlin + Jetpack Compose + Material 3 |
 | 最低 Android 版本 | Android 8.0 (API 26) |
 | 目标 Android 版本 | Android 16 (API 36) |
@@ -69,7 +69,7 @@
 | 液态玻璃卡片 | 半透明底色 + 微光描边 + 零阴影 |
 | 背景装扮 | 主页 / 使用页各一套独立背景，自动提取主题色，透明度 / 模糊 / 亮度可调 |
 | 卡片自定义 | 「我的」页卡片可上下排序、隐藏显示，状态持久化 |
-| 应用内更新检测 | 读取 GitHub Release 自动比对版本，折叠展示更新日志 |
+| 应用内更新 | 读取 GitHub Release 比对版本、折叠展示更新日志，并可在应用内下载安装（含浏览器备用入口） |
 | 内置运行日志 | 环形缓冲 + 文件滚动 + 敏感信息脱敏 + 崩溃捕获 + 一键导出 |
 | 扫码手电筒 | 扫码界面提供手电筒，光线不足时补光 |
 | 加密存储 | 登录凭证用 EncryptedSharedPreferences 加密存储 |
@@ -145,7 +145,8 @@ app/src/main/
 │       ├── AppLogger.kt                   # 运行日志（脱敏 / 滚动 / 崩溃捕获）
 │       ├── BackgroundManager.kt           # 背景图存取（主页 / 使用页两套配置）
 │       ├── BackgroundState.kt             # 背景配置状态（Compose State）
-│       └── ScanPermission.kt              # 蓝牙扫描权限（按系统版本分流）
+│       ├── ScanPermission.kt              # 蓝牙扫描权限（按系统版本分流）
+│       └── ApkUpdater.kt                  # 更新包下载 + 调起系统安装器
 │
 └── res/
     ├── drawable/

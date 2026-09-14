@@ -3,10 +3,10 @@
 [![Platform](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com)
 [![Language](https://img.shields.io/badge/Language-Kotlin-blue.svg)](https://kotlinlang.org)
 [![UI](https://img.shields.io/badge/UI-Jetpack%20Compose-purple.svg)](https://developer.android.com/jetpack/compose)
-[![Version](https://img.shields.io/badge/Version-v2.2.0-orange.svg)](https://github.com/yehu-imei/linyu/releases/latest)
+[![Version](https://img.shields.io/badge/Version-v2.2.1-orange.svg)](https://github.com/yehu-imei/linyu/releases/latest)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**⬇️ [下载最新 APK (v2.2.0)](https://github.com/yehu-imei/linyu/releases/latest)**
+**⬇️ [下载最新 APK (v2.2.1)](https://github.com/yehu-imei/linyu/releases/latest)**
 
 趣智校园第三方 Android 客户端，用于控制校园热水器与直饮水机。相比官方 App，提供更简洁的界面和更流畅的操作体验。
 
@@ -45,7 +45,7 @@
 ### 🔧 其他
 
 - 📜 **内置运行日志** — 内存 + 文件双缓冲，敏感信息自动打码，崩溃自动捕获，可一键分享导出
-- 🔄 **应用内更新检测** — 自动读取 GitHub Release，展开查看更新日志
+- 🔄 **应用内更新** — 自动读取 GitHub Release 比对版本、展开查看更新日志，并可直接在应用内下载安装；下载失败或想挂代理时可改用浏览器
 - 🔐 **加密存储** — 登录凭证加密存储（EncryptedSharedPreferences）
 
 ## 🏗 架构
@@ -114,7 +114,8 @@ app/src/main/java/com/hualala/linyu/
     ├── AppLogger.kt        # 日志（脱敏 / 滚动 / 崩溃捕获）
     ├── BackgroundManager.kt# 背景图存取（主页 / 使用页两套）
     ├── BackgroundState.kt  # 背景配置状态
-    └── ScanPermission.kt   # 蓝牙扫描权限（按系统版本分流）
+    ├── ScanPermission.kt   # 蓝牙扫描权限（按系统版本分流）
+    └── ApkUpdater.kt       # 更新包下载 + 调起安装器
 ```
 
 res/ 额外包含 `drawable/ic_flashlight.xml`（扫码手电筒图标）、`drawable/app_logo.png`（应用 logo）、

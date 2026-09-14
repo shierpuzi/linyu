@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hualala.linyu.BuildConfig
 import com.hualala.linyu.api.GithubApi
+import com.hualala.linyu.api.GithubAsset
 import com.hualala.linyu.api.GithubRelease
 import com.hualala.linyu.api.GithubRepoInfo
 import com.hualala.linyu.api.NetworkModule
@@ -48,6 +49,8 @@ import com.hualala.linyu.ui.theme.AppColors
 import com.hualala.linyu.ui.theme.LocalThemeMode
 import com.hualala.linyu.ui.theme.LocalThemeReveal
 import com.hualala.linyu.ui.theme.ThemeMode
+import com.hualala.linyu.utils.ApkDownloadState
+import com.hualala.linyu.utils.ApkUpdater
 import com.hualala.linyu.utils.PrefsHelper
 import kotlinx.coroutines.launch
 
@@ -538,14 +541,20 @@ private fun BackgroundCard(onOpen: () -> Unit) {
 @Composable
 private fun UpdateCard() {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     // 用进程级缓存，避免每次切到「我的」都重新请求
     var releases by remember { mutableStateOf(UserPageCache.releases) }
     var checking by remember { mutableStateOf(false) }
     var checkedOnce by remember { mutableStateOf(UserPageCache.releasesFetched) }
     var expandedTag by remember { mutableStateOf<String?>(null) }
 
-    val currentVersion = "v" + BuildConfig.VERSION_NAME
-    val latestTag = releases.firstOrNull()?.tagName
+    val currentVersion = ApkUpdater.currentVersion
+    val latestRelease = releases.firstOrNull()
+    val latestTag = latestRelease?.tagName
+    // 只有确实比当前新才提示更新——避免 tag 命名差异导致误报"有新版本"
+    val hasUpdate = latestTag != null && ApkUpdater.isNewer(latestTag, currentVersion)
+    val apkAsset = latestRelease?.apkAsset
+    val downloadState = ApkUpdater.state
 
     // 打开卡片即自动检测一次（已拉取过则跳过）
     fun doCheck() {
@@ -577,8 +586,8 @@ private fun UpdateCard() {
                 checking -> "正在检测更新…" to AppColors.TextSecondary
                 !checkedOnce -> "正在检测更新…" to AppColors.TextSecondary
                 releases.isEmpty() -> "检测失败（多为网络原因）" to AppColors.Warning
-                latestTag == currentVersion -> "当前已是最新版本" to AppColors.Success
-                else -> "发现新版本 $latestTag" to AppColors.Accent
+                hasUpdate -> "发现新版本 $latestTag" to AppColors.Accent
+                else -> "当前已是最新版本" to AppColors.Success
             }
             Text(statusText, color = statusColor, fontSize = 13.sp,
                 fontWeight = FontWeight.Medium)
@@ -601,10 +610,24 @@ private fun UpdateCard() {
                 }
             }
 
-            // ④ 检查更新按钮
+            // ④ 下载更新（仅在有新版时出现）
+            if (hasUpdate) {
+                Spacer(Modifier.height(14.dp))
+                DownloadSection(
+                    context = context,
+                    asset = apkAsset,
+                    releasePageUrl = latestRelease?.htmlUrl ?: GithubApi.REPO_URL,
+                    state = downloadState
+                )
+            }
+
+            // ⑤ 检查更新按钮
             Spacer(Modifier.height(14.dp))
             Button(
-                onClick = { doCheck() },
+                onClick = {
+                    ApkUpdater.reset()
+                    doCheck()
+                },
                 enabled = !checking,
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth(),
@@ -612,6 +635,117 @@ private fun UpdateCard() {
             ) { Text(if (checking) "检查中..." else "检查更新") }
         }
     }
+}
+
+/**
+ * 下载更新的三种形态：可下载 / 下载中 / 下载完成或失败。
+ *
+ * 两个入口都提供——应用内下载体验最顺，但国内直连 GitHub 下 40MB 经常失败，
+ * 所以浏览器入口一直摆在旁边，不是只当错误兜底。
+ */
+@Composable
+private fun DownloadSection(
+    context: android.content.Context,
+    asset: GithubAsset?,
+    releasePageUrl: String,
+    state: ApkDownloadState
+) {
+    when (state) {
+        is ApkDownloadState.Running -> {
+            val pct = state.percent
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("正在下载更新包…", color = AppColors.TextSecondary, fontSize = 13.sp)
+                Text(
+                    if (pct >= 0) "$pct%" else formatBytes(state.downloaded),
+                    color = AppColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Medium
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            if (pct >= 0) {
+                LinearProgressIndicator(
+                    progress = { pct / 100f },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = AppColors.Accent,
+                    trackColor = AppColors.Border
+                )
+            } else {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = AppColors.Accent,
+                    trackColor = AppColors.Border
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            TextButton(
+                onClick = { ApkUpdater.cancel() },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("取消下载", color = AppColors.TextSecondary, fontSize = 13.sp) }
+        }
+
+        is ApkDownloadState.Done -> {
+            Text("更新包已下载完成", color = AppColors.Success, fontSize = 13.sp,
+                fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = { ApkUpdater.installApk(context, state.file) },
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = AppColors.Success)
+            ) { Text("立即安装") }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "若安装被拦截，请在系统设置里允许「安装未知应用」后重试",
+                color = AppColors.TextSecondary, fontSize = 11.sp
+            )
+        }
+
+        is ApkDownloadState.Failed -> {
+            Surface(shape = RoundedCornerShape(10.dp),
+                color = AppColors.Warning.copy(alpha = 0.12f)) {
+                Text(state.message, modifier = Modifier.padding(10.dp),
+                    color = AppColors.Warning, fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    asset?.let {
+                        ApkUpdater.start(context, it.downloadUrl, it.name)
+                    }
+                },
+                enabled = asset != null,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent)
+            ) { Text("重试下载") }
+        }
+
+        ApkDownloadState.Idle -> {
+            Button(
+                onClick = {
+                    asset?.let { ApkUpdater.start(context, it.downloadUrl, it.name) }
+                },
+                enabled = asset != null,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent)
+            ) { Text("下载更新 ${formatBytes(asset?.sizeBytes ?: 0L)}") }
+        }
+    }
+
+    // 浏览器入口：应用内下载失败、或者想挂代理加速时用
+    Spacer(Modifier.height(6.dp))
+    TextButton(
+        onClick = { ApkUpdater.openInBrowser(context, asset?.downloadUrl ?: releasePageUrl) },
+        modifier = Modifier.fillMaxWidth()
+    ) { Text("用浏览器下载", color = AppColors.TextSecondary, fontSize = 13.sp) }
+}
+
+/** 字节数转成人看的单位 */
+private fun formatBytes(bytes: Long): String = when {
+    bytes <= 0L -> ""
+    bytes < 1024 -> "$bytes B"
+    bytes < 1024 * 1024 -> "%.0f KB".format(bytes / 1024.0)
+    else -> "%.1f MB".format(bytes / 1024.0 / 1024.0)
 }
 
 /**
