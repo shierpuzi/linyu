@@ -50,6 +50,7 @@ import com.hualala.linyu.ui.theme.LocalThemeMode
 import com.hualala.linyu.ui.theme.LocalThemeReveal
 import com.hualala.linyu.ui.theme.ThemeMode
 import com.hualala.linyu.utils.ApkDownloadState
+import com.hualala.linyu.utils.ApkInstallResult
 import com.hualala.linyu.utils.ApkUpdater
 import com.hualala.linyu.utils.PrefsHelper
 import kotlinx.coroutines.launch
@@ -610,18 +611,7 @@ private fun UpdateCard() {
                 }
             }
 
-            // ④ 下载更新（仅在有新版时出现）
-            if (hasUpdate) {
-                Spacer(Modifier.height(14.dp))
-                DownloadSection(
-                    context = context,
-                    asset = apkAsset,
-                    releasePageUrl = latestRelease?.htmlUrl ?: GithubApi.REPO_URL,
-                    state = downloadState
-                )
-            }
-
-            // ⑤ 检查更新按钮
+            // ④ 检查更新按钮
             Spacer(Modifier.height(14.dp))
             Button(
                 onClick = {
@@ -633,49 +623,72 @@ private fun UpdateCard() {
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent)
             ) { Text(if (checking) "检查中..." else "检查更新") }
+
+            // ⑤ 下载区：放在「检查更新」下方，仍在本卡片内
+            if (hasUpdate) {
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider(color = AppColors.Border)
+                Spacer(Modifier.height(12.dp))
+                DownloadSection(
+                    context = context,
+                    asset = apkAsset,
+                    state = downloadState
+                )
+            }
         }
     }
 }
 
 /**
- * 下载更新的三种形态：可下载 / 下载中 / 下载完成或失败。
+ * 下载更新的四种形态：可下载 / 下载中 / 已下载待安装 / 失败。
  *
- * 两个入口都提供——应用内下载体验最顺，但国内直连 GitHub 下 40MB 经常失败，
- * 所以浏览器入口一直摆在旁边，不是只当错误兜底。
+ * 全部收在这张卡片里，不往外弹任何东西。
  */
 @Composable
 private fun DownloadSection(
     context: android.content.Context,
     asset: GithubAsset?,
-    releasePageUrl: String,
     state: ApkDownloadState
 ) {
+    // 点「立即安装」后如果调起失败（包丢了 / 没有可用设置页），要在这里说清楚
+    var installError by remember { mutableStateOf<String?>(null) }
+
+    val startDownload: () -> Unit = {
+        installError = null
+        asset?.let { ApkUpdater.start(context, it.downloadUrl, it.name) }
+    }
+
     when (state) {
         is ApkDownloadState.Running -> {
             val pct = state.percent
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("正在下载更新包…", color = AppColors.TextSecondary, fontSize = 13.sp)
                 Text(
-                    if (pct >= 0) "$pct%" else formatBytes(state.downloaded),
+                    // 显示「已下载 / 总大小」，比单纯一个百分比更有信息量
+                    if (state.total > 0) {
+                        "${formatBytes(state.downloaded)} / ${formatBytes(state.total)}"
+                    } else {
+                        formatBytes(state.downloaded)
+                    },
                     color = AppColors.Accent, fontSize = 13.sp, fontWeight = FontWeight.Medium
                 )
             }
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(8.dp))
             if (pct >= 0) {
                 LinearProgressIndicator(
                     progress = { pct / 100f },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().height(6.dp),
                     color = AppColors.Accent,
                     trackColor = AppColors.Border
                 )
             } else {
                 LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().height(6.dp),
                     color = AppColors.Accent,
                     trackColor = AppColors.Border
                 )
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(4.dp))
             TextButton(
                 onClick = { ApkUpdater.cancel() },
                 modifier = Modifier.fillMaxWidth()
@@ -687,15 +700,20 @@ private fun DownloadSection(
                 fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(8.dp))
             Button(
-                onClick = { ApkUpdater.installApk(context, state.file) },
+                onClick = {
+                    installError = when (val r = ApkUpdater.installApk(context, state.file)) {
+                        is ApkInstallResult.Error -> r.message
+                        else -> null
+                    }
+                },
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = AppColors.Success)
             ) { Text("立即安装") }
             Spacer(Modifier.height(6.dp))
             Text(
-                "若安装被拦截，请在系统设置里允许「安装未知应用」后重试",
-                color = AppColors.TextSecondary, fontSize = 11.sp
+                "请在系统设置里允许「安装未知应用」",
+                color = AppColors.TextSecondary, fontSize = 12.sp
             )
         }
 
@@ -707,37 +725,33 @@ private fun DownloadSection(
             }
             Spacer(Modifier.height(8.dp))
             Button(
-                onClick = {
-                    asset?.let {
-                        ApkUpdater.start(context, it.downloadUrl, it.name)
-                    }
-                },
+                onClick = startDownload,
                 enabled = asset != null,
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent)
-            ) { Text("重试下载") }
+            ) { Text("重新下载") }
         }
 
         ApkDownloadState.Idle -> {
             Button(
-                onClick = {
-                    asset?.let { ApkUpdater.start(context, it.downloadUrl, it.name) }
-                },
+                onClick = startDownload,
                 enabled = asset != null,
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent)
-            ) { Text("下载更新 ${formatBytes(asset?.sizeBytes ?: 0L)}") }
+            ) { Text("下载更新") }
         }
     }
 
-    // 浏览器入口：应用内下载失败、或者想挂代理加速时用
-    Spacer(Modifier.height(6.dp))
-    TextButton(
-        onClick = { ApkUpdater.openInBrowser(context, asset?.downloadUrl ?: releasePageUrl) },
-        modifier = Modifier.fillMaxWidth()
-    ) { Text("用浏览器下载", color = AppColors.TextSecondary, fontSize = 13.sp) }
+    installError?.let { msg ->
+        Spacer(Modifier.height(8.dp))
+        Surface(shape = RoundedCornerShape(10.dp),
+            color = AppColors.Warning.copy(alpha = 0.12f)) {
+            Text(msg, modifier = Modifier.padding(10.dp),
+                color = AppColors.Warning, fontSize = 12.sp)
+        }
+    }
 }
 
 /** 字节数转成人看的单位 */
