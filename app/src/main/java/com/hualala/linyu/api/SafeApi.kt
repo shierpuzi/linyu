@@ -147,8 +147,8 @@ suspend fun QzxyService.generateUseCodeSafe(
     auth: Map<String, String>
 ): BaseResponse<UseCodeData> = parse(generateUseCode(auth).awaitString(), UseCodeData::class.java)
 
-suspend fun QzxyService.getVerificationCodeSafe(telephone: String): BaseResponse<Unit> =
-    parse(getVerificationCode(telephone).awaitString(), Unit::class.java)
+suspend fun QzxyService.getVerificationCodeSafe(telephone: String, secret: String): BaseResponse<Unit> =
+    parse(getVerificationCode(telephone, secret).awaitString(), Unit::class.java)
 
 suspend fun QzxyService.registerAndLoginSafe(telephone: String, smsCode: String): BaseResponse<LoginData> =
     parse(registerAndLogin(telephone, smsCode).awaitString(), LoginData::class.java)

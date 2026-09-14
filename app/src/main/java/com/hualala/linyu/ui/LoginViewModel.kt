@@ -25,6 +25,7 @@ class LoginViewModel : ViewModel() {
 
     fun login() {
         if (phone.isBlank()) return
+        if (phone.length != 11) { errorMessage = "请输入 11 位手机号"; return }
         if (isSmsMode) {
             if (smsCode.isBlank()) return
             smsLogin()
@@ -68,6 +69,7 @@ class LoginViewModel : ViewModel() {
 
     fun sendSmsCode() {
         if (phone.isBlank() || isSendingCode) return
+        if (phone.length != 11) { errorMessage = "请输入 11 位手机号"; return }
         viewModelScope.launch {
             isSendingCode = true; errorMessage = null
             val result = AuthRepository.sendSmsCode(phone)

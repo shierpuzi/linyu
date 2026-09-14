@@ -1,11 +1,14 @@
 package com.hualala.linyu.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -20,6 +23,8 @@ import androidx.compose.ui.unit.sp
 import com.hualala.linyu.ui.theme.AppColors
 import com.hualala.linyu.ui.theme.LocalThemeMode
 import com.hualala.linyu.ui.theme.ThemeMode
+import com.hualala.linyu.utils.BackgroundManager
+import com.hualala.linyu.utils.BackgroundState
 
 @Composable
 fun ShowerScreen(
@@ -30,7 +35,8 @@ fun ShowerScreen(
     elapsedSec: Int,
     autoDisConSec: Int = 0,
     isStopping: Boolean = false,
-    onStopClick: () -> Unit
+    onStopClick: () -> Unit,
+    onMinimizeClick: () -> Unit = {}
 ) {
     val minutes = elapsedSec / 60
     val seconds = elapsedSec % 60
@@ -38,14 +44,14 @@ fun ShowerScreen(
     val themeMode = LocalThemeMode.current.value
     val isDark = themeMode == ThemeMode.DARK
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                if (isDark) Brush.verticalGradient(listOf(Color(0xFF1A237E), Color(0xFF283593), Color(0xFF3949AB)))
-                else Brush.verticalGradient(listOf(Color(0xFFE3F2FD), Color(0xFFBBDEFB), Color(0xFF90CAF9)))
-            )
-    ) {
+    // 背景应用到「使用页」时不再画自身渐变，让底层背景图透出来
+    val bgModifier = if (BackgroundState.config(BackgroundManager.SCOPE_SHOWER).enabled) Modifier
+    else Modifier.background(
+        if (isDark) Brush.verticalGradient(listOf(Color(0xFF1A237E), Color(0xFF283593), Color(0xFF3949AB)))
+        else Brush.verticalGradient(listOf(Color(0xFFE3F2FD), Color(0xFFBBDEFB), Color(0xFF90CAF9)))
+    )
+
+    Box(modifier = Modifier.fillMaxSize().then(bgModifier)) {
         Column(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -68,7 +74,8 @@ fun ShowerScreen(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
                 color = AppColors.Card,
-                shadowElevation = 2.dp
+                border = BorderStroke(1.dp, Color.White.copy(alpha = if (isDark) 0.18f else 0.6f)),
+                shadowElevation = 0.dp // 去掉阴影：半透明卡片叠在渐变上时阴影会显脏
             ) {
                 Column(
                     modifier = Modifier.padding(20.dp),
@@ -88,7 +95,8 @@ fun ShowerScreen(
                 modifier = Modifier
                     .clip(RoundedCornerShape(12.dp))
                     .background(AppColors.Card.copy(alpha = 0.6f)),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(12.dp),
+                color = Color.Transparent // 背景已由 Modifier 绘制，避免 Surface 默认的不透明底色盖住
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
@@ -110,7 +118,8 @@ fun ShowerScreen(
                 Surface(
                     modifier = Modifier.clip(RoundedCornerShape(12.dp))
                         .background(AppColors.Warning.copy(alpha = 0.12f)),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color.Transparent // 同上：背景由 Modifier 绘制
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
@@ -157,6 +166,18 @@ fun ShowerScreen(
 
             Text("费率: 0.041元/升 · 设备: ${location.takeLast(6)}",
                 fontSize = 11.sp, color = AppColors.TextSecondary, textAlign = TextAlign.Center)
+        }
+
+        // 左上角返回：必须放在 Column 之后（上层），否则会被 full-size 的内容层拦截点击
+        IconButton(
+            onClick = onMinimizeClick,
+            modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp)
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "返回（不结束用水）",
+                tint = AppColors.TextPrimary
+            )
         }
     }
 }

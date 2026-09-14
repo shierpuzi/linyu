@@ -55,13 +55,25 @@ data class BillDTO(
         return if (name.isNotEmpty()) DeviceInfo.formatDeviceName(name) else description
     }
 
-    /** 设备类型标签：卫生间热水器 / 洗手台热水器 */
+    /** 是否饮水机账单 */
+    val isDrinkingWater: Boolean get() =
+        description.contains("饮水") || description.contains("直饮") || description.contains("冷水")
+
+    /** 设备类型标签：饮水机 / 洗手台热水器 / 卫生间热水器 */
     val deviceTypeLabel: String get() {
         val name = description.substringAfter(":")
         return when {
+            isDrinkingWater -> "饮水机"
             name.startsWith("洗手台") || description.contains("洗手台", ignoreCase = true) -> "洗手台热水器"
             else -> "卫生间热水器"
         }
+    }
+
+    /** 设备类型 emoji：饮水机 🚰 / 洗手台 🪥 / 热水器 🚿 */
+    val deviceEmoji: String get() = when {
+        isDrinkingWater -> "🚰"
+        description.contains("洗手台", ignoreCase = true) -> "🪥"
+        else -> "🚿"
     }
 }
 

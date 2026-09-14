@@ -7,6 +7,7 @@ import com.hualala.linyu.api.registerAndLoginSafe
 import com.hualala.linyu.model.LoginData
 import com.hualala.linyu.utils.MD5Utils
 import com.hualala.linyu.utils.PrefsHelper
+import com.hualala.linyu.utils.SignUtils
 
 object AuthRepository {
     suspend fun login(phone: String, passwordRaw: String): Result<LoginData> {
@@ -43,7 +44,9 @@ object AuthRepository {
 
     suspend fun sendSmsCode(phone: String): Result<Unit> {
         return try {
-            val resp = NetworkModule.apiService.getVerificationCodeSafe(phone)
+            // secret 按手机号动态计算（官方算法），所有人可用
+            val secret = SignUtils.smsSecret(phone)
+            val resp = NetworkModule.apiService.getVerificationCodeSafe(phone, secret)
             if (resp.success) Result.success(Unit)
             else Result.failure(Exception(resp.displayMessage ?: "发送失败"))
         } catch (e: Exception) { Result.failure(e) }

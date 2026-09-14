@@ -71,6 +71,18 @@ object PrefsHelper {
     // ── 绑定的寝室（设备筛选关键词） ──
     var boundRoom: String get() = prefs.getString("boundRoom", "") ?: ""; set(v) = prefs.edit().putString("boundRoom", v).apply()
 
+    // ── 「我的」页面卡片顺序 / 已隐藏卡片（逗号分隔的枚举名） ──
+    var userCardOrder: String get() = prefs.getString("userCardOrder", "") ?: ""; set(v) = prefs.edit().putString("userCardOrder", v).apply()
+    var userHiddenCards: String get() = prefs.getString("userHiddenCards", "") ?: ""; set(v) = prefs.edit().putString("userHiddenCards", v).apply()
+
+    // ── 自定义背景：两套独立配置（scope = home / shower），与深浅模式完全无关 ──
+    fun bgGetBool(scope: String, name: String, def: Boolean) = prefs.getBoolean("bg_${scope}_$name", def)
+    fun bgPutBool(scope: String, name: String, v: Boolean) = prefs.edit().putBoolean("bg_${scope}_$name", v).apply()
+    fun bgGetFloat(scope: String, name: String, def: Float) = prefs.getFloat("bg_${scope}_$name", def)
+    fun bgPutFloat(scope: String, name: String, v: Float) = prefs.edit().putFloat("bg_${scope}_$name", v).apply()
+    fun bgGetInt(scope: String, name: String, def: Int) = prefs.getInt("bg_${scope}_$name", def)
+    fun bgPutInt(scope: String, name: String, v: Int) = prefs.edit().putInt("bg_${scope}_$name", v).apply()
+
     // ── Active orders list ──
     fun getActiveOrders(): MutableList<ActiveOrder> {
         val json = prefs.getString("activeOrders", "[]") ?: "[]"

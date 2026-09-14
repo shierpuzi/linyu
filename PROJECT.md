@@ -8,11 +8,11 @@
 |---|---|
 | 应用名称 | 淋浴 |
 | 包名 | `com.hualala.linyu` |
-| 版本 | v1.2.0 |
+| 版本 | v2.1.0 |
 | 技术栈 | Kotlin + Jetpack Compose + Material 3 |
 | 最低 Android 版本 | Android 8.0 (API 26) |
 | 目标 Android 版本 | Android 16 (API 36) |
-| APK 体积 | ~17 MB |
+| APK 体积 | ~42 MB（含 ML Kit 条码识别 native 库） |
 | 后端 API | 趣智校园 `v3-api.china-qzxy.cn` |
 | 适用范围 | 使用趣智校园系统的学校（学校名称可手动修改） |
 
@@ -24,12 +24,13 @@
 
 | 功能 | 说明 |
 |---|---|
-| 登录/登出 | 手机号 + 密码登录，MD5 加密，loginCode 加密持久化，挤号检测 |
-| 蓝牙扫描设备 | BLE 低功耗蓝牙扫描附近热水器，按信号强度显示（强/中/弱） |
-| 扫码绑定设备 | 扫描热水器二维码，直接弹出设备详情（无需蓝牙） |
+| 密码登录/登出 | 手机号 + 密码登录，MD5 加密，loginCode 加密持久化，挤号检测 |
+| 短信验证码登录 | v2.1.0 通用化：`secret = MD5(前3位+后4位+"klcx")` 由手机号推导，任何手机号可用 |
+| 蓝牙扫描设备 | BLE 低功耗蓝牙扫描附近设备，按信号强度显示（强/中/弱） |
+| 扫码绑定设备 | 扫描设备二维码，直接弹出设备详情（无需蓝牙） |
 | 绑定寝室 | 绑定寝室关键词，设备列表只显示寝室内的设备 |
-| 开始洗澡 | 调用 downRate API 开启热水器，并轮询确认开阀成功 |
-| 停止洗澡 | 调用 closeOrder API 关闭热水器，确认关闭成功，失败有提示 |
+| 开始洗澡 | 调用 downRate API 开启设备，并轮询确认开阀成功 |
+| 停止洗澡 | 调用 closeOrder API 关闭设备，确认关闭成功，失败有提示 |
 | 洗澡中界面 | 全屏沉浸式界面，显示计时器、预扣金额、设备位置 |
 | 自动关停倒计时 | 解析 autoDisConTime 显示闲置自动关闭倒计时 |
 | 自动关停确认弹窗 | 设备自动关闭时弹确认框（设备名 + 时长 + 消费金额） |
@@ -38,6 +39,7 @@
 | 使用码启动检测 | 通过物理键盘使用码启动设备后，刷新可自动发现使用中的设备 |
 | 多设备支持 | 支持同时管理多个活跃设备订单 |
 | 上次使用设备 | 记住上次使用的设备，一键快速开始 |
+| 饮水机支持 | 按 `bigTypeId == 5` 识别直饮水机，绿主题 + ❄️/♨️ 图标 + 名称精简（未实机验证） |
 
 ### 钱包与账单
 
@@ -59,7 +61,14 @@
 
 | 功能 | 说明 |
 |---|---|
-| 深浅主题 | 手动切换浅色/深色模式，设置持久化保存 |
+| 深浅主题 | 手动切换浅色/深色模式，圆形揭示过渡动画，设置持久化保存 |
+| 悬浮胶囊导航栏 | 弹簧滑块跟随选中项，点击无水波纹（仅滑块滑动反馈） |
+| 页面切换动画 | 三大主页之间左右视差滑移 + 淡入淡出弹簧动画 |
+| 液态玻璃卡片 | 半透明底色 + 微光描边 + 零阴影 |
+| 背景装扮 | 主页 / 使用页各一套独立背景，自动提取主题色，透明度 / 模糊 / 亮度可调 |
+| 卡片自定义 | 「我的」页卡片可上下排序、隐藏显示，状态持久化 |
+| 应用内更新检测 | 读取 GitHub Release 自动比对版本，折叠展示更新日志 |
+| 内置运行日志 | 环形缓冲 + 文件滚动 + 敏感信息脱敏 + 崩溃捕获 + 一键导出 |
 | 扫码手电筒 | 扫码界面提供手电筒，光线不足时补光 |
 | 加密存储 | 登录凭证用 EncryptedSharedPreferences 加密存储 |
 | 学校名称编辑 | 用户可手动修改学校名称 |
@@ -82,40 +91,51 @@ app/src/main/
 │   ├── api/                               # 网络层
 │   │   ├── QzxyService.kt                 # Retrofit 接口定义（16 个 API）
 │   │   ├── NetworkModule.kt               # OkHttp + Retrofit 单例，认证拦截器
-│   │   └── SafeApi.kt                     # 扩展函数，手动 JSON 解析（绕开 R8 泛型问题）
+│   │   ├── SafeApi.kt                     # 扩展函数，手动 JSON 解析（绕开 R8 泛型问题）
+│   │   └── GithubApi.kt                   # GitHub Release / 仓库信息（更新检测）
 │   │
 │   ├── data/                              # 数据层
-│   │   └── AuthRepository.kt              # 登录认证逻辑
+│   │   └── AuthRepository.kt              # 登录认证逻辑（密码 / 短信）
 │   │
 │   ├── model/                             # 数据模型
 │   │   ├── LoginModels.kt                 # BaseResponse<T>、LoginData、UserAccount、
 │   │   │                                  # WalletData、OrderStatus、BillItem、BillDTO、
 │   │   │                                  # UseCodeData、BillDetail、DownRateResult、
-│   │   │                                  # CloseOrderResult
-│   │   ├── DeviceModels.kt                # DeviceInfo、NearbyDevice
+│   │   │                                  # CloseOrderResult（含账单设备类型判定）
+│   │   ├── DeviceModels.kt                # DeviceInfo、NearbyDevice（含饮水机识别、
+│   │   │                                  # 设备名格式化、类型 emoji / 颜色）
 │   │   ├── ActiveOrder.kt                 # 活跃订单模型
 │   │   └── MqttModels.kt                  # MQTT 消息模型
 │   │
 │   ├── ui/                                # UI 层
-│   │   ├── LoginScreen.kt                 # 登录页面（渐变背景 + 卡片式表单）
+│   │   ├── LoginScreen.kt                 # 登录页面（密码 / 短信双模式）
 │   │   ├── LoginViewModel.kt              # 登录 ViewModel（网络异常友好提示）
 │   │   ├── MainScreen.kt                  # 主页（设备列表、扫码、寝室筛选、余额显示）
 │   │   ├── MainViewModel.kt               # 主 ViewModel（蓝牙、MQTT、洗澡控制、开阀/
 │   │   │                                  # 关阀确认、消费结算、挤号检测）
 │   │   ├── ShowerScreen.kt                # 洗澡中界面（计时器、自动关停倒计时）
 │   │   ├── WalletScreen.kt                # 钱包页面（余额估算、账单列表、下拉刷新）
-│   │   ├── UserScreen.kt                  # 我的页面（账号信息、使用码、绑定寝室、主题）
+│   │   ├── UserScreen.kt                  # 我的页面（可排序卡片 + 进程级缓存）
+│   │   ├── FloatingPillNavBar.kt          # 悬浮胶囊导航栏（弹簧滑块，点击无波纹）
+│   │   ├── AppBackgroundLayer.kt          # 自定义背景渲染层（透明度/模糊/亮度）
+│   │   ├── CustomBackgroundScreen.kt      # 背景装扮设置页（主页 / 使用页切换）
+│   │   ├── LogViewerDialog.kt             # 内置日志查看器
 │   │   ├── DeviceDetailDialog.kt          # 设备详情弹窗（SN、MAC、预扣金额、状态）
 │   │   ├── LinYuToast.kt                  # 自定义 Toast 组件（应用图标 + 深色背景）
 │   │   └── theme/
-│   │       └── Theme.kt                   # 深浅主题配色方案
+│   │       ├── Theme.kt                   # 深浅主题配色方案（液态玻璃卡片）
+│   │       └── CircularRevealTheme.kt     # 圆形揭示主题切换容器
 │   │
 │   └── utils/                             # 工具层
 │       ├── PrefsHelper.kt                 # 加密存储（EncryptedSharedPreferences，认证、
-│       │                                  # 设备、余额、主题、寝室绑定、倒计时）
+│       │                                  # 设备、余额、主题、寝室绑定、倒计时、背景）
 │       ├── MqttManager.kt                 # MQTT 连接管理（Paho 客户端）
 │       ├── BluetoothScanner.kt            # BLE 蓝牙扫描（过滤 KLCXKJ-Water 设备）
-│       └── MD5Utils.kt                    # 密码加密（MD5 取后 10 位）
+│       ├── MD5Utils.kt                    # 密码加密（MD5 取后 10 位）
+│       ├── SignUtils.kt                   # 短信验证码 secret 计算（按手机号推导）
+│       ├── AppLogger.kt                   # 运行日志（脱敏 / 滚动 / 崩溃捕获）
+│       ├── BackgroundManager.kt           # 背景图存取（主页 / 使用页两套配置）
+│       └── BackgroundState.kt             # 背景配置状态（Compose State）
 │
 └── res/
     ├── drawable/
@@ -123,6 +143,7 @@ app/src/main/
     │   └── ic_flashlight.xml              # 扫码手电筒图标
     ├── xml/
     │   ├── network_security_config.xml    # 网络安全配置（仅允许 MQTT 明文）
+    │   ├── file_paths.xml                 # 日志导出 FileProvider 路径
     │   ├── backup_rules.xml               # 备份规则
     │   └── data_extraction_rules.xml      # 数据提取规则
     ├── values/
@@ -147,21 +168,34 @@ app/src/main/
 │  UI 层 (Compose)                        │
 │  LoginScreen / MainScreen / ShowerScreen│
 │  WalletScreen / UserScreen              │
+│  FloatingPillNavBar / AppBackgroundLayer│
+├─────────────────────────────────────────┤
+│  主题层                                 │
+│  Theme (AppColors 组合局部)             │
+│  CircularRevealThemeHost (圆形揭示过渡) │
 ├─────────────────────────────────────────┤
 │  ViewModel 层                           │
 │  LoginViewModel / MainViewModel         │
 ├─────────────────────────────────────────┤
 │  数据层                                 │
 │  AuthRepository / NetworkModule         │
-│  QzxyService (Retrofit) / SafeApi       │
+│  QzxyService / SafeApi / GithubApi      │
 │  PrefsHelper / MqttManager              │
-│  BluetoothScanner                       │
+│  BluetoothScanner / BackgroundManager   │
+│  AppLogger                              │
 ├─────────────────────────────────────────┤
 │  模型层                                 │
 │  BaseResponse / LoginData / DeviceInfo  │
 │  ActiveOrder / MqttOrderMsg             │
 └─────────────────────────────────────────┘
 ```
+
+### 主题与背景实现要点
+
+- 配色通过 `CompositionLocal`（`LocalAppColors`）向下传递，主题切换时走**重组**而非重建，因此不会丢状态
+- 强调色可被自定义背景提取出的主题色覆盖
+- 背景配置分 `home` / `shower` 两个 scope 独立存储，`AppBackgroundLayer` 按当前是否洗澡中选取对应 scope 渲染
+- 状态栏透明度跟随背景启用状态自动切换
 
 ### 关键依赖
 
@@ -177,6 +211,7 @@ app/src/main/
 | Jetpack Security Crypto | 1.1.0-alpha06 | EncryptedSharedPreferences 加密存储 |
 | CameraX | 1.4.2 | 相机预览（扫码） |
 | ML Kit Barcode | 17.3.0 | 二维码识别 |
+| AndroidX Core | — | FileProvider（日志导出）、WindowCompat（边到边） |
 
 ### R8 混淆兼容方案
 
@@ -187,6 +222,8 @@ R8 full mode 会擦除 Kotlin suspend 函数的泛型签名，导致 Gson 无法
 2. `SafeApi.kt` 中定义扩展函数，使用 `suspendCancellableCoroutine` 桥接回调
 3. 手动用 `JsonParser` 解析 JSON，用 `Class<T>` 反序列化 data 字段
 4. 完全不依赖 Gson 的泛型反射，R8 无法破坏
+
+同样的思路也用在 `GithubApi.kt` 上：更新检测不引入 GitHub SDK，直接解析 GitHub REST 返回的 JSON，任何一步失败都返回 null / 空列表，绝不阻塞主流程（国内网络访问 GitHub 常失败）。
 
 ### 网络安全配置
 
@@ -267,20 +304,46 @@ buildTypes {
 | 限制 | 说明 |
 |---|---|
 | 测试范围 | 仅在金华职业技术大学（projectId=905）男生宿舍测试过几次，其他学校未测试 |
-| 短信登录 | 短信验证码接口需要 secret，且 secret 绑定账号（未完善，请用密码登录） |
+| 挤号检测被动 | 需触发网络请求（刷新/操作）才能发现被挤下线，打开 App 不操作不会主动发现 |
+| 饮水机未实机验证 | 识别与 UI 已实现，但作者所在学校无直饮水机，实际控制流程未验证 |
 | 实时扣费 | MQTT 仅在订单结束时推送消费金额，洗澡中无实时扣费（官方 App 也是如此） |
-| 一卡通余额 | 无法获取真实余额（易校园 API 有签名保护），仅支持手动估算 |
+| 结算延迟 | 账单生成有延迟，消费金额最长需等待约 20 秒 |
+| 一卡通余额 | 无法获取真实余额（易校园 API 有 HMAC-SHA256 签名保护），仅支持手动估算 |
 | MQTT 明文 | 趣智校园 MQTT 服务器不支持 TLS，通信内容未加密 |
 | 密码安全 | 趣智校园使用 MD5 取后 10 位作为密码，安全性较低（官方协议限制） |
 | 学校适配 | 不同学校的趣智校园服务器可能不同，需修改 projectId、BLE 过滤名、MQTT 地址 |
 | 深色模式 | 登录页面和洗澡页面的深色模式适配为硬编码颜色切换，非完全动态 |
 | 多语言 | 仅支持中文 |
 
+### v2.1.0 已修复的历史问题
+
+| 原问题 | 状态 |
+|---|---|
+| 短信登录 secret 绑定账号 | ✅ secret 由手机号推导（`SignUtils`），任何手机号可用 |
+| 切到「我的」页面卡顿 | ✅ 卡片顺序 / Release / 仓库信息改为进程级缓存 |
+| 设备名残留「表」字 | ✅ 修正正则顺序，`热水表-xxx` 不再被截断 |
+| 使用页退出按钮点击无响应 | ✅ 修正组件层级，按钮不再被上层 Column 拦截 |
+| 使用页「已预扣」卡片不透明色块 | ✅ 补 `Color.Transparent`（Surface 默认不透明） |
+| 主题切换跳回首页 / 闪烁 | ✅ 状态移出过渡容器 + 遮罩先绘一帧 |
+| 版本号硬编码 | ✅ 改读 `BuildConfig.VERSION_NAME` |
+
 ---
 
 ## 版本历史
 
-### v1.2.0
+### v2.1.0 (2026-09-14)
+
+- **短信验证码登录通用化**（secret 由手机号推导，任何手机号可用）
+- **饮水机支持**（识别 + 绿主题 + 冷热图标 + 设备名精简）
+- **内置运行日志查看器**（脱敏 + 滚动 + 崩溃捕获 + 导出）
+- **背景装扮**（主页 / 使用页双套配置 + 主题色提取 + 三项参数调节）
+- **UI 升级**（悬浮胶囊导航栏、圆形揭示主题切换、页面弹簧滑移、液态玻璃卡片）
+- 「我的」页面卡片可排序 / 可隐藏
+- 应用信息卡片自动检测 GitHub 更新 + 折叠更新日志
+- 关于项目卡片显示制作者与 Star 数
+- 修复：切「我的」卡顿、设备名残留「表」字、使用页退出按钮无响应、使用页色块、主题切换丢状态与闪烁
+
+### v1.2.0 (2026-08-08)
 
 - 开阀确认（开始洗澡时确认开阀成功）
 - 自动关停倒计时与确认弹窗

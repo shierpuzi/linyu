@@ -1,5 +1,6 @@
 package com.hualala.linyu.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -67,7 +68,7 @@ fun WalletScreen(viewModel: MainViewModel) {
     val initialBalance = PrefsHelper.manualBalance.toDoubleOrNull() ?: 0.0
     val displayBalance = if (PrefsHelper.manualBalance.isEmpty()) 0.0 else initialBalance - totalNewSpent
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -80,7 +81,7 @@ fun WalletScreen(viewModel: MainViewModel) {
 
             Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp),
                 colors = CardDefaults.cardColors(containerColor = AppColors.Card),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+                border = BorderStroke(0.8.dp, AppColors.Border), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
                 Column(Modifier.padding(24.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween) {
@@ -117,13 +118,15 @@ fun WalletScreen(viewModel: MainViewModel) {
                     }
                 }
             }
+
+            Spacer(Modifier.height(100.dp)) // 底部留出悬浮导航栏空间
         }
 
         PullRefreshIndicator(
             refreshing = pullRefreshing,
             state = pullState,
             modifier = Modifier.align(Alignment.TopCenter),
-            backgroundColor = AppColors.Card,
+            backgroundColor = AppColors.SolidSurface, // 不透明，避免半透明叠加导致内外不一致
             contentColor = AppColors.Accent
         )
     }
@@ -193,13 +196,17 @@ private fun BillCard(bill: BillItem, onClick: () -> Unit) {
     val dto = bill.consumeBillDTO
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = AppColors.Card),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) {
+        border = BorderStroke(0.8.dp, AppColors.Border), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
         Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(dto.displayDesc, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = AppColors.TextPrimary)
+                Text("${dto.deviceEmoji} ${dto.displayDesc}", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = AppColors.TextPrimary)
                 Spacer(Modifier.height(2.dp))
-                val tc = if (dto.deviceTypeLabel.contains("洗手台")) Color(0xFFFF9800) else AppColors.Accent
+                val tc = when {
+                    dto.isDrinkingWater -> Color(0xFF10B981)          // 饮水机：绿色
+                    dto.deviceTypeLabel.contains("洗手台") -> Color(0xFFFF9800)
+                    else -> AppColors.Accent
+                }
                 Text(dto.deviceTypeLabel, fontSize = 12.sp, color = tc)
                 Spacer(Modifier.height(2.dp))
                 Text(dto.consumeDate.take(16), fontSize = 12.sp, color = AppColors.TextSecondary)

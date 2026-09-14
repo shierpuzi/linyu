@@ -3,12 +3,12 @@
 [![Platform](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com)
 [![Language](https://img.shields.io/badge/Language-Kotlin-blue.svg)](https://kotlinlang.org)
 [![UI](https://img.shields.io/badge/UI-Jetpack%20Compose-purple.svg)](https://developer.android.com/jetpack/compose)
-[![Version](https://img.shields.io/badge/Version-v1.2.0-orange.svg)](https://github.com/yehu-imei/linyu/releases/latest)
+[![Version](https://img.shields.io/badge/Version-v2.1.0-orange.svg)](https://github.com/yehu-imei/linyu/releases/latest)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**⬇️ [下载最新 APK (v1.2.0)](https://github.com/yehu-imei/linyu/releases/latest)**
+**⬇️ [下载最新 APK (v2.1.0)](https://github.com/yehu-imei/linyu/releases/latest)**
 
-趣智校园第三方 Android 客户端，用于控制校园热水器。相比官方 App，提供更简洁的界面和更流畅的操作体验。
+趣智校园第三方 Android 客户端，用于控制校园热水器与直饮水机。相比官方 App，提供更简洁的界面和更流畅的操作体验。
 
 ## 📱 预览
 
@@ -16,72 +16,101 @@
 
 ## ✨ 功能
 
-- 🔐 **手机号登录** — 支持登录状态持久化和自动恢复
-- 📡 **蓝牙扫描** — BLE 扫描附近热水器，按信号强度排序
-- 📷 **扫码绑定** — 扫描热水器二维码，直接弹出设备详情，无需蓝牙
+### 🚿 设备控制
+
+- 🔐 **手机号登录** — 密码登录 / **短信验证码登录**（已通用化），登录状态持久化与自动恢复
+- 📡 **蓝牙扫描** — BLE 扫描附近设备，按信号强度排序
+- 📷 **扫码绑定** — 扫描设备二维码，直接弹出设备详情，无需蓝牙
 - 🔦 **扫码手电筒** — 光线不足时扫码补光
 - 🏠 **绑定寝室** — 绑定寝室关键词，设备列表只显示寝室内的设备
 - 🚿 **一键洗澡** — 选择设备即可开始，支持停止和恢复；开阀确认，失败有提示
 - ⏳ **自动关停倒计时** — 显示闲置自动关闭倒计时，关闭时弹出确认框
 - 💰 **消费结算** — 关阀后通过账单自动显示本次消费金额
+- 🚰 **饮水机支持** — 自动识别直饮水机（冷水 ❄️ / 热水 ♨️），绿色主题区分，设备名智能精简
+
+### 💰 钱包与账单
+
 - 💰 **余额估算** — 手动输入初始余额，根据账单自动扣减
-- 📋 **账单查询** — 查看当月消费记录和详情
-- 🔢 **使用码** — 显示/远程开关热水器使用码
-- 🌓 **深浅主题** — 手动切换，设置自动保存
-- 🔐 **加密存储** — 登录凭证加密存储（EncryptedSharedPreferences）
+- 📋 **账单查询** — 查看当月消费记录和详情，按设备类型着色
+
+### 🎨 个性化
+
+- 🖼 **背景装扮** — 主页与使用页各一套独立背景，自动提取主题色（网易云式），支持透明度 / 模糊 / 亮度调节
+- 🌓 **深浅主题** — 圆形揭示切换动画，设置自动保存
+- 🧩 **卡片自定义** — 「我的」页面卡片可上下排序、隐藏显示
 - 📶 **断网提示** — 网络异常时友好提示
 - 👥 **挤号检测** — 多设备登录自动提醒
+
+### 🔧 其他
+
+- 📜 **内置运行日志** — 内存 + 文件双缓冲，敏感信息自动打码，崩溃自动捕获，可一键分享导出
+- 🔄 **应用内更新检测** — 自动读取 GitHub Release，展开查看更新日志
+- 🔐 **加密存储** — 登录凭证加密存储（EncryptedSharedPreferences）
 
 ## 🏗 架构
 
 ```
 UI (Compose) → ViewModel → Repository → Retrofit API (v3-api.china-qzxy.cn)
                               ↓
-          MQTT / BLE 扫描 / 扫码(CameraX) / 账单结算 / 加密存储
+   MQTT / BLE 扫描 / 扫码(CameraX) / 账单结算 / 加密存储 / 日志 / 背景管理
 ```
 
 | 层级 | 技术 |
 |---|---|
 | UI | Jetpack Compose + Material 3 |
-| 状态管理 | ViewModel + StateFlow |
+| 状态管理 | ViewModel + StateFlow / Compose State |
 | HTTP | Retrofit 2.9 + OkHttp |
 | 实时推送 | Eclipse Paho MQTT |
 | 蓝牙 / 扫码 | Android BLE API / CameraX + ML Kit |
 | 加密存储 | EncryptedSharedPreferences |
+| 日志 | 自研 AppLogger（环形缓冲 + 文件滚动 + 脱敏） |
 | 混淆 | R8 Full Mode |
 
 ## 📁 项目结构
 
 ```
 app/src/main/java/com/hualala/linyu/
-├── MainActivity.kt         # 主 Activity
+├── MainActivity.kt         # 主 Activity（导航、弹窗、边到边、状态栏）
 ├── QrScanActivity.kt       # 扫码界面 (CameraX + ML Kit + 手电筒)
 ├── api/                    # 网络层
-│   ├── QzxyService.kt      # Retrofit 接口 (16 个 API)
+│   ├── QzxyService.kt      # Retrofit 接口
 │   ├── NetworkModule.kt    # OkHttp + 认证拦截器
-│   └── SafeApi.kt          # 手动 JSON 解析 (避 R8 泛型擦除)
+│   ├── SafeApi.kt          # 手动 JSON 解析 (避 R8 泛型擦除)
+│   └── GithubApi.kt        # GitHub Release / 仓库信息（更新检测）
 ├── data/                   # 数据层
-│   └── AuthRepository.kt   # 登录认证
+│   └── AuthRepository.kt   # 登录认证（密码 / 短信）
 ├── model/                  # 数据模型
-│   ├── LoginModels.kt
-│   ├── DeviceModels.kt
+│   ├── LoginModels.kt      # 含账单设备类型判定（热水器 / 饮水机）
+│   ├── DeviceModels.kt     # 含饮水机识别与设备名格式化
 │   ├── ActiveOrder.kt
 │   └── MqttModels.kt
 ├── ui/                     # 界面
-│   ├── LoginScreen.kt      # 登录
+│   ├── LoginScreen.kt      # 登录（密码 / 短信两种方式）
 │   ├── MainScreen.kt       # 主页 + 设备列表 + 扫码
 │   ├── ShowerScreen.kt     # 洗澡中 (含自动关停倒计时)
 │   ├── WalletScreen.kt     # 钱包 + 账单
-│   ├── UserScreen.kt       # 用户 + 使用码 + 绑定寝室
-│   └── theme/Theme.kt      # 主题
+│   ├── UserScreen.kt       # 我的（可排序卡片）
+│   ├── FloatingPillNavBar.kt    # 悬浮胶囊导航栏（弹簧滑块）
+│   ├── AppBackgroundLayer.kt    # 自定义背景渲染层
+│   ├── CustomBackgroundScreen.kt# 背景装扮设置页
+│   ├── LogViewerDialog.kt       # 内置日志查看器
+│   ├── LinYuToast.kt
+│   ├── DeviceDetailDialog.kt
+│   └── theme/
+│       ├── Theme.kt             # 配色方案（液态玻璃卡片）
+│       └── CircularRevealTheme.kt # 圆形揭示主题切换
 └── utils/                  # 工具
-    ├── PrefsHelper.kt      # 加密存储 (EncryptedSharedPreferences)
+    ├── PrefsHelper.kt      # 加密存储
     ├── MqttManager.kt      # MQTT 管理
     ├── BluetoothScanner.kt # 蓝牙扫描
-    └── MD5Utils.kt         # 密码加密
+    ├── MD5Utils.kt         # 密码加密
+    ├── SignUtils.kt        # 短信验证码 secret 计算
+    ├── AppLogger.kt        # 日志（脱敏 / 滚动 / 崩溃捕获）
+    ├── BackgroundManager.kt# 背景图存取（主页 / 使用页两套）
+    └── BackgroundState.kt  # 背景配置状态
 ```
 
-res/ 额外包含 `drawable/ic_flashlight.xml`（扫码手电筒图标）、`drawable/app_logo.png`（应用 logo）。
+res/ 额外包含 `drawable/ic_flashlight.xml`（扫码手电筒图标）、`drawable/app_logo.png`（应用 logo）、`xml/file_paths.xml`（日志导出 FileProvider）。
 
 ## 🚀 构建
 
@@ -126,6 +155,7 @@ KEY_PASSWORD=你的密码
 | 文档 | 说明 |
 |---|---|
 | [PROJECT.md](PROJECT.md) | 完整项目文档、技术架构、功能清单 |
+| [CHANGELOG.md](CHANGELOG.md) | 版本更新日志 |
 | [API-qzxy.md](API-qzxy.md) | 趣智校园 API 逆向工程完整参考 |
 | [开发者指南.md](开发者指南.md) | 面向第三方开发者的开发指南 |
 
@@ -133,24 +163,17 @@ KEY_PASSWORD=你的密码
 
 本项目仅在**金华职业技术大学（projectId=905）**的男生宿舍测试过，其他学校使用前需要修改以下内容：
 
-### 1. 短信登录 secretKey（未完善功能）
+### 1. 短信登录
 
-⚠️ **短信验证码登录目前是「未完善功能」**：`getVerificationCode` 接口的 `secret` 参数（`QzxyService.kt` 硬编码）经测试**绑定账号**，其他手机号无法用同一 secret 发验证码。
+✅ **v2.1.0 起短信登录已通用化**，任何手机号都可以直接收验证码登录，无需抓包。
 
-- 默认请使用**手机号 + 密码登录**（密码登录不需要 secret，已验证正常）
-- 短信登录需自行逆向官方 App 获取与自己账号匹配的 secret 后替换（见下）
-
-如需尝试，获取 secret 的方法：
+逆向发现官方 App 的 `secret` 并非随机值，而是按手机号计算得来（见 `utils/SignUtils.kt`）：
 
 ```
-1. 安装 Reqable + LSPosed + TrustMeAlready（绕过 SSL Pinning）
-2. 打开官方趣智校园 App，点击"发送验证码"
-3. 在 Reqable 中找到 /user/verification/code/get 请求
-4. 复制 URL 中 secret 参数的值
-5. 替换 QzxyService.kt 第 113 行的 secret 默认值
+secret = MD5( 手机号前3位 + 手机号后4位 + "klcx" )
 ```
 
-> 💡 由于 secret 绑定账号，此方式仅对抓包者本人的账号有效，不是通用的短信登录方案。
+由于算法在本地即可算出，所有用户都能正常使用短信登录。若你的学校接口签名算法不同，可在此处替换。
 
 ### 2. 修改 projectId
 
@@ -161,7 +184,7 @@ KEY_PASSWORD=你的密码
 | 位置 | 当前值 | 说明 |
 |---|---|---|
 | `projectId` | 905 | 学校唯一标识 |
-| BLE 设备名过滤 | `KLCXKJ-Water` | 热水器蓝牙广播名 |
+| BLE 设备名过滤 | `KLCXKJ-Water` | 设备蓝牙广播名 |
 | MAC 地址前缀 | `C4:7F:0E` | 凯路创新科技厂商码 |
 | MQTT 服务器 | `tcp://47.107.37.60:1883` | 不同学校可能不同 |
 
@@ -169,21 +192,32 @@ KEY_PASSWORD=你的密码
 
 ## ⚠️ 已知问题与限制
 
-### 🚿 洗澡相关
+### ✅ v2.1.0 已修复
+
+| 原问题 | 状态 |
+|---|---|
+| ~~短信登录 secret 绑定账号~~ | ✅ **已解决**：secret 由手机号推导，任何手机号可用 |
+| ~~热水器自动关停无感知~~ | ✅ **已解决 (v1.2.0)**：解析 `autoDisConTime` 显示闲置倒计时，自动关闭时弹确认框 |
+| ~~关闭失败无提示~~ | ✅ **已解决 (v1.2.0)**：关阀后通过 `closeOrderResult` 确认，失败会提示重试 |
+| ~~切到「我的」页面卡顿~~ | ✅ **已解决**：卡片顺序 / Release 数据改为进程级缓存，避免重复解密与请求 |
+| ~~设备名残留「表」字~~ | ✅ **已解决**：修正正则处理顺序，`热水表-xxx` 不再被截成 `表 xxx` |
+| ~~使用页退出按钮点击无响应~~ | ✅ **已解决**：修正组件层级，按钮不再被上层 Column 拦截点击 |
+
+### ❌ 仍未解决
 
 | 问题 | 说明 |
 |---|---|
-| ~~热水器自动关停无感知~~ | ✅ **已解决 (v1.2.0)**：解析 `autoDisConTime` 显示闲置倒计时；自动关闭时弹出确认框（设备名 + 时长 + 消费金额） |
-| ~~关闭失败无提示~~ | ✅ **已解决 (v1.2.0)**：关阀后通过 `closeOrderResult` 确认，失败会提示重试 |
+| **挤号检测是被动的** | 需触发网络请求（刷新 / 操作）才能发现被挤下线，打开 App 不操作不会主动发现 |
 | **无实时扣费** | MQTT 仅在订单结束时推送消费金额，洗澡中看不到实时扣费。官方 App 也是如此 |
+| **消费金额结算延迟** | 账单生成有延迟，最长需等待约 20 秒 |
+| **一卡通余额无法获取** | 易校园 API 有 HMAC-SHA256 native 签名保护，只能手动估算余额 |
 
 ### 🏫 兼容性
 
 | 问题 | 说明 |
 |---|---|
 | **仅在一所学校测试** | 只在金华职业技术大学（projectId=905）男生宿舍测试过几次，其他学校能否使用未知 |
-| **短信登录未完善** | 短信验证码接口的 `secret` 绑定账号，其他人无法使用同一 secret；请用密码登录 |
-| **一卡通余额无法获取** | 易校园 API 有 HMAC-SHA256 native 签名保护，只能手动估算余额 |
+| **饮水机功能未实机验证** | 饮水机识别与 UI 已实现，但作者所在学校无直饮水机，实际控制流程未验证 |
 
 ### 🔒 安全
 

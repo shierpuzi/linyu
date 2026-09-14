@@ -13,14 +13,6 @@ import androidx.compose.ui.unit.sp
 import com.hualala.linyu.model.DeviceInfo
 import com.hualala.linyu.ui.theme.AppColors
 
-private fun determineType(name: String): Pair<String, String> {
-    return when {
-        name.startsWith("热水器") || name.startsWith("热水表") -> "🚿" to "沐浴"
-        name.startsWith("洗手台") -> "🪥" to "洗漱"
-        else -> "🚿" to "沐浴"
-    }
-}
-
 @Composable
 fun DeviceDetailDialog(
     device: DeviceInfo?,
@@ -31,9 +23,14 @@ fun DeviceDetailDialog(
 ) {
     if (device == null) return
 
-    val (emoji, type) = determineType(device.deviceName)
-    // displayName is now pure text without emoji
+    val emoji = device.typeEmoji
+    val type = when {
+        device.isDrinkingWater -> if (device.isHotWater) "饮水（热水）" else "饮水（冷水）"
+        device.typeName == "洗手台" -> "洗漱"
+        else -> "沐浴"
+    }
     val location = device.displayName
+    val startText = if (device.isDrinkingWater) "开始接水" else "开始使用"
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -45,6 +42,7 @@ fun DeviceDetailDialog(
         },
         text = {
             Column {
+                DetailRow("类型", device.typeName)
                 DetailRow("SN 码", device.snCode)
                 DetailRow("MAC 地址", device.macAddress)
                 DetailRow("预扣金额", "¥ ${device.withholdMoney}")
@@ -53,7 +51,7 @@ fun DeviceDetailDialog(
         },
         confirmButton = {
             val canUse = !isActive || isOwner
-            val txt = if (isActive && !isOwner) "他人使用中" else if (isActive) "恢复使用" else "开始使用"
+            val txt = if (isActive && !isOwner) "他人使用中" else if (isActive) "恢复使用" else startText
             Button(onClick = { if (canUse) { onConfirm(); onDismiss() } },
                 enabled = canUse,
                 colors = ButtonDefaults.buttonColors(

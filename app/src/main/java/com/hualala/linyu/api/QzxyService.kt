@@ -105,12 +105,13 @@ interface QzxyService {
     ): Call<ResponseBody>
 
     // ── 短信验证码 ──
+    // secret 由 SignUtils.smsSecret(telephone) 按手机号动态计算，不再硬编码
     @GET("/user/verification/code/get")
     fun getVerificationCode(
         @Query("telephone") telephone: String,
+        @Query("secret") secret: String,
         @Query("typeId") typeId: Int = 3,
-        @Query("platform") platform: Int = 1,
-        @Query("secret") secret: String = "e3d2220b920cca13499ea76328e24a4e"
+        @Query("platform") platform: Int = 1
     ): Call<ResponseBody>
 
     @FormUrlEncoded

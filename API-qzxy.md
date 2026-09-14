@@ -47,8 +47,8 @@
 | 获取使用码 | GET | `/account/useCode/new` | ✅ | 获取当前使用码 |
 | 生成使用码 | POST | `/account/useCode/new/generate` | ✅ | 生成新的使用码 |
 | 使用码开关 | POST | `/account/useCode/new/status/update` | ✅ | 开启/关闭使用码 |
-| 发送短信验证码 | GET | `/user/verification/code/get` | ❌ | 发送验证码，需 secret |
-| 短信验证码登录 | POST | `/user/registerAndLogin` | ❌ | 用验证码注册/登录 |
+| 发送短信验证码 | GET | `/user/verification/code/get` | ✅ | 发送验证码，secret 由手机号推导（v2.1.0） |
+| 短信验证码登录 | POST | `/user/registerAndLogin` | ✅ | 用验证码注册/登录 |
 
 ---
 
@@ -702,7 +702,8 @@ interface QzxyService {
     @POST("/account/useCode/new/generate")
     fun generateUseCode(@FieldMap auth: Map<String, String>): Call<ResponseBody>
 
-    // ── 短信验证码（secret 绑定账号，未完善） ──
+    // ── 短信验证码（v2.1.0：secret 由手机号推导，任何手机号可用） ──
+    // secret = MD5(手机号前3位 + 手机号后4位 + "klcx")，见 utils/SignUtils.kt
     @GET("/user/verification/code/get")
     fun getVerificationCode(
         @Query("telephone") telephone: String,

@@ -5,13 +5,17 @@ import android.content.Intent
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -25,11 +29,13 @@ import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
+import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -41,6 +47,8 @@ import kotlinx.coroutines.launch
 import com.hualala.linyu.QrScanActivity
 import com.hualala.linyu.model.NearbyDevice
 import com.hualala.linyu.ui.theme.AppColors
+import com.hualala.linyu.utils.BackgroundManager
+import com.hualala.linyu.utils.BackgroundState
 import com.hualala.linyu.utils.PrefsHelper
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
@@ -93,15 +101,37 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
         }
     )
 
-    // 按寝室筛选设备（在 composable 上下文计算，供 LazyColumn 使用）
-    val filteredDevices = viewModel.nearbyDevices.filter {
-        val n = it.deviceInfo?.deviceName ?: it.name
-        viewModel.matchesBoundRoom(n)
+    // 按寝室筛选设备：用 remember 缓存，仅当设备列表或绑定寝室变化时才重新过滤
+    val filteredDevices = remember(
+        viewModel.nearbyDevices.toList(),
+        PrefsHelper.boundRoom
+    ) {
+        viewModel.nearbyDevices.filter {
+            val n = it.deviceInfo?.deviceName ?: it.name
+            viewModel.matchesBoundRoom(n)
+        }
+    }
+
+    // 余额估算：含日期解析，开销较大。放在 LazyColumn 之外并用 remember 缓存，
+    // 避免滚动时 item 反复组合/销毁导致重新解析日期而掉帧。
+    val displayBalance = remember(viewModel.billList, PrefsHelper.manualBalance, PrefsHelper.manualBalanceTime) {
+        val balanceTime = PrefsHelper.manualBalanceTime
+        val newBills = viewModel.billList.filter {
+            val timeStr = it.consumeBillDTO.consumeDate.replace(" ", "T")
+            try {
+                java.time.LocalDateTime.parse(timeStr)
+                    .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli() > balanceTime
+            } catch (_: Exception) { false }
+        }
+        val totalNewSpent = newBills.sumOf { (it.consumeBillDTO.consumeMoney.toDoubleOrNull() ?: 0.0) }
+        val initialBalance = PrefsHelper.manualBalance.toDoubleOrNull() ?: 0.0
+        if (PrefsHelper.manualBalance.isEmpty()) 0.0 else initialBalance - totalNewSpent
     }
 
     AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
         Scaffold(
-            containerColor = AppColors.Background
+            // 背景应用到「主页」时透明，让最底层的背景图透出来
+            containerColor = if (BackgroundState.config(BackgroundManager.SCOPE_HOME).enabled) Color.Transparent else AppColors.Background
         ) { padding ->
             if (viewModel.isShowering) {
                 ShowerScreen(
@@ -112,7 +142,8 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
                     elapsedSec = viewModel.showerElapsedSec,
                     autoDisConSec = viewModel.autoDisConSec,
                     isStopping = viewModel.isStopping,
-                    onStopClick = { viewModel.stopShower() }
+                    onStopClick = { viewModel.stopShower() },
+                    onMinimizeClick = { viewModel.minimizeShower() }
                 )
             } else {
                 Box(modifier = Modifier.padding(padding).fillMaxSize()) {
@@ -176,19 +207,7 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
                                 verticalAlignment = Alignment.CenterVertically) {
                                 Text("附近设备", fontWeight = FontWeight.Bold, fontSize = 18.sp,
                                     color = AppColors.TextPrimary)
-                                
-                                // 显示估算余额
-                                val balanceTime = PrefsHelper.manualBalanceTime
-                                val newBills = viewModel.billList.filter {
-                                    val timeStr = it.consumeBillDTO.consumeDate.replace(" ", "T")
-                                    try { 
-                                        java.time.LocalDateTime.parse(timeStr).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli() > balanceTime 
-                                    } catch (_: Exception) { false }
-                                }
-                                val totalNewSpent = newBills.sumOf { (it.consumeBillDTO.consumeMoney.toDoubleOrNull() ?: 0.0) }
-                                val initialBalance = PrefsHelper.manualBalance.toDoubleOrNull() ?: 0.0
-                                val displayBalance = if (PrefsHelper.manualBalance.isEmpty()) 0.0 else initialBalance - totalNewSpent
-                                
+                                // 余额在 LazyColumn 外已算好并缓存
                                 Text("余额 ¥%.2f".format(displayBalance), color = AppColors.TextSecondary, fontSize = 14.sp)
                             }
                         }
@@ -243,18 +262,18 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
                             }
                         }
 
-                        items(filteredDevices) { device ->
+                        items(filteredDevices, key = { it.mac }) { device ->
                             DeviceCard(device) { viewModel.fetchDeviceInfo(device.mac) }
                         }
 
-                        item { Spacer(Modifier.height(24.dp)) }
+                        item { Spacer(Modifier.height(110.dp)) }
                     }
 
                     PullRefreshIndicator(
                         refreshing = pullRefreshing,
                         state = pullState,
                         modifier = Modifier.align(Alignment.TopCenter),
-                        backgroundColor = AppColors.Card,
+                        backgroundColor = AppColors.SolidSurface, // 不透明，避免半透明叠加导致内外不一致
                         contentColor = AppColors.Accent
                     )
                 }
@@ -337,10 +356,16 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
 private fun ActiveOrderCard(order: com.hualala.linyu.model.ActiveOrder, viewModel: MainViewModel, phone: String) {
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = AppColors.ActiveBg),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+        border = BorderStroke(0.8.dp, AppColors.Border), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(48.dp).clip(RoundedCornerShape(14.dp))
-                .background(if (order.deviceEmoji == "🪥") Color(0xFFFFCC80) else AppColors.Accent),
+                .background(
+                    when (order.deviceEmoji) {
+                        "🪥" -> Color(0xFFFFCC80)
+                        "❄️", "♨️", "🚰" -> Color(0xFF10B981)
+                        else -> AppColors.Accent
+                    }
+                ),
                 contentAlignment = Alignment.Center) { Text(order.deviceEmoji, fontSize = 22.sp) }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
@@ -370,10 +395,17 @@ private fun ActiveOrderCard(order: com.hualala.linyu.model.ActiveOrder, viewMode
 private fun LastDeviceCard(viewModel: MainViewModel, phone: String) {
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = AppColors.Card),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+        border = BorderStroke(0.8.dp, AppColors.Border), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(48.dp).clip(RoundedCornerShape(14.dp))
-                .background(if (viewModel.lastDeviceEmoji == "🪥") Color(0xFFFFCC80) else AppColors.Accent),
+                .background(
+                    when (viewModel.lastDeviceEmoji) {
+                        "🪥" -> Color(0xFFFFCC80)
+                        "❄️", "♨️", "🚰" -> Color(0xFF10B981)
+                        // 固定色，与「附近设备」卡片保持一致；不跟随背景主题色变化
+                        else -> Color(0xFF2563EB)
+                    }
+                ),
                 contentAlignment = Alignment.Center) { Text(viewModel.lastDeviceEmoji, fontSize = 22.sp) }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
@@ -397,12 +429,28 @@ private fun DeviceCard(device: NearbyDevice, onClick: () -> Unit) {
         else -> AppColors.Danger
     }
 
+    // 按下反馈：轻微缩小 + 水波纹
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.97f else 1f,
+        animationSpec = spring(stiffness = 700f),
+        label = "DeviceCardPress"
+    )
+
     Card(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .scale(pressScale)
+            .clip(RoundedCornerShape(22.dp)) // 让点击涟漪也贴合卡片圆角
+            .clickable(
+                interactionSource = interactionSource,
+                indication = rememberRipple(color = AppColors.Accent.copy(alpha = 0.25f)),
+                onClick = onClick
+            ),
         shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = AppColors.Card),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        border = BorderStroke(0.8.dp, AppColors.Border), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(device.typeColor),

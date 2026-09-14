@@ -1,6 +1,7 @@
 package com.hualala.linyu.api
 
 import com.hualala.linyu.BuildConfig
+import com.hualala.linyu.utils.AppLogger
 import com.hualala.linyu.utils.PrefsHelper
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -70,19 +71,37 @@ object NetworkModule {
         }
     }
 
+    /** 应用内日志拦截器：始终生效，把每个请求/响应写入 AppLogger（自动脱敏），供 App 内查看 */
+    private val appLogInterceptor = Interceptor { chain ->
+        val req = chain.request()
+        val start = System.currentTimeMillis()
+        val reqBody = runCatching {
+            val buffer = okio.Buffer()
+            req.body?.writeTo(buffer)
+            buffer.readUtf8()
+        }.getOrDefault("")
+        try {
+            val resp = chain.proceed(req)
+            val took = System.currentTimeMillis() - start
+            val respBody = runCatching { resp.peekBody(4096).string() }.getOrDefault("")
+            AppLogger.i(
+                "HTTP ${resp.code} ${req.method} ${req.url.encodedPath} (${took}ms)" +
+                    (if (reqBody.isNotEmpty()) "\n  req: ${reqBody.take(300)}" else "") +
+                    (if (respBody.isNotEmpty()) "\n  resp: ${respBody.take(400)}" else "")
+            )
+            resp
+        } catch (e: Exception) {
+            AppLogger.e("HTTP FAIL ${req.method} ${req.url.encodedPath}", e)
+            throw e
+        }
+    }
+
     private val okHttpClient = OkHttpClient.Builder()
         .addInterceptor(authInterceptor)
+        .addInterceptor(appLogInterceptor)
         .apply {
-            if (com.hualala.linyu.BuildConfig.DEBUG) {
-            addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BODY })
-            addInterceptor(Interceptor { chain ->
-                val req = chain.request()
-                android.util.Log.i("LinYu", "→ ${req.method} ${req.url}")
-                val resp = chain.proceed(req)
-                val body = resp.peekBody(Long.MAX_VALUE).string()
-                android.util.Log.i("LinYu", "← ${resp.code} ${req.url} body=${body.take(500)}")
-                resp
-            })
+            if (BuildConfig.DEBUG) {
+                addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BODY })
             }
         }
         .build()

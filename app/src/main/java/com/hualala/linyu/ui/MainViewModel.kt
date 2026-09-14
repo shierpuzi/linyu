@@ -374,12 +374,13 @@ class MainViewModel : ViewModel() {
                     }
                 }
 
-                // 每 30 秒检查一次设备是否已被外部关闭（兜底）
-                if (tick % 30 == 0) {
+                // 每 15 秒检查一次订单状态：
+                // 设备被外部关闭或超时自动关停时，及时退出使用界面（原来 30 秒太慢）
+                if (tick % 15 == 0) {
                     try {
                         val q = NetworkModule.apiService.queryUsingSafe(snCode = snCode, auth = NetworkModule.authFields())
-                        if (q.success && q.data?.orderNo == null && q.errorCode != 307) {
-                            // 设备已被外部关闭 → 弹确认框
+                        // 不要求 success：只要不是「使用中」(307) 且没有订单号，即认为订单已结束
+                        if (q.errorCode != 307 && q.data?.orderNo == null) {
                             onAutoClose(snCode)
                             return@launch
                         }
@@ -431,6 +432,23 @@ class MainViewModel : ViewModel() {
         showAutoCloseDialog = false
         val snCode = showerSnCode ?: ""
         finishShower(snCode, null)
+    }
+
+    /**
+     * 最小化使用界面：退出界面但**不结束用水**。
+     * 订单保留在 activeOrders，计时器（startedAt）继续累计，可随时通过"恢复"回到界面。
+     */
+    fun minimizeShower() {
+        if (!isShowering) return
+        timerJob?.cancel()
+        orderPollJob?.cancel()
+        isShowering = false
+        isStopping = false
+        showerSnCode = null
+        currentOrderNo = null
+        // 注意：保留 activeOrders 与 PrefsHelper.getStartedAt(snCode)，用水与计时都继续
+        try { mqttManager?.disconnect() } catch (_: Exception) {}
+        toastMessage = "已返回主页，设备仍在运行"
     }
 
     // ════════════════════════════════════════════
@@ -531,7 +549,8 @@ class MainViewModel : ViewModel() {
         val fmt = java.text.SimpleDateFormat("yyyy-MM", java.util.Locale.getDefault())
         val month = fmt.format(java.util.Calendar.getInstance().time)
 
-        for (attempt in 0 until 10) {
+        // 最多 6 次 × 1.2 秒 ≈ 7 秒（原 20 秒太慢，用户感知为"迟迟不弹"）
+        for (attempt in 0 until 6) {
             try {
                 val resp = NetworkModule.apiService.getBillListSafe(month = month)
                 val bills = resp.data ?: return null
@@ -560,7 +579,7 @@ class MainViewModel : ViewModel() {
                     if (m != null && m > 0) return m
                 }
             } catch (_: Exception) {}
-            if (attempt < 9) delay(2000)
+            if (attempt < 5) delay(1200)
         }
         return 0.0
     }
@@ -639,12 +658,21 @@ class MainViewModel : ViewModel() {
         return n.trim()
     }
 
+    // 归一化后的寝室关键词缓存，避免每次过滤都重复做字符串替换
+    private var cachedRoomKey: String? = null
+    private var cachedNormKey: String = ""
+
     /** 判断设备名是否匹配绑定的寝室（忽略大小写、空格、连字符） */
     fun matchesBoundRoom(deviceName: String): Boolean {
         val key = PrefsHelper.boundRoom.trim()
         if (key.isEmpty()) return true
-        val norm = { s: String -> s.lowercase().replace(" ", "").replace("-", "") }
-        return norm(deviceName).contains(norm(key))
+        if (cachedRoomKey != key) {
+            cachedRoomKey = key
+            cachedNormKey = key.lowercase().replace(" ", "").replace("-", "")
+        }
+        if (cachedNormKey.isEmpty()) return true
+        val n = deviceName.lowercase().replace(" ", "").replace("-", "")
+        return n.contains(cachedNormKey)
     }
 
     // ── 挤号 ──

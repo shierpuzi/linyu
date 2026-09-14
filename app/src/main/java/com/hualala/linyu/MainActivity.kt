@@ -3,6 +3,13 @@ package com.hualala.linyu
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
@@ -11,11 +18,16 @@ import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hualala.linyu.api.NetworkModule
+import com.hualala.linyu.ui.AppBackgroundLayer
+import com.hualala.linyu.ui.FloatingPillNavBar
 import com.hualala.linyu.ui.LinYuToast
 import com.hualala.linyu.ui.LoginScreen
 import com.hualala.linyu.ui.MainScreen
@@ -23,15 +35,25 @@ import com.hualala.linyu.ui.MainViewModel
 import com.hualala.linyu.ui.UserScreen
 import com.hualala.linyu.ui.WalletScreen
 import com.hualala.linyu.ui.theme.AppColors
+import com.hualala.linyu.ui.theme.CircularRevealThemeHost
 import com.hualala.linyu.ui.theme.LinYuTheme
 import com.hualala.linyu.ui.theme.LocalThemeMode
 import com.hualala.linyu.ui.theme.ThemeMode
+import com.hualala.linyu.utils.AppLogger
+import com.hualala.linyu.utils.BackgroundManager
+import com.hualala.linyu.utils.BackgroundState
 import com.hualala.linyu.utils.PrefsHelper
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 启用 edge-to-edge：让内容延伸到状态栏/导航栏下方，
+        // 这样自定义背景才能铺满到状态栏（各页面用 statusBarsPadding 自保内容位置）
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
         PrefsHelper.init(this)
+        AppLogger.init(this)
+        AppLogger.installCrashHandler(this)
+        BackgroundState.refresh() // 恢复自定义背景配置（与深浅模式无关）
 
         val initialThemeMode = try {
             ThemeMode.valueOf(PrefsHelper.themeMode)
@@ -51,20 +73,26 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
-            CompositionLocalProvider(LocalThemeMode provides themeModeState) {
-            LinYuTheme {
-                // 在 LinYuTheme 内部观察主题变化，实时更新状态栏
-                val currentThemeMode by themeModeState
-                SideEffect {
-                    updateStatusBarColor(currentThemeMode)
-                }
+            // 状态声明在动画容器之外：切换动画会切换容器内的渲染分支，
+            // 状态若声明在容器内会被重建（表现为切主题后跳回首页）
+            var isLoggedIn by rememberSaveable { mutableStateOf(hasToken) }
+            var userPhone by rememberSaveable { mutableStateOf(PrefsHelper.telephone) }
+            var currentTab by rememberSaveable { mutableStateOf(0) }
+            var showKickedDialog by remember { mutableStateOf(false) }
+            var showLogoutConfirm by remember { mutableStateOf(false) }
+            val mainViewModel: MainViewModel = viewModel()
 
-                var isLoggedIn by rememberSaveable { mutableStateOf(hasToken) }
-                var userPhone by rememberSaveable { mutableStateOf(PrefsHelper.telephone) }
-                var currentTab by rememberSaveable { mutableStateOf(0) }
-                var showKickedDialog by remember { mutableStateOf(false) }
-                var showLogoutConfirm by remember { mutableStateOf(false) }
-                val mainViewModel: MainViewModel = viewModel()
+            CircularRevealThemeHost(
+                themeModeState = themeModeState,
+                onThemeChanged = { mode ->
+                    // 动画结束：持久化主题
+                    PrefsHelper.themeMode = mode.name
+                },
+                onThemePreview = { mode ->
+                    // 内容切换点同步状态栏，避免"慢半拍"
+                    updateStatusBarColor(mode)
+                }
+            ) {
 
                 LaunchedEffect(mainViewModel.kickedOut, isLoggedIn) {
                     if (mainViewModel.kickedOut && !showKickedDialog && isLoggedIn) {
@@ -72,40 +100,58 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // 自定义背景开关变化时刷新状态栏（启用→透明，关闭→恢复纯色）
+                val bgHomeEnabled = BackgroundState.config(BackgroundManager.SCOPE_HOME).enabled
+                LaunchedEffect(bgHomeEnabled) {
+                    updateStatusBarColor(themeModeState.value)
+                }
+
                 Box(modifier = Modifier.fillMaxSize()) {
+                    // 全局自定义背景（最底层）：洗澡中取「使用页」配置，否则取「主页」配置
+                    val bgScope = if (mainViewModel.isShowering) BackgroundManager.SCOPE_SHOWER
+                                  else BackgroundManager.SCOPE_HOME
+                    AppBackgroundLayer(bgScope)
+
                     if (!isLoggedIn) {
                         LoginScreen(onLoginSuccess = { phone ->
                             userPhone = phone; isLoggedIn = true; currentTab = 0
                         })
                     } else {
-                        Scaffold(
-                            bottomBar = {
-                                if (!mainViewModel.isShowering) {
-                                    NavigationBar(containerColor = AppColors.Card) {
-                                        val nc = NavigationBarItemDefaults.colors(
-                                            selectedIconColor = AppColors.Accent,
-                                            selectedTextColor = AppColors.Accent,
-                                            indicatorColor = AppColors.Accent.copy(alpha = 0.1f))
-                                        NavigationBarItem(
-                                            icon = { Icon(Icons.Default.Home, "主页") }, label = { Text("主页") },
-                                            selected = currentTab == 0, onClick = { currentTab = 0 }, colors = nc)
-                                        NavigationBarItem(
-                                            icon = { Icon(Icons.Default.ShoppingCart, "钱包") }, label = { Text("钱包") },
-                                            selected = currentTab == 1, onClick = { currentTab = 1 }, colors = nc)
-                                        NavigationBarItem(
-                                            icon = { Icon(Icons.Default.Person, "我的") }, label = { Text("我的") },
-                                            selected = currentTab == 2, onClick = { currentTab = 2 }, colors = nc)
-                                    }
-                                }
-                            }
-                        ) { padding ->
-                            Box(modifier = Modifier.padding(padding)) {
-                                when (currentTab) {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            // 三大主页面弹性视差左右滑移（对齐 MudLife 的交互）
+                            AnimatedContent(
+                                targetState = currentTab,
+                                transitionSpec = {
+                                    val forward = targetState > initialState
+                                    val springSpec = spring<IntOffset>(dampingRatio = 0.78f, stiffness = 420f)
+                                    val fadeSpec = spring<Float>(stiffness = 420f)
+                                    (slideInHorizontally(
+                                        animationSpec = springSpec,
+                                        initialOffsetX = { fullWidth -> if (forward) fullWidth else -fullWidth }
+                                    ) + fadeIn(animationSpec = fadeSpec))
+                                        .togetherWith(
+                                            slideOutHorizontally(
+                                                animationSpec = springSpec,
+                                                targetOffsetX = { fullWidth -> if (forward) -fullWidth else fullWidth }
+                                            ) + fadeOut(animationSpec = fadeSpec)
+                                        )
+                                },
+                                label = "PageSpringTransition"
+                            ) { tab ->
+                                when (tab) {
                                     0 -> MainScreen(phone = userPhone, viewModel = mainViewModel)
                                     1 -> WalletScreen(viewModel = mainViewModel)
                                     2 -> UserScreen(phone = userPhone, viewModel = mainViewModel,
                                         onLogout = { showLogoutConfirm = true })
                                 }
+                            }
+                            // 悬浮胶囊导航栏
+                            if (!mainViewModel.isShowering) {
+                                FloatingPillNavBar(
+                                    currentTab = currentTab,
+                                    onTabSelected = { currentTab = it },
+                                    modifier = Modifier.align(Alignment.BottomCenter)
+                                )
                             }
                         }
                     }
@@ -152,17 +198,18 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-            }
         }
     }
 
     private fun updateStatusBarColor(themeMode: ThemeMode) {
         val isDarkMode = themeMode == ThemeMode.DARK
 
-        window.statusBarColor = if (isDarkMode) {
-            android.graphics.Color.parseColor("#0D1117")
-        } else {
-            android.graphics.Color.parseColor("#F6F8FA")
+        // 启用自定义背景时状态栏透明，让背景图延伸到状态栏；
+        // 否则与页面 Background 一致（Light #F1F5F9 / Dark #0E131D）
+        window.statusBarColor = when {
+            BackgroundState.config(BackgroundManager.SCOPE_HOME).enabled -> android.graphics.Color.TRANSPARENT
+            isDarkMode -> android.graphics.Color.parseColor("#0E131D")
+            else -> android.graphics.Color.parseColor("#F1F5F9")
         }
 
         androidx.core.view.WindowInsetsControllerCompat(window, window.decorView).apply {
