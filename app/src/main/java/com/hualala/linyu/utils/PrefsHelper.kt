@@ -57,6 +57,7 @@ object PrefsHelper {
                 .remove("projectId").remove("telephone").remove("userName")
                 .remove("lastDeviceName").remove("lastDeviceMac").remove("lastDeviceSnCode")
                 .remove("lastDeviceEmoji").remove("boundRoom").remove("activeOrders")
+                .remove("lastConsumeMoney").remove("lastConsumeTime")
             // startedAt_/autoDiscon_ 的 key 是「前缀 + snCode」，不是固定名，
             // 原来写成 remove("startedAt_") 是删不掉的——换个账号登录后，
             // 上一任的计时器还在，界面会显示莫名其妙的已用时长。这里按前缀扫掉。
@@ -116,6 +117,23 @@ object PrefsHelper {
 
     var manualBalance: String get() = prefs.getString("manualBalance", "") ?: ""; set(v) = prefs.edit().putString("manualBalance", v).apply()
     var manualBalanceTime: Long get() = prefs.getLong("manualBalanceTime", 0L); set(v) = prefs.edit().putLong("manualBalanceTime", v).apply()
+
+    // ── 上次消费 ──
+    // 持久化下来给桌面小组件显示用：小组件不能为了一个数字去轮询账单接口，
+    // 所以由 App（结算成功、或拉到账单列表时）写入，小组件只读。
+
+    /** 上次消费金额，0 表示还没有记录 */
+    var lastConsumeMoney: Float get() = prefs.getFloat("lastConsumeMoney", 0f); set(v) = prefs.edit().putFloat("lastConsumeMoney", v).apply()
+
+    /** 上次消费时间戳（毫秒），0 表示还没有记录 */
+    var lastConsumeTime: Long get() = prefs.getLong("lastConsumeTime", 0L); set(v) = prefs.edit().putLong("lastConsumeTime", v).apply()
+
+    /** 记一笔消费。金额为 0 时不动已有记录，避免「本次无消费」把历史值抹掉 */
+    fun recordConsume(amount: Double, atMs: Long = System.currentTimeMillis()) {
+        if (amount <= 0) return
+        lastConsumeMoney = amount.toFloat()
+        lastConsumeTime = atMs
+    }
 
     // ── Per-device timer ──
     fun getStartedAt(snCode: String): Long = prefs.getLong("startedAt_$snCode", 0L)

@@ -89,7 +89,10 @@ open class LinYuWidgetProvider : AppWidgetProvider() {
                 AppLogger.e("Widget action failed: $action", e)
             } finally {
                 WidgetBridge.clearBusy(id)
-                WidgetBridge.renderId(context, id)
+                // 必须刷新桌面上的**所有**小组件，不能只刷被点的那个：
+                // 2x2 和 2x4 可能同时摆在桌面上，它们读的是同一份 Prefs，
+                // 只刷一个的话另一个会一直停在旧状态（点了 2x2 开阀，2x4 还显示「空闲」）。
+                WidgetBridge.renderAll(context)
                 pending.finish()
             }
         }
@@ -177,7 +180,9 @@ object LinYuWidget {
     /** App 内状态变化时调用，把桌面上的小组件全部刷新一遍 */
     fun refreshAll(context: Context) {
         WidgetBridge.ensureInit(context)
-        // App 刚把状态对齐过，桌面上残留的"状态未知"不再成立
+        // App 刚把状态对齐过，桌面上残留的"状态未知"不再成立。
+        // 注意小组件自己操作完走的 [WidgetBridge.renderAll] 不带这一步——
+        // 那时其他 widget 的"状态未知"仍然成立，不该被顺手清掉。
         WidgetBridge.clearAllUnknown()
         WidgetBridge.forEachWidget(context) { id, size ->
             WidgetBridge.render(context, id, size)
@@ -263,13 +268,17 @@ internal object WidgetBridge {
         AppWidgetManager.getInstance(context).updateAppWidget(id, views)
     }
 
-    /** 按 id 反查它属于哪个尺寸并重绘 */
+    /** 重绘桌面上所有「淋浴」小组件（2x2 与 2x4 一起） */
+    fun renderAll(context: Context) {
+        forEachWidget(context) { id, size -> render(context, id, size) }
+    }
+
+    /** 只重绘指定 id 的那个；没匹配到说明已被用户删除，顺手清掉它的过渡态 */
     fun renderId(context: Context, id: Int) {
         var matched = false
         forEachWidget(context) { wid, size ->
             if (wid == id) { render(context, id, size); matched = true }
         }
-        // 没匹配到说明小组件已被用户删除，什么都不用做
         if (!matched) clearBusy(id)
     }
 }

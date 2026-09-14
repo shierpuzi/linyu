@@ -101,16 +101,18 @@ object WidgetRenderer {
                 views.setTextViewText(R.id.widget_emoji, "🔒")
                 // 未登录时不给按钮事件：点击会冒泡到整张卡片的「打开 App」，正好引导用户去登录
                 bindButton(views, stopStyle = false, label = "开", onClick = null)
-                bindSubLabel(views, size, "点此登录")
-                bindMirrorToStatus(views, size, "未登录")
+                views.setTextViewText(R.id.widget_lastconsume, "点此登录")
+                bindTimer(views, "—")
+                bindStatus(views, size, "未登录")
             }
 
             WidgetState.NoDevice -> {
                 views.setTextViewText(R.id.widget_device, "还没有用过设备")
                 views.setTextViewText(R.id.widget_emoji, "🚿")
                 bindButton(views, stopStyle = false, label = "开", onClick = null)
-                bindSubLabel(views, size, "点此打开淋浴")
-                bindMirrorToStatus(views, size, "未绑定")
+                views.setTextViewText(R.id.widget_lastconsume, "点此打开淋浴")
+                bindTimer(views, "—")
+                bindStatus(views, size, "未绑定")
             }
 
             is WidgetState.Idle -> {
@@ -120,8 +122,9 @@ object WidgetRenderer {
                     views, stopStyle = false, label = "开",
                     onClick = actionIntent(context, appWidgetId, disabled, LinYuWidgetProvider.ACTION_START)
                 )
-                bindSubLabel(views, size, disabled?.text ?: "上次使用的设备")
-                bindMirrorToStatus(views, size, disabled?.text ?: "空闲")
+                bindLastConsume(views)
+                bindTimer(views, disabled?.text ?: "00:00")
+                bindStatus(views, size, disabled?.text ?: "空闲")
             }
 
             is WidgetState.Running -> {
@@ -131,12 +134,14 @@ object WidgetRenderer {
                     views, stopStyle = true, label = "关",
                     onClick = actionIntent(context, appWidgetId, disabled, LinYuWidgetProvider.ACTION_STOP)
                 )
-                bindSubLabel(views, size, disabled?.text ?: "上次使用的设备")
-                bindMirrorToStatus(
-                    views, size,
-                    if (disabled != null) disabled.text else null,
+                bindLastConsume(views)
+                // 使用中 → 走秒；操作进行中 / 状态未知 → 显示提示文字
+                bindTimer(
+                    views,
+                    text = disabled?.text,
                     chronometerBase = chronometerBase(state.startedAtMs)
                 )
+                bindStatus(views, size, "使用中")
             }
         }
         return views
@@ -166,8 +171,11 @@ object WidgetRenderer {
     // ── 各控件的写入 ──
 
     /**
-     * 圆形按钮：布局里放了「开」「关」两个 TextView，靠 visibility 切换。
+     * 圆形按钮：布局里放了「开」「关」两张圆形 drawable，靠 visibility 切换。
      * 这样就不需要反射改背景（见类注释）。
+     *
+     * 文字标签是叠在圆上的独立 TextView，所以点击事件要**同时**挂在圆和标签上——
+     * 只挂圆的话点在字上会被标签接住，反而没反应。
      */
     private fun bindButton(
         views: RemoteViews,
@@ -180,35 +188,45 @@ object WidgetRenderer {
 
         views.setViewVisibility(hiddenId, View.GONE)
         views.setViewVisibility(visibleId, View.VISIBLE)
-        views.setTextViewText(visibleId, label)
+        views.setTextViewText(R.id.widget_action_label, label)
         // 显式写 null 清掉上一次残留的点击：RemoteViews 复用同一个 View 对象，
         // 不写的话"正在开启…"这种禁用态还会带着上一轮的点击动作
         views.setOnClickPendingIntent(visibleId, onClick)
-    }
-
-    /** 2x2 的第二行说明文字；2x4 没有这个控件，跳过 */
-    private fun bindSubLabel(views: RemoteViews, size: WidgetSize, text: String) {
-        if (size != WidgetSize.SMALL) return
-        views.setTextViewText(R.id.widget_sublabel, text)
+        views.setOnClickPendingIntent(R.id.widget_action_label, onClick)
     }
 
     /**
-     * 2x4 右上角的状态位。
-     * [text] 不为空时写死文本（空闲 / 进行中提示）；为 null 时改成走秒的计时器。
+     * 「上次消费」那一行。
+     * 没有记录时显示占位符而不是 ¥0.00——0 会被误读成「上次洗澡没花钱」。
+     */
+    private fun bindLastConsume(views: RemoteViews) {
+        val money = PrefsHelper.lastConsumeMoney
+        views.setTextViewText(
+            R.id.widget_lastconsume,
+            if (money > 0f) "上次消费 ¥%.2f".format(money) else "上次消费 —"
+        )
+    }
+
+    /**
+     * 2x4 右上角的状态位；2x2 没有这个控件，跳过。
+     * 计时已经独立成按钮上方的 widget_timer，这里只写「空闲 / 使用中」这类文字。
+     */
+    private fun bindStatus(views: RemoteViews, size: WidgetSize, text: String) {
+        if (size != WidgetSize.WIDE) return
+        views.setTextViewText(R.id.widget_status, text)
+    }
+
+    /**
+     * 按钮上方的计时器。
+     * [text] 不为空时写死文本（空闲 / 进行中提示）；为 null 时改成走秒。
      * 必须先 setChronometer 再 setTextViewText，否则会被它自己的 updateText 覆盖。
      */
-    private fun bindMirrorToStatus(
-        views: RemoteViews,
-        size: WidgetSize,
-        text: String?,
-        chronometerBase: Long = 0L
-    ) {
-        if (size != WidgetSize.WIDE) return
+    private fun bindTimer(views: RemoteViews, text: String?, chronometerBase: Long = 0L) {
         if (text != null) {
-            views.setChronometer(R.id.widget_status, 0L, null, false)
-            views.setTextViewText(R.id.widget_status, text)
+            views.setChronometer(R.id.widget_timer, 0L, null, false)
+            views.setTextViewText(R.id.widget_timer, text)
         } else {
-            views.setChronometer(R.id.widget_status, chronometerBase, null, true)
+            views.setChronometer(R.id.widget_timer, chronometerBase, null, true)
         }
     }
 

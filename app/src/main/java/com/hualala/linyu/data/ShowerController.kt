@@ -301,7 +301,10 @@ object ShowerController {
                     val matched = bills.firstOrNull { it.consumeBillDTO.orderId == orderNo }
                     if (matched != null) {
                         val m = matched.consumeBillDTO.consumeMoney.toDoubleOrNull()
-                        if (m != null && m > 0) return m
+                        if (m != null && m > 0) {
+                            PrefsHelper.recordConsume(m)   // 供桌面小组件显示「上次消费」
+                            return m
+                        }
                         // 金额仍为 0 → 可能结算中，继续轮询
                     }
                 }
@@ -317,7 +320,10 @@ object ShowerController {
                 if (recent.isNotEmpty()) {
                     val latest = recent.maxByOrNull { it.consumeBillDTO.consumeDate }
                     val m = latest?.consumeBillDTO?.consumeMoney?.toDoubleOrNull()
-                    if (m != null && m > 0) return m
+                    if (m != null && m > 0) {
+                        PrefsHelper.recordConsume(m)   // 供桌面小组件显示「上次消费」
+                        return m
+                    }
                 }
             } catch (_: Exception) {
                 // 网络抖动，继续重试

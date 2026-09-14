@@ -515,6 +515,8 @@ class MainViewModel : ViewModel() {
                         amount > 0 -> "已停止，本次消费 ¥%.2f".format(amount)
                         else -> "热水器已关闭，本次无消费"
                     }
+                    // 结算拿到了新的「上次消费」，让桌面小组件跟上
+                    refreshWidgets()
                 }
             } catch (e: Exception) {
                 checkKickEx(e)
@@ -796,6 +798,11 @@ class MainViewModel : ViewModel() {
                     cal.add(java.util.Calendar.MONTH, -1)
                 }
                 billList = all.take(20)
+                // 顺手把最近一笔消费记下来，桌面小组件要显示它。
+                // 账单按月份倒序拉取，所以第一条就是最新的
+                all.firstOrNull()?.consumeBillDTO?.consumeMoney?.toDoubleOrNull()
+                    ?.let { PrefsHelper.recordConsume(it) }
+                refreshWidgets()
             } catch (e: Exception) { 
                 checkKickEx(e)
                 val msg = e.message ?: ""
