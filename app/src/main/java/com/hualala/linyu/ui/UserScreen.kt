@@ -629,14 +629,23 @@ private fun extractReleaseHighlights(body: String): String {
                       title.contains("修复") || title.contains("BUG", ignoreCase = true)
             if (keeping) {
                 if (out.isNotEmpty()) out.append('\n')
-                out.append(title).append('\n')
+                out.append(stripMarkdown(title)).append('\n')
             }
         } else if (keeping) {
-            out.append(line).append('\n')
+            out.append(stripMarkdown(line)).append('\n')
         }
     }
     return out.toString().trim()
 }
+
+/**
+ * 去掉 Markdown 强调标记。
+ *
+ * 发行版说明是按 Markdown 写的，但 App 里用的是普通 Text 渲染（没有 Markdown 解析），
+ * 不处理的话 `**加粗**` 会把星号原样显示出来，`反引号` 同理。
+ */
+private fun stripMarkdown(s: String): String =
+    s.replace("**", "").replace("__", "").replace("`", "")
 
 /** 去掉标题里的 `#`、表情符号和多余空白，只保留中日韩文字与 ASCII */
 private fun plainHeading(line: String): String =
@@ -710,18 +719,30 @@ private fun AboutCard() {
         Column(Modifier.padding(20.dp)) {
             Text("关于项目", fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                 color = AppColors.TextPrimary)
+            Spacer(Modifier.height(10.dp))
+
+            Text("一款趣智校园第三方客户端", color = AppColors.TextSecondary, fontSize = 13.sp)
+
             Spacer(Modifier.height(6.dp))
-            Text("趣智校园第三方客户端 · v" + BuildConfig.VERSION_NAME,
-                color = AppColors.TextSecondary, fontSize = 12.sp)
-            Spacer(Modifier.height(4.dp))
-            // 制作者信息来自 GitHub（失败时回退为默认值）
-            val maker = repo?.ownerLogin?.takeIf { it.isNotBlank() } ?: "yehu-imei"
+            // Star 数来自 GitHub API，拉取失败时省略（不显示假数据）
             val stars = repo?.stars
             Text(
-                "制作者：$maker" + (stars?.let { " · ⭐ $it" } ?: ""),
-                color = AppColors.TextSecondary, fontSize = 12.sp
+                "项目名：淋浴（Hualala）" + (stars?.let { " · ⭐ $it" } ?: ""),
+                color = AppColors.TextSecondary, fontSize = 13.sp
             )
-            Spacer(Modifier.height(12.dp))
+
+            Spacer(Modifier.height(6.dp))
+            Text("制作者：${repo?.ownerLogin?.takeIf { it.isNotBlank() } ?: "yehu-imei"}",
+                color = AppColors.TextSecondary, fontSize = 13.sp)
+
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("联系方式：", color = AppColors.TextSecondary, fontSize = 13.sp)
+                Text(CONTACT_EMAIL, color = AppColors.Accent, fontSize = 13.sp,
+                    modifier = Modifier.clickable { sendEmail(context) })
+            }
+
+            Spacer(Modifier.height(14.dp))
             Button(
                 onClick = { openUrl(context, repo?.htmlUrl ?: GithubApi.REPO_URL) },
                 shape = RoundedCornerShape(12.dp),
@@ -729,6 +750,20 @@ private fun AboutCard() {
                 colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent)
             ) { Text("访问 GitHub 仓库") }
         }
+    }
+}
+
+/** 项目联系方式（点一下会调起邮件应用） */
+private const val CONTACT_EMAIL = "2276391153@qq.com"
+
+/** 点击邮箱调起系统邮件应用 */
+private fun sendEmail(context: android.content.Context) {
+    runCatching {
+        context.startActivity(
+            android.content.Intent(android.content.Intent.ACTION_SENDTO,
+                android.net.Uri.parse("mailto:$CONTACT_EMAIL"))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
     }
 }
 

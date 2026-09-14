@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  2x2 极简小组件（浅色）：设备名 + 状态/计时 + 一个启停按钮。
+
+  按钮为什么放两个 TextView 而不是一个换背景：
+  RemoteViews 换背景只能靠 setInt(id, "setBackgroundResource", ...) 反射调用，
+  而框架对反射方法有 @RemotableViewMethod 白名单限制，赌错会让整个小组件渲染失败。
+  两个按钮切 visibility 用的是 RemoteViews 一等公民 API，零风险。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg_light"
+    android:padding="12dp"
+    android:gravity="center_vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/widget_emoji"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="16sp"
+            android:text="🚿" />
+
+        <TextView
+            android:id="@+id/widget_device"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:textSize="13sp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textColor="#111827"
+            android:text="未绑定设备" />
+    </LinearLayout>
+
+    <Chronometer
+        android:id="@+id/widget_timer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:textSize="22sp"
+        android:textColor="#111827"
+        android:textStyle="bold" />
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <TextView
+            android:id="@+id/widget_action_start"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/widget_btn_start_light"
+            android:gravity="center"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:textSize="13sp"
+            android:textColor="#FFFFFF"
+            android:textStyle="bold"
+            android:text="开始使用" />
+
+        <TextView
+            android:id="@+id/widget_action_stop"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/widget_btn_stop_light"
+            android:gravity="center"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:textSize="13sp"
+            android:textColor="#EF4444"
+            android:textStyle="bold"
+            android:text="停止使用"
+            android:visibility="gone" />
+    </FrameLayout>
+</LinearLayout>

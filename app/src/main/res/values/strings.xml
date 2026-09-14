@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">淋浴</string>
+
+    <!-- 桌面小组件 -->
+    <string name="widget_2x2_description">快捷启停热水（简洁）</string>
+    <string name="widget_2x4_description">快捷启停热水（含计时与预扣金额）</string>
 </resources>

@@ -12,6 +12,9 @@ object PrefsHelper {
     private lateinit var prefs: SharedPreferences
     private val gson = Gson()
 
+    /** 是否已经 init 过。小组件可能在没有 Activity 的新进程里被唤起，需要一个幂等的判断 */
+    val isInitialized: Boolean get() = ::prefs.isInitialized
+
     fun init(context: Context) {
         try {
             val masterKey = MasterKey.Builder(context)
@@ -54,7 +57,12 @@ object PrefsHelper {
                 .remove("projectId").remove("telephone").remove("userName")
                 .remove("lastDeviceName").remove("lastDeviceMac").remove("lastDeviceSnCode")
                 .remove("lastDeviceEmoji").remove("boundRoom").remove("activeOrders")
-                .remove("startedAt_").remove("autoDiscon_")
+            // startedAt_/autoDiscon_ 的 key 是「前缀 + snCode」，不是固定名，
+            // 原来写成 remove("startedAt_") 是删不掉的——换个账号登录后，
+            // 上一任的计时器还在，界面会显示莫名其妙的已用时长。这里按前缀扫掉。
+            prefs.all.keys
+                .filter { it.startsWith("startedAt_") || it.startsWith("autoDiscon_") }
+                .forEach { editor.remove(it) }
             editor.apply()
         } catch (_: Exception) {
             // 兜底：即使加密存储清理异常也不崩溃，登录态由内存态管理

@@ -7,9 +7,9 @@ import androidx.compose.runtime.setValue
 /** 一套背景的配置 */
 data class BgConfig(
     val enabled: Boolean = false,
-    val opacity: Float = 0.70f,
-    val blur: Float = 2f,
-    val brightness: Float = 1.0f,
+    val opacity: Float = BackgroundState.DEFAULT_OPACITY,
+    val blur: Float = BackgroundState.DEFAULT_BLUR,
+    val brightness: Float = BackgroundState.DEFAULT_BRIGHTNESS,
     val themeColor: Int? = null
 )
 
@@ -24,6 +24,11 @@ data class BgConfig(
  * 这里只描述"背景图片及其效果"，不控制 Light / Dark，也不会触发主题切换。
  */
 object BackgroundState {
+    // 新背景图的默认效果参数：不透明、不模糊、原亮度（改图时也会重置回这一组）
+    const val DEFAULT_OPACITY = 1.0f
+    const val DEFAULT_BLUR = 0f
+    const val DEFAULT_BRIGHTNESS = 1.0f
+
     // 用私有 backing state + 只读属性，避免属性 setter 与 setXxx() 方法签名冲突
     private var _home by mutableStateOf(BgConfig())
     private var _shower by mutableStateOf(BgConfig())
@@ -63,9 +68,9 @@ object BackgroundState {
 
     private fun readConfig(scope: String): BgConfig = BgConfig(
         enabled = PrefsHelper.bgGetBool(scope, "enabled", false),
-        opacity = PrefsHelper.bgGetFloat(scope, "opacity", 0.70f),
-        blur = PrefsHelper.bgGetFloat(scope, "blur", 2f),
-        brightness = PrefsHelper.bgGetFloat(scope, "brightness", 1.0f),
+        opacity = PrefsHelper.bgGetFloat(scope, "opacity", DEFAULT_OPACITY),
+        blur = PrefsHelper.bgGetFloat(scope, "blur", DEFAULT_BLUR),
+        brightness = PrefsHelper.bgGetFloat(scope, "brightness", DEFAULT_BRIGHTNESS),
         themeColor = PrefsHelper.bgGetInt(scope, "themeColor", 0).takeIf { it != 0 }
     )
 }

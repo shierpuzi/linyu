@@ -1,6 +1,5 @@
 package com.hualala.linyu.ui
 
-import android.Manifest
 import android.content.Intent
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -50,6 +49,7 @@ import com.hualala.linyu.ui.theme.AppColors
 import com.hualala.linyu.utils.BackgroundManager
 import com.hualala.linyu.utils.BackgroundState
 import com.hualala.linyu.utils.PrefsHelper
+import com.hualala.linyu.utils.ScanPermission
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
@@ -57,9 +57,22 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var visible by remember { mutableStateOf(false) }
+    // 是否已获得扫描权限。做成状态：用户授权后要立刻反映到界面上
+    var hasScanPerm by remember { mutableStateOf(ScanPermission.granted(context)) }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { perms -> if (perms.entries.all { it.value }) viewModel.startScan() }
+    ) { perms ->
+        val ok = perms.entries.all { it.value }
+        hasScanPerm = ok
+        if (ok) viewModel.startScan() else viewModel.toastMessage = ScanPermission.deniedMessage()
+    }
+
+    // 扫描前才要权限：已授权直接扫，没授权才弹系统对话框。
+    // 这样 Android 12+ 的用户全程只会看到「附近的设备」，不会看到定位
+    fun scanWithPermission() {
+        if (ScanPermission.granted(context)) viewModel.startScan()
+        else permissionLauncher.launch(ScanPermission.required)
+    }
 
     // 扫码绑定设备
     val scanLauncher = rememberLauncherForActivityResult(
@@ -79,11 +92,9 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
         viewModel.refreshWallet()
         viewModel.loadBills()
         viewModel.initManagers(context)
-        val perms = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            perms.add(Manifest.permission.BLUETOOTH_SCAN); perms.add(Manifest.permission.BLUETOOTH_CONNECT)
-        }
-        permissionLauncher.launch(perms.toTypedArray())
+        // 已授权就静默开始扫描（老用户无感知）；没授权不再自动弹窗，
+        // 改由界面上的「开启扫描」按钮触发，避免登录完突然被要定位权限
+        if (ScanPermission.granted(context)) viewModel.startScan()
         visible = true
     }
 
@@ -93,6 +104,7 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
         onRefresh = {
             pullRefreshing = true
             viewModel.pullRefresh()
+            scanWithPermission()
             // 1秒后隐藏顶部指示器
             scope.launch {
                 kotlinx.coroutines.delay(1000)
@@ -175,7 +187,7 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
                                     // 刷新按钮
                                     Box(Modifier.size(40.dp).clip(CircleShape).background(AppColors.Card),
                                         contentAlignment = Alignment.Center) {
-                                        IconButton(onClick = { viewModel.pullRefresh() },
+                                        IconButton(onClick = { viewModel.pullRefresh(); scanWithPermission() },
                                             modifier = Modifier.size(40.dp)) {
                                             Icon(Icons.Default.Refresh, null, tint = AppColors.TextPrimary, modifier = Modifier.size(20.dp))
                                         }
@@ -250,7 +262,10 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
                             }
                         }
 
-                        if (filteredDevices.isEmpty() && !viewModel.isScanning) {
+                        if (!hasScanPerm) {
+                            // 未授权时不自动弹系统对话框，改为显式按钮，用户自己决定何时授权
+                            item { ScanPermissionCard { scanWithPermission() } }
+                        } else if (filteredDevices.isEmpty() && !viewModel.isScanning) {
                             item {
                                 Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                                     Text(
@@ -417,6 +432,45 @@ private fun LastDeviceCard(viewModel: MainViewModel, phone: String) {
             Button(onClick = { viewModel.startLastDevice(phone) },
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent)) { Text("开始") }
+        }
+    }
+}
+
+/**
+ * 未授予扫描权限时的引导卡片。
+ * Android 12+ 只会要「附近的设备」；Android 11 及以下系统强制要定位权限，文案里说明清楚。
+ */
+@Composable
+private fun ScanPermissionCard(onGrant: () -> Unit) {
+    val needLocation = Build.VERSION.SDK_INT < Build.VERSION_CODES.S
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = AppColors.Card),
+        border = BorderStroke(0.8.dp, AppColors.Border),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(Modifier.padding(20.dp)) {
+            Text("${if (needLocation) "🔍" else "📶"} 开启扫描，发现附近设备",
+                fontWeight = FontWeight.SemiBold, color = AppColors.TextPrimary)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                if (needLocation)
+                    "Android 11 及以下系统规定：扫描蓝牙设备必须授予定位权限。" +
+                        "授权后仅用于发现附近的热水器。"
+                else
+                    "需要「附近的设备」权限才能扫描附近的热水器。",
+                color = AppColors.TextSecondary, fontSize = 12.sp
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(onClick = onGrant, shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent)) {
+                Text("授予权限并扫描")
+            }
+            Spacer(Modifier.height(6.dp))
+            Text("也可以直接用右上角 📷 扫码绑定设备，无需任何权限",
+                color = AppColors.TextSecondary, fontSize = 11.sp)
         }
     }
 }

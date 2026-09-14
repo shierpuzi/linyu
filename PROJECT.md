@@ -8,7 +8,7 @@
 |---|---|
 | 应用名称 | 淋浴 |
 | 包名 | `com.hualala.linyu` |
-| 版本 | v2.1.0 |
+| 版本 | v2.2.0 |
 | 技术栈 | Kotlin + Jetpack Compose + Material 3 |
 | 最低 Android 版本 | Android 8.0 (API 26) |
 | 目标 Android 版本 | Android 16 (API 36) |
@@ -40,6 +40,8 @@
 | 多设备支持 | 支持同时管理多个活跃设备订单 |
 | 上次使用设备 | 记住上次使用的设备，一键快速开始 |
 | 饮水机支持 | 按 `bigTypeId == 5` 识别直饮水机，绿主题 + ❄️/♨️ 图标 + 名称精简（未实机验证） |
+| 桌面小组件 | 2x2 / 2x4 两种尺寸，桌面直接启停热水；计时由 `Chronometer` 驱动，App 不在也能走秒 |
+| 主动挤号检测 | 25 秒心跳轮询，被挤下线能及时弹提示（跟随 Activity 生命周期，退后台自动停） |
 
 ### 钱包与账单
 
@@ -71,9 +73,11 @@
 | 内置运行日志 | 环形缓冲 + 文件滚动 + 敏感信息脱敏 + 崩溃捕获 + 一键导出 |
 | 扫码手电筒 | 扫码界面提供手电筒，光线不足时补光 |
 | 加密存储 | 登录凭证用 EncryptedSharedPreferences 加密存储 |
+| 自动填充 | 登录输入框标注自动填充身份，手机密码管理器可保存 / 回填账号密码 |
+| 扫描权限按需申请 | 不再登录后自动弹窗；Android 12+ 用 `neverForLocation` 免掉定位权限 |
 | 学校名称编辑 | 用户可手动修改学校名称 |
 | 网络异常提示 | 断网时显示友好提示（自定义 Toast，带应用图标） |
-| 挤号检测 | 在其他设备登录同一账号时弹出强制下线提示 |
+| 挤号检测 | 在其他设备登录同一账号时弹出强制下线提示（25 秒心跳轮询，主动发现） |
 | 屏幕旋转 | 使用 rememberSaveable 保持登录状态和当前页面 |
 | 退出确认 | 洗澡中退出登录时弹出警告提示 |
 
@@ -95,7 +99,8 @@ app/src/main/
 │   │   └── GithubApi.kt                   # GitHub Release / 仓库信息（更新检测）
 │   │
 │   ├── data/                              # 数据层
-│   │   └── AuthRepository.kt              # 登录认证逻辑（密码 / 短信）
+│   │   ├── AuthRepository.kt              # 登录认证逻辑（密码 / 短信）
+│   │   └── ShowerController.kt            # 开阀 / 关阀 / 结算共享层（App 与小组件共用）
 │   │
 │   ├── model/                             # 数据模型
 │   │   ├── LoginModels.kt                 # BaseResponse<T>、LoginData、UserAccount、
@@ -126,6 +131,10 @@ app/src/main/
 │   │       ├── Theme.kt                   # 深浅主题配色方案（液态玻璃卡片）
 │   │       └── CircularRevealTheme.kt     # 圆形揭示主题切换容器
 │   │
+│   ├── widget/                            # 桌面小组件
+│   │   ├── LinYuWidgetProvider.kt         # Provider 基类（2x2 / 2x4 共用）+ 状态推送
+│   │   └── WidgetRenderer.kt              # 状态推断 + RemoteViews 渲染（无反射调用）
+│   │
 │   └── utils/                             # 工具层
 │       ├── PrefsHelper.kt                 # 加密存储（EncryptedSharedPreferences，认证、
 │       │                                  # 设备、余额、主题、寝室绑定、倒计时、背景）
@@ -135,15 +144,22 @@ app/src/main/
 │       ├── SignUtils.kt                   # 短信验证码 secret 计算（按手机号推导）
 │       ├── AppLogger.kt                   # 运行日志（脱敏 / 滚动 / 崩溃捕获）
 │       ├── BackgroundManager.kt           # 背景图存取（主页 / 使用页两套配置）
-│       └── BackgroundState.kt             # 背景配置状态（Compose State）
+│       ├── BackgroundState.kt             # 背景配置状态（Compose State）
+│       └── ScanPermission.kt              # 蓝牙扫描权限（按系统版本分流）
 │
 └── res/
     ├── drawable/
     │   ├── app_logo.png                   # 应用 logo（Toast 图标）
-    │   └── ic_flashlight.xml              # 扫码手电筒图标
+    │   ├── ic_flashlight.xml              # 扫码手电筒图标
+    │   └── widget_*.xml                   # 小组件卡片底 / 按钮底（浅深各一套）
+    ├── layout/
+    │   └── widget_linyu_2x2_*.xml         # 小组件布局（2x2 / 2x4 × 浅 / 深）
+    │   └── widget_linyu_2x4_*.xml
     ├── xml/
     │   ├── network_security_config.xml    # 网络安全配置（仅允许 MQTT 明文）
     │   ├── file_paths.xml                 # 日志导出 FileProvider 路径
+    │   ├── widget_info_2x2.xml            # 小组件配置（2x2）
+    │   ├── widget_info_2x4.xml            # 小组件配置（2x4）
     │   ├── backup_rules.xml               # 备份规则
     │   └── data_extraction_rules.xml      # 数据提取规则
     ├── values/
@@ -197,6 +213,20 @@ app/src/main/
 - 背景配置分 `home` / `shower` 两个 scope 独立存储，`AppBackgroundLayer` 按当前是否洗澡中选取对应 scope 渲染
 - 状态栏透明度跟随背景启用状态自动切换
 
+### 桌面小组件实现要点
+
+- 小组件**不持有状态**，每次渲染都从 `PrefsHelper` 现读现算，因此不需要与 App 做状态同步
+- 计时用 `RemoteViews.setChronometer()`：`Chronometer` 由启动器进程驱动，App 未运行也能实时走秒
+  - 注意 `startedAt` 存的是 `System.currentTimeMillis()`（挂钟），而 `Chronometer` 要的是
+    `SystemClock.elapsedRealtime()`（开机以来）基准，两者原点不同，必须换算后再传入
+- 全程只用 RemoteViews 一等公民 API（`setTextViewText` / `setViewVisibility` / `setChronometer` /
+  `setOnClickPendingIntent`），**不用** `setInt(id, "setXxx", ...)` 反射写法——
+  框架对反射方法有 `@RemotableViewMethod` 白名单，不通过会让整个小组件渲染失败
+- 「开始 / 停止」两种按钮样式做成两个 TextView 切换 visibility，规避上述反射限制
+- 开阀 / 关阀逻辑与 App 共用 `data/ShowerController.kt`；小组件侧只额外限制确认轮询预算（6 秒），
+  超时返回「状态未知」并提供手动刷新，而不是谎报成功或失败
+- 状态推送：App 内进入 / 退出洗澡、自动关停时调用 `LinYuWidget.refreshAll(context)`
+
 ### 关键依赖
 
 | 依赖 | 版本 | 用途 |
@@ -212,6 +242,7 @@ app/src/main/
 | CameraX | 1.4.2 | 相机预览（扫码） |
 | ML Kit Barcode | 17.3.0 | 二维码识别 |
 | AndroidX Core | — | FileProvider（日志导出）、WindowCompat（边到边） |
+| AppWidget / RemoteViews | 平台内置 | 桌面小组件（无额外依赖） |
 
 ### R8 混淆兼容方案
 
@@ -304,8 +335,11 @@ buildTypes {
 | 限制 | 说明 |
 |---|---|
 | 测试范围 | 仅在金华职业技术大学（projectId=905）男生宿舍测试过几次，其他学校未测试 |
-| 挤号检测被动 | 需触发网络请求（刷新/操作）才能发现被挤下线，打开 App 不操作不会主动发现 |
+| 挤号检测有最多 25 秒延迟 | 靠心跳轮询实现（v2.2.0 前是完全发现不了） |
 | 饮水机未实机验证 | 识别与 UI 已实现，但作者所在学校无直饮水机，实际控制流程未验证 |
+| 小组件无实时消费 | 小组件不连 MQTT，使用中只显示预扣金额；停止后也不做账单结算 |
+| Android 11 及以下仍需定位权限 | 系统对蓝牙发现的硬性规定，无法绕过 |
+| 自动填充依赖厂商 ROM | 不同厂商密码管理器行为差异较大，未在多机型验证 |
 | 实时扣费 | MQTT 仅在订单结束时推送消费金额，洗澡中无实时扣费（官方 App 也是如此） |
 | 结算延迟 | 账单生成有延迟，消费金额最长需等待约 20 秒 |
 | 一卡通余额 | 无法获取真实余额（易校园 API 有 HMAC-SHA256 签名保护），仅支持手动估算 |
@@ -315,21 +349,36 @@ buildTypes {
 | 深色模式 | 登录页面和洗澡页面的深色模式适配为硬编码颜色切换，非完全动态 |
 | 多语言 | 仅支持中文 |
 
-### v2.1.0 已修复的历史问题
+### 历史问题的修复记录
 
 | 原问题 | 状态 |
 |---|---|
-| 短信登录 secret 绑定账号 | ✅ secret 由手机号推导（`SignUtils`），任何手机号可用 |
-| 切到「我的」页面卡顿 | ✅ 卡片顺序 / Release / 仓库信息改为进程级缓存 |
-| 设备名残留「表」字 | ✅ 修正正则顺序，`热水表-xxx` 不再被截断 |
-| 使用页退出按钮点击无响应 | ✅ 修正组件层级，按钮不再被上层 Column 拦截 |
-| 使用页「已预扣」卡片不透明色块 | ✅ 补 `Color.Transparent`（Surface 默认不透明） |
-| 主题切换跳回首页 / 闪烁 | ✅ 状态移出过渡容器 + 遮罩先绘一帧 |
-| 版本号硬编码 | ✅ 改读 `BuildConfig.VERSION_NAME` |
+| 短信登录 secret 绑定账号 | ✅ v2.1.0：secret 由手机号推导（`SignUtils`），任何手机号可用 |
+| 被挤号后重登又被弹出、需登两次 | ✅ v2.2.0：旧会话在途请求会清掉新会话凭证，改为会话级作用域整体取消 |
+| Android 12+ 被迫要定位权限 | ✅ v2.2.0：`neverForLocation` + 改由用户主动触发申请 |
+| 退出登录后上一任计时器残留 | ✅ v2.2.0：`clear()` 按前缀删除 `startedAt_` / `autoDiscon_` |
+| 切到「我的」页面卡顿 | ✅ v2.1.0：卡片顺序 / Release / 仓库信息改为进程级缓存 |
+| 设备名残留「表」字 | ✅ v2.1.0：修正正则顺序，`热水表-xxx` 不再被截断 |
+| 使用页退出按钮点击无响应 | ✅ v2.1.0：修正组件层级，按钮不再被上层 Column 拦截 |
+| 使用页「已预扣」卡片不透明色块 | ✅ v2.1.0：补 `Color.Transparent`（Surface 默认不透明） |
+| 主题切换跳回首页 / 闪烁 | ✅ v2.1.0：状态移出过渡容器 + 遮罩先绘一帧 |
+| 版本号硬编码 | ✅ v2.1.0：改读 `BuildConfig.VERSION_NAME` |
 
 ---
 
 ## 版本历史
+
+### v2.2.0 (2026-09-14)
+
+- **桌面小组件**（2x2 / 2x4，桌面直接启停热水，Chronometer 实时计时）
+- **扫描权限按需申请**（Android 12+ 不再需要定位权限）
+- **登录页接入系统自动填充**（保存 / 回填账号密码）
+- **挤号检测改为主动**（25 秒心跳轮询）
+- 抽出 `data/ShowerController.kt` 共享网络层，App 与小组件共用开阀/关阀逻辑
+- 修复：被挤号后重登又被弹出（需登两次）、退出登录后计时器残留、验证码框宽度跳变、
+  更新日志显示 Markdown 星号、换背景图后参数被沿用
+- 背景默认参数调整为 透明度 100% / 模糊 0 / 亮度 100%
+- 关于项目卡片改版（显示 Star 数与联系方式）
 
 ### v2.1.0 (2026-09-14)
 

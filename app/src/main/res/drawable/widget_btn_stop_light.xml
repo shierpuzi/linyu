@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 「停止使用」按钮底（浅色）：描边样式，和「开始」明显区分，降低误触 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#FEF2F2" />
+    <stroke android:width="1dp" android:color="#EF4444" />
+    <corners android:radius="14dp" />
+</shape>

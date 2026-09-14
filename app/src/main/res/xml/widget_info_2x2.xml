@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  2x2：默认 110dp（2 格宽 × 2 格高）。
+  updatePeriodMillis 设 0 —— 系统最小也才 30 分钟，对"启停状态"没意义，
+  刷新完全交给「用户点按」和「App 内状态变化时主动 push」两条路径。
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="110dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="2"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_linyu_2x2_light"
+    android:previewImage="@mipmap/ic_launcher"
+    android:description="@string/widget_2x2_description"
+    android:widgetCategory="home_screen" />

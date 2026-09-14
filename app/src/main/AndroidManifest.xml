@@ -4,12 +4,32 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.BLUETOOTH" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" />
+    <!--
+      neverForLocation：声明本应用不会用蓝牙扫描结果推导物理位置。
+      App 只用扫描结果拿设备 MAC 地址，从不读取、不上报任何位置信息。
+      有了这个声明，Android 12+ 上只需要「附近的设备」权限，完全不碰定位权限。
+    -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!--
+      Android 11 及以下：系统的蓝牙发现（含 BLE）强制要求定位权限，绕不开，
+      所以这里限定只在 API ≤30 上申请，Android 12+ 不再出现在权限列表里。
+    -->
+    <uses-permission
+        android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.ACCESS_COARSE_LOCATION"
+        android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.CAMERA" />
 
     <application
@@ -35,6 +55,37 @@
             android:name=".QrScanActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
+
+        <!-- 桌面小组件：2x2 与 2x4 各注册一个，共用同一个 Provider 基类的逻辑 -->
+        <receiver
+            android:name=".widget.LinYuWidget2x2"
+            android:exported="false"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.hualala.linyu.widget.ACTION_START" />
+                <action android:name="com.hualala.linyu.widget.ACTION_STOP" />
+                <action android:name="com.hualala.linyu.widget.ACTION_REFRESH" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_info_2x2" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.LinYuWidget2x4"
+            android:exported="false"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.hualala.linyu.widget.ACTION_START" />
+                <action android:name="com.hualala.linyu.widget.ACTION_STOP" />
+                <action android:name="com.hualala.linyu.widget.ACTION_REFRESH" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_info_2x4" />
+        </receiver>
 
         <!-- 日志导出用 FileProvider -->
         <provider

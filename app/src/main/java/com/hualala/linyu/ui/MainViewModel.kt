@@ -8,15 +8,15 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hualala.linyu.api.NetworkModule
-import com.hualala.linyu.api.closeOrderSafe
-import com.hualala.linyu.api.closeOrderResultSafe
-import com.hualala.linyu.api.downRateSafe
-import com.hualala.linyu.api.downRateResultSafe
 import com.hualala.linyu.api.getBillListSafe
 import com.hualala.linyu.api.getDeviceInfoSafe
 import com.hualala.linyu.api.getUseCodeSafe
 import com.hualala.linyu.api.getWalletSafe
 import com.hualala.linyu.api.queryUsingSafe
+import com.hualala.linyu.data.CloseOutcome
+import com.hualala.linyu.data.OpenOutcome
+import com.hualala.linyu.data.ShowerController
+import com.hualala.linyu.widget.LinYuWidget
 import com.hualala.linyu.model.ActiveOrder
 import com.hualala.linyu.model.UseCodeData
 import com.hualala.linyu.model.BillItem
@@ -28,8 +28,11 @@ import com.hualala.linyu.utils.BluetoothScanner
 import com.hualala.linyu.utils.MqttManager
 import com.hualala.linyu.utils.PrefsHelper
 import com.google.gson.Gson
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -83,13 +86,32 @@ class MainViewModel : ViewModel() {
     private var mqttManager: MqttManager? = null
     private var timerJob: Job? = null
     private var orderPollJob: Job? = null
+    private var kickWatchJob: Job? = null
+
+    /**
+     * 会话级协程作用域。
+     *
+     * 所有"发请求"的任务都挂在这上面，而不是直接挂 viewModelScope——
+     * 这样被挤号 / 退出登录时可以把它们**整体取消**。
+     *
+     * 为什么必须整体取消：这些请求是拿旧 loginCode 发出去的，
+     * 响应可能在用户已经重新登录之后才回来，里面写着"登录失效"。
+     * 若不掐断，`checkKick` 会拿旧会话的失败去清掉**新会话**的凭证，
+     * 表现就是"被挤下线后重新登录，刚进去又被弹出来"。
+     */
+    private var sessionJob = SupervisorJob(viewModelScope.coroutineContext[Job])
+    private fun sessionScope() = CoroutineScope(viewModelScope.coroutineContext + sessionJob)
 
     // ── 账单 ──
     var billList by mutableStateOf<List<BillItem>>(emptyList())
     var isLoadingBills by mutableStateOf(false)
     var useCodeData by mutableStateOf<UseCodeData?>(null)
 
+    /** 存一份 AppContext 供刷新桌面小组件用（ViewModel 不应该长期持有 Activity） */
+    private var appContext: Context? = null
+
     fun initManagers(context: Context) {
+        appContext = context.applicationContext
         if (scanner == null) scanner = BluetoothScanner(context, { addDevice(it) }, { onScanTimeout() })
         if (mqttManager == null) mqttManager = MqttManager(context, { handleMqttMessage(it) })
 
@@ -107,7 +129,8 @@ class MainViewModel : ViewModel() {
 
     override fun onCleared() {
         super.onCleared()
-        timerJob?.cancel(); orderPollJob?.cancel()
+        stopTimer()
+        sessionJob.cancel()
         mqttManager?.disconnect(); scanner?.stopScan()
     }
 
@@ -117,13 +140,13 @@ class MainViewModel : ViewModel() {
     }
     fun onScanTimeout() {
         val e = System.currentTimeMillis() - scanStartTime
-        if (e < 600) viewModelScope.launch { delay(600 - e); isScanning = false }
+        if (e < 600) sessionScope().launch { delay(600 - e); isScanning = false }
         else isScanning = false
     }
 
     // ── 扫码绑定 ──
     fun scanBind(snCode: String) {
-        viewModelScope.launch {
+        sessionScope().launch {
             try {
                 val resp = NetworkModule.apiService.getDeviceInfoSafe(snCode)
                 if (resp.success && resp.data != null) {
@@ -162,10 +185,10 @@ class MainViewModel : ViewModel() {
         val cached = nearbyDevices.find { it.mac == mac }?.deviceInfo
         if (cached != null) {
             selectedDevice = cached; showDeviceDetail = true
-            viewModelScope.launch { refreshDeviceStatus(cached.snCode) }
+            sessionScope().launch { refreshDeviceStatus(cached.snCode) }
             return
         }
-        viewModelScope.launch {
+        sessionScope().launch {
             try {
                 val resp = NetworkModule.apiService.getDeviceInfoSafe(mac)
                 if (resp.success && resp.data != null) {
@@ -209,7 +232,7 @@ class MainViewModel : ViewModel() {
         // 找对应的活跃订单
         val order = activeOrders.find { it.snCode == sn }
         if (order != null) {
-            viewModelScope.launch {
+            sessionScope().launch {
                 try {
                     val resp = NetworkModule.apiService.getDeviceInfoSafe(order.deviceMac)
                     if (resp.success && resp.data != null) {
@@ -224,7 +247,7 @@ class MainViewModel : ViewModel() {
             return
         }
         val mac = lastDeviceMac.ifEmpty { return }
-        viewModelScope.launch {
+        sessionScope().launch {
             try {
                 val resp = NetworkModule.apiService.getDeviceInfoSafe(mac)
                 if (resp.success && resp.data != null) {
@@ -245,82 +268,82 @@ class MainViewModel : ViewModel() {
         if (snCode.isNullOrBlank()) { showerError = "设备信息不完整"; return }
 
         isStartingShower = true
-        viewModelScope.launch {
+        sessionScope().launch {
             try {
                 showerError = null
                 showerSnCode = snCode
 
-                val existing = NetworkModule.apiService.queryUsingSafe(snCode = snCode, auth = NetworkModule.authFields())
-                if (existing.errorCode == 307 || (existing.success && existing.data?.orderNo != null)) {
-                    val oNo = existing.data?.orderNo ?: ""
-                    if (activeOrders.none { it.snCode == snCode }) {
-                        activeOrders.add(ActiveOrder(snCode, oNo, device.displayName, device.macAddress, device.typeEmoji, device.withholdMoney))
-                        saveOrders()
-                    }
-                    // 恢复订单：从持久化恢复自动关停剩余时间
-                    val remain = PrefsHelper.getAutoDisconRemain(snCode)
-                    enterShowerState(oNo, snCode, device, remain)
-                    return@launch
-                }
-
+                // 「查询是否已有订单 → 开阀 → 轮询确认 → 落盘」这套流程在 ShowerController 里，
+                // 桌面小组件也走同一份逻辑；这里只负责 MQTT、界面状态与结果提示
                 mqttManager?.connect(phone)
-                val resp = NetworkModule.apiService.downRateSafe(snCode = snCode, auth = NetworkModule.authFields())
-                if (!resp.success) {
-                    showerError = resp.displayMessage ?: "开始失败"
-                    checkKick(resp.displayMessage); mqttManager?.disconnect(); return@launch
-                }
+                val outcome = ShowerController.openValve(snCode, device)
 
-                // 开阀确认：轮询 downRateResult，确认开阀成功
-                var opened = false
-                var autoDiscon = resp.data?.autoDisConTime ?: 0
-                for (i in 0..8) {
-                    delay(700)
-                    try {
-                        val r = NetworkModule.apiService.downRateResultSafe(snCode = snCode, auth = NetworkModule.authFields())
-                        val d = r.data
-                        if (r.success && (d?.state == 0 || d?.result == 0 || d?.orderNo != null)) {
-                            opened = true
-                            val autoTime = d?.autoDisConTime
-                            if (autoTime != null && autoTime > 0) {
-                                autoDiscon = autoTime
-                            }
-                            break
-                        }
-                    } catch (_: Exception) {}
-                }
+                when (outcome) {
+                    is OpenOutcome.Resumed -> {
+                        syncActiveOrdersFromPrefs()
+                        // 恢复订单：从持久化恢复自动关停剩余时间
+                        enterShowerState(outcome.orderNo, snCode, device, PrefsHelper.getAutoDisconRemain(snCode))
+                    }
 
-                if (!opened) {
-                    // 开阀确认失败，退出并提示
-                    showerError = "开阀未确认成功，请确认热水器是否已开启"
-                    mqttManager?.disconnect()
-                    return@launch
-                }
+                    is OpenOutcome.Opened -> {
+                        syncActiveOrdersFromPrefs()
+                        enterShowerState(null, snCode, device, outcome.autoDiscon)
+                        startOrderPoll(snCode)
+                    }
 
-                // 记录开阀时间戳（供消费金额过滤）
-                if (PrefsHelper.getStartedAt(snCode) <= 0L) {
-                    PrefsHelper.setStartedAt(snCode, System.currentTimeMillis())
-                }
+                    is OpenOutcome.Failed -> {
+                        showerError = outcome.message
+                        checkKick(outcome.kickHint)
+                        mqttManager?.disconnect()
+                    }
 
-                activeOrders.add(ActiveOrder(snCode, "", device.displayName, device.macAddress, device.typeEmoji, device.withholdMoney))
-                saveOrders()
-                enterShowerState(null, snCode, device, autoDiscon)
-
-                orderPollJob?.cancel()
-                orderPollJob = viewModelScope.launch {
-                    for (i in 0..10) {
-                        delay(800)
-                        if (currentOrderNo != null) break
-                        try {
-                            val p = NetworkModule.apiService.queryUsingSafe(snCode = snCode, auth = NetworkModule.authFields())
-                            if (p.errorCode == 307 || (p.success && p.data?.orderNo != null)) {
-                                currentOrderNo = p.data?.orderNo
-                                updateOrderNo(snCode, currentOrderNo ?: "")
-                            } else checkKick(p.displayMessage)
-                        } catch (e: Exception) { checkKickEx(e) }
+                    OpenOutcome.Unknown -> {
+                        // App 内调用给了充足预算，理论上不会走到这；保守起见按未确认处理
+                        showerError = "开阀未确认成功，请确认热水器是否已开启"
+                        mqttManager?.disconnect()
                     }
                 }
-            } catch (e: Exception) { checkKickEx(e); if (!isShowering) showerError = e.message ?: "网络错误" }
-            finally { isStartingShower = false }
+            } catch (e: Exception) {
+                checkKickEx(e)
+                if (!isShowering) showerError = e.message ?: "网络错误"
+            } finally { isStartingShower = false }
+        }
+    }
+
+    /**
+     * 桌面上有小组件时刷新一下。
+     * 小组件自己不持有状态、每次都从 Prefs 现读，所以这里只要推它重绘即可。
+     */
+    private fun refreshWidgets() {
+        appContext?.let { LinYuWidget.refreshAll(it) }
+    }
+
+    /**
+     * 把活跃订单从 Prefs 重新读回内存。
+     * Prefs 是唯一事实来源——ShowerController 可能在没有这个 ViewModel 的情况下改过它
+     * （例如用户在桌面小组件里开了阀）。
+     */
+    private fun syncActiveOrdersFromPrefs() {
+        val saved = PrefsHelper.getActiveOrders()
+        activeOrders.clear(); activeOrders.addAll(saved)
+        activeDeviceSnCodes.clear(); saved.forEach { activeDeviceSnCodes.add(it.snCode) }
+    }
+
+    /** 开阀后订单号还没生成，轮询把它补上 */
+    private fun startOrderPoll(snCode: String) {
+        orderPollJob?.cancel()
+        orderPollJob = sessionScope().launch {
+            for (i in 0..10) {
+                delay(800)
+                if (currentOrderNo != null) break
+                try {
+                    val p = NetworkModule.apiService.queryUsingSafe(snCode = snCode, auth = NetworkModule.authFields())
+                    if (p.errorCode == 307 || (p.success && p.data?.orderNo != null)) {
+                        currentOrderNo = p.data?.orderNo
+                        updateOrderNo(snCode, currentOrderNo ?: "")
+                    } else checkKick(p.displayMessage)
+                } catch (e: Exception) { checkKickEx(e) }
+            }
         }
     }
 
@@ -337,11 +360,17 @@ class MainViewModel : ViewModel() {
         showerPreDeduct = device.withholdMoney; showerConsumed = 0.0
         showerRemaining = "%.2f".format(device.withholdMoney)
         activeDeviceSnCodes.add(snCode)
+        // 开阀时间戳可能刚刚才写入（开阀成功时），这里读一次再刷新桌面，计时才对得上
+        refreshWidgets()
 
-        // 自动关停倒计时：仅在已知且尚未开始时初始化
-        if (autoDiscon > 0 && PrefsHelper.getAutoDisconRemain(snCode) <= 0) {
+        // 自动关停倒计时。界面上的秒数无条件跟随传入值；
+        // 持久化的截止时间只在没有时才写——恢复订单时传入的本身就是「剩余秒数」，
+        // 若用无条件覆盖的写法会把它当成新的完整时长，倒计时会越恢复越长
+        if (autoDiscon > 0) {
             autoDisConSec = autoDiscon
-            PrefsHelper.setAutoDisconRemain(snCode, autoDiscon)
+            if (PrefsHelper.getAutoDisconRemain(snCode) <= 0) {
+                PrefsHelper.setAutoDisconRemain(snCode, autoDiscon)
+            }
         }
 
         val st = PrefsHelper.getStartedAt(snCode)
@@ -354,7 +383,7 @@ class MainViewModel : ViewModel() {
         PrefsHelper.lastDeviceSnCode = snCode; PrefsHelper.lastDeviceEmoji = device.typeEmoji
 
         timerJob?.cancel()
-        timerJob = viewModelScope.launch {
+        timerJob = sessionScope().launch {
             var tick = 0
             while (isShowering) {
                 delay(1000); tick++
@@ -417,11 +446,11 @@ class MainViewModel : ViewModel() {
         showAutoCloseDialog = true
 
         // 后台异步等账单结算，拿到金额后更新弹窗
-        viewModelScope.launch {
+        sessionScope().launch {
             val orderNo = currentOrderNo ?: activeOrders.find { it.snCode == snCode }?.orderNo ?: ""
             val startTime = PrefsHelper.getStartedAt(snCode)
             autoCloseConsumed = try {
-                queryLastBillAmount(orderNo, startTime) ?: 0.0
+                ShowerController.settleAmount(orderNo, startTime) ?: 0.0
             } catch (_: Exception) { 0.0 }
             autoCloseLoading = false
         }
@@ -464,66 +493,28 @@ class MainViewModel : ViewModel() {
         }
 
         isStopping = true
-        viewModelScope.launch {
+        sessionScope().launch {
             try {
-                var orderNo = oNo
-                if (orderNo.isEmpty()) {
-                    val p = NetworkModule.apiService.queryUsingSafe(snCode = snCode, auth = NetworkModule.authFields())
-                    orderNo = p.data?.orderNo ?: ""
-                }
+                // 关阀 + 确认 + 清本地状态都在 ShowerController 里，小组件的「停止使用」走同一份逻辑
+                val outcome = ShowerController.closeValve(snCode, oNo)
+                checkKick(outcome.kickHint)
 
-                // 1. 发送关阀指令
-                val close = NetworkModule.apiService.closeOrderSafe(snCode = snCode, orderNo = orderNo, auth = NetworkModule.authFields())
-                if (!close.success) {
-                    checkKick(close.displayMessage)
-                    // 服务器已接受/已在关闭中时也视为成功
-                    if (close.errorCode == 307 || close.displayMessage?.contains("已在") == true) {
-                        finishShower(snCode, null)
-                    } else {
-                        toastMessage = close.displayMessage ?: "关闭失败，请重试"
-                        isStopping = false
-                    }
+                if (outcome is CloseOutcome.Failed) {
+                    toastMessage = outcome.message
+                    isStopping = false
                     return@launch
                 }
 
-                // 2. 轮询确认关阀结果（最多 5 次，间隔 1 秒）
-                var closedOk = false
-                for (i in 0 until 5) {
-                    delay(1000)
-                    try {
-                        val r = NetworkModule.apiService.closeOrderResultSafe(snCode = snCode, orderNo = orderNo, auth = NetworkModule.authFields())
-                        if (r.success) {
-                            val d = r.data
-                            val closed = d == null ||
-                                d.state == 0 ||
-                                d.status == 0 ||
-                                d.orderNo.isNullOrEmpty()
-                            if (closed) { closedOk = true; break }
-                        } else {
-                            checkKick(r.displayMessage)
-                        }
-                    } catch (_: Exception) {}
-                }
-
-                // 3. 关阀确认成功后：先立即退出（不阻塞），后台异步等账单结算后弹金额
-                if (closedOk) {
-                    val startTime = PrefsHelper.getStartedAt(snCode)  // 开阀时间戳，未开始时为 0
-                    finishShower(snCode, null)
-                    // 后台轮询账单（最多 10 次 × 2 秒 = 20 秒），拿到金额后弹 toast
-                    viewModelScope.launch {
-                        val amount = queryLastBillAmount(orderNo, startTime)
-                        if (amount != null) {
-                            toastMessage = if (amount > 0) {
-                                "已停止，本次消费 ¥%.2f".format(amount)
-                            } else {
-                                "热水器已关闭，本次无消费"
-                            }
-                        } else {
-                            toastMessage = "热水器已关闭"
-                        }
+                val startTime = (outcome as CloseOutcome.Closed).startTimeMs
+                finishShower(snCode, null)
+                // 界面已退出（不阻塞），后台异步等账单结算后弹金额
+                sessionScope().launch {
+                    val amount = ShowerController.settleAmount(oNo, startTime)
+                    toastMessage = when {
+                        amount == null -> "热水器已关闭"
+                        amount > 0 -> "已停止，本次消费 ¥%.2f".format(amount)
+                        else -> "热水器已关闭，本次无消费"
                     }
-                } else {
-                    finishShower(snCode, null)
                 }
             } catch (e: Exception) {
                 checkKickEx(e)
@@ -531,57 +522,6 @@ class MainViewModel : ViewModel() {
                 isStopping = false
             }
         }
-    }
-
-    /**
-     * 查询账单获取本次消费金额（后台异步调用，不阻塞关闭流程）。
-     * 账单结算可能有延迟，故轮询最多 10 次（每次间隔 2 秒，共约 20 秒）等服务器结算完成。
-     * 只统计 [startTime]（开阀时间戳，毫秒）之后产生的账单，避免读到上一次的消费；
-     * 优先匹配当前订单号（billRequestType=2 时 orderId 与 orderNo 对应）。
-     * 超时仍无消费时返回 0.0。
-     */
-    private suspend fun queryLastBillAmount(orderNo: String, startTime: Long): Double? {
-        val parsers = listOf(
-            java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()),
-            java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault()),
-            java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.getDefault())
-        )
-        val fmt = java.text.SimpleDateFormat("yyyy-MM", java.util.Locale.getDefault())
-        val month = fmt.format(java.util.Calendar.getInstance().time)
-
-        // 最多 6 次 × 1.2 秒 ≈ 7 秒（原 20 秒太慢，用户感知为"迟迟不弹"）
-        for (attempt in 0 until 6) {
-            try {
-                val resp = NetworkModule.apiService.getBillListSafe(month = month)
-                val bills = resp.data ?: return null
-
-                // 优先精确匹配订单号
-                if (orderNo.isNotEmpty()) {
-                    val matched = bills.firstOrNull { it.consumeBillDTO.orderId == orderNo }
-                    if (matched != null) {
-                        val m = matched.consumeBillDTO.consumeMoney.toDoubleOrNull()
-                        if (m != null && m > 0) return m
-                        // 金额仍为 0 → 可能结算中，继续轮询
-                    }
-                }
-
-                // 开阀之后的账单取最新一笔
-                val recent = bills.filter { bill ->
-                    if (startTime <= 0) return@filter true
-                    val t = parsers.asSequence()
-                        .map { p -> try { p.parse(bill.consumeBillDTO.consumeDate)?.time ?: 0L } catch (_: Exception) { 0L } }
-                        .maxOrNull() ?: 0L
-                    t >= startTime
-                }
-                if (recent.isNotEmpty()) {
-                    val latest = recent.maxByOrNull { it.consumeBillDTO.consumeDate }
-                    val m = latest?.consumeBillDTO?.consumeMoney?.toDoubleOrNull()
-                    if (m != null && m > 0) return m
-                }
-            } catch (_: Exception) {}
-            if (attempt < 5) delay(1200)
-        }
-        return 0.0
     }
 
     /** 完成停止流程：退出洗澡界面，清理状态，显示结算结果 */
@@ -607,19 +547,22 @@ class MainViewModel : ViewModel() {
         PrefsHelper.clearAutoDiscon(snCode)  // 清除自动关停倒计时
         showerSnCode = null; timerJob?.cancel(); orderPollJob?.cancel()
         try { mqttManager?.disconnect() } catch (_: Exception) {}
+        refreshWidgets()  // 桌面小组件跟着变回「空闲」
     }
 
     fun logout() {
-        // 停止所有后台任务
-        timerJob?.cancel()
-        orderPollJob?.cancel()
-        
+        // 掐断所有网络任务（含挤号心跳），避免退出后还有响应回来改状态
+        stopTimer()
+        sessionJob.cancel()
+        sessionJob = SupervisorJob(viewModelScope.coroutineContext[Job])
+
         // 断开 MQTT 连接
         try { mqttManager?.disconnect() } catch (_: Exception) {}
-        
+
         // 停止蓝牙扫描
         try { scanner?.stopScan() } catch (_: Exception) {}
-        
+        isScanning = false
+
         // 重置所有状态
         isShowering = false
         showerSnCode = null
@@ -676,19 +619,95 @@ class MainViewModel : ViewModel() {
     }
 
     // ── 挤号 ──
+
+    /** 心跳间隔。要"马上发现被挤号"就得主动轮询，这是拿一点电和流量换来的 */
+    private val kickWatchIntervalMs = 25_000L
+
+    /**
+     * 开始挤号心跳检测：登录后调用，按生命周期在前后台启停。
+     *
+     * 原来只有发请求时才顺带检查挤号（被动），用户挂在这个页面不动就永远发现不了。
+     * 这里定时打一个最轻的接口兜底，被挤号最多 25 秒内弹提示。
+     */
+    fun startKickWatch() {
+        if (kickWatchJob?.isActive == true) return
+        kickWatchJob = sessionScope().launch {
+            while (isActive) {
+                delay(kickWatchIntervalMs)
+                if (kickedOut) break
+                try {
+                    val resp = NetworkModule.apiService.getWalletSafe()
+                    if (!resp.success) checkKick(resp.displayMessage)
+                } catch (e: Exception) {
+                    // 网络异常不算挤号，checkKickEx 只认 401/403
+                    checkKickEx(e)
+                }
+            }
+        }
+    }
+
+    fun stopKickWatch() {
+        kickWatchJob?.cancel()
+        kickWatchJob = null
+    }
+
+    /**
+     * 被挤号：标记状态并清掉本地凭证。
+     *
+     * 用 `if (kickedOut) return` 兜住重复触发——多个请求可能几乎同时返回"登录失效"，
+     * 否则会反复 clear() + 反复通知界面。
+     */
+    private fun kickOut() {
+        if (kickedOut) return
+        kickedOut = true
+        stopTimer()
+        PrefsHelper.clear()
+        // 掐断旧会话的所有在途请求，避免它们的失败响应回来干扰用户接下来的重新登录。
+        // 放在最后：调用者本身就跑在 sessionJob 上，取消会连自己一起取消，
+        // 而取消是协作式的——只要后面不再有挂起点，这几行仍会执行完。
+        sessionJob.cancel()
+        sessionJob = SupervisorJob(viewModelScope.coroutineContext[Job])
+    }
+
     private fun checkKick(msg: String?) {
         if (msg.isNullOrEmpty()) return
         if (msg.contains("登录") || msg.contains("token") || msg.contains("失效") || msg.contains("过期") || msg.contains("认证") || msg.contains("未登录") || msg.contains("请重新")) {
-            kickedOut = true; PrefsHelper.clear()
+            kickOut()
         }
     }
+
     private fun checkKickEx(e: Exception) {
         val m = e.message ?: return
-        if (m.contains("401") || m.contains("403") || m.contains("Unauthorized") || m.contains("Forbidden")) { kickedOut = true; PrefsHelper.clear() }
+        if (m.contains("401") || m.contains("403") || m.contains("Unauthorized") || m.contains("Forbidden")) {
+            kickOut()
+        }
+    }
+
+    /** 取消计时与轮询（挤号 / 退出登录共用） */
+    private fun stopTimer() {
+        timerJob?.cancel(); timerJob = null
+        orderPollJob?.cancel(); orderPollJob = null
+        stopKickWatch()
+    }
+
+    /**
+     * 开始一次新会话：登录成功后调用。
+     *
+     * 必须做三件事，缺一个都会导致"重新登录进去还是被弹出"：
+     * 1. 换一个全新的 sessionJob，让旧会话的残留请求彻底失效
+     * 2. 清掉 kickedOut 标志，否则主界面一挂载就又弹挤号框
+     * 3. 断开上一轮的 MQTT（它还连着旧会话的 topic），由新会话按需重连
+     */
+    fun beginSession() {
+        sessionJob.cancel()
+        sessionJob = SupervisorJob(viewModelScope.coroutineContext[Job])
+        stopTimer()
+        try { mqttManager?.disconnect() } catch (_: Exception) {}
+        kickedOut = false
     }
 
     fun refreshWallet() {
-        viewModelScope.launch {
+        sessionScope().launch {
             try { 
                 val resp = NetworkModule.apiService.getWalletSafe()
                 if (resp.success) walletInfo = resp.data else checkKick(resp.displayMessage) 
@@ -706,7 +725,7 @@ class MainViewModel : ViewModel() {
     }
 
     fun loadUseCode() {
-        viewModelScope.launch {
+        sessionScope().launch {
             try {
                 val resp = NetworkModule.apiService.getUseCodeSafe()
                 if (resp.success && resp.data != null) useCodeData = resp.data
@@ -714,10 +733,14 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    fun pullRefresh() { 
+    /**
+     * 刷新余额与账单。
+     * 扫描不在这里触发——是否扫描由界面决定（要先确认拿到权限），
+     * 见 MainScreen 的 scanWithPermission()。
+     */
+    fun pullRefresh() {
         refreshWallet()
         loadBills()
-        startScan() 
     }
 
     // ── 设备发现 ──
@@ -735,7 +758,7 @@ class MainViewModel : ViewModel() {
     }
 
     private fun fetchInfo(mac: String) {
-        viewModelScope.launch {
+        sessionScope().launch {
             try {
                 val resp = NetworkModule.apiService.getDeviceInfoSafe(mac)
                 if (resp.success && resp.data != null) {
@@ -760,7 +783,7 @@ class MainViewModel : ViewModel() {
 
     // ── 账单 ──
     fun loadBills() {
-        viewModelScope.launch {
+        sessionScope().launch {
             isLoadingBills = true
             try {
                 val fmt = java.text.SimpleDateFormat("yyyy-MM", java.util.Locale.getDefault())

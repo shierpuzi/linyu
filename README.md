@@ -3,10 +3,10 @@
 [![Platform](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com)
 [![Language](https://img.shields.io/badge/Language-Kotlin-blue.svg)](https://kotlinlang.org)
 [![UI](https://img.shields.io/badge/UI-Jetpack%20Compose-purple.svg)](https://developer.android.com/jetpack/compose)
-[![Version](https://img.shields.io/badge/Version-v2.1.0-orange.svg)](https://github.com/yehu-imei/linyu/releases/latest)
+[![Version](https://img.shields.io/badge/Version-v2.2.0-orange.svg)](https://github.com/yehu-imei/linyu/releases/latest)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**⬇️ [下载最新 APK (v2.1.0)](https://github.com/yehu-imei/linyu/releases/latest)**
+**⬇️ [下载最新 APK (v2.2.0)](https://github.com/yehu-imei/linyu/releases/latest)**
 
 趣智校园第三方 Android 客户端，用于控制校园热水器与直饮水机。相比官方 App，提供更简洁的界面和更流畅的操作体验。
 
@@ -18,8 +18,8 @@
 
 ### 🚿 设备控制
 
-- 🔐 **手机号登录** — 密码登录 / **短信验证码登录**（已通用化），登录状态持久化与自动恢复
-- 📡 **蓝牙扫描** — BLE 扫描附近设备，按信号强度排序
+- 🔐 **手机号登录** — 密码登录 / **短信验证码登录**（已通用化），支持系统自动填充保存账号密码，登录状态持久化与自动恢复
+- 📡 **蓝牙扫描** — BLE 扫描附近设备，按信号强度排序；权限按需申请，Android 12+ 不需要定位权限
 - 📷 **扫码绑定** — 扫描设备二维码，直接弹出设备详情，无需蓝牙
 - 🔦 **扫码手电筒** — 光线不足时扫码补光
 - 🏠 **绑定寝室** — 绑定寝室关键词，设备列表只显示寝室内的设备
@@ -27,6 +27,7 @@
 - ⏳ **自动关停倒计时** — 显示闲置自动关闭倒计时，关闭时弹出确认框
 - 💰 **消费结算** — 关阀后通过账单自动显示本次消费金额
 - 🚰 **饮水机支持** — 自动识别直饮水机（冷水 ❄️ / 热水 ♨️），绿色主题区分，设备名智能精简
+- 🧩 **桌面小组件** — 2x2 / 2x4 两种尺寸，在桌面直接启停热水；计时由系统 Chronometer 驱动，App 不在也能实时走秒
 
 ### 💰 钱包与账单
 
@@ -39,7 +40,7 @@
 - 🌓 **深浅主题** — 圆形揭示切换动画，设置自动保存
 - 🧩 **卡片自定义** — 「我的」页面卡片可上下排序、隐藏显示
 - 📶 **断网提示** — 网络异常时友好提示
-- 👥 **挤号检测** — 多设备登录自动提醒
+- 👥 **挤号检测** — 多设备登录自动提醒，25 秒心跳轮询，被挤下线能及时弹出提示
 
 ### 🔧 其他
 
@@ -64,6 +65,7 @@ UI (Compose) → ViewModel → Repository → Retrofit API (v3-api.china-qzxy.cn
 | 蓝牙 / 扫码 | Android BLE API / CameraX + ML Kit |
 | 加密存储 | EncryptedSharedPreferences |
 | 日志 | 自研 AppLogger（环形缓冲 + 文件滚动 + 脱敏） |
+| 桌面小组件 | AppWidgetProvider + RemoteViews |
 | 混淆 | R8 Full Mode |
 
 ## 📁 项目结构
@@ -78,7 +80,8 @@ app/src/main/java/com/hualala/linyu/
 │   ├── SafeApi.kt          # 手动 JSON 解析 (避 R8 泛型擦除)
 │   └── GithubApi.kt        # GitHub Release / 仓库信息（更新检测）
 ├── data/                   # 数据层
-│   └── AuthRepository.kt   # 登录认证（密码 / 短信）
+│   ├── AuthRepository.kt   # 登录认证（密码 / 短信）
+│   └── ShowerController.kt # 开阀/关阀/结算共享层（App 与小组件共用）
 ├── model/                  # 数据模型
 │   ├── LoginModels.kt      # 含账单设备类型判定（热水器 / 饮水机）
 │   ├── DeviceModels.kt     # 含饮水机识别与设备名格式化
@@ -99,6 +102,9 @@ app/src/main/java/com/hualala/linyu/
 │   └── theme/
 │       ├── Theme.kt             # 配色方案（液态玻璃卡片）
 │       └── CircularRevealTheme.kt # 圆形揭示主题切换
+├── widget/                 # 桌面小组件
+│   ├── LinYuWidgetProvider.kt # Provider（2x2 / 2x4 共用逻辑）+ 状态推送
+│   └── WidgetRenderer.kt      # 状态推断 + RemoteViews 渲染
 └── utils/                  # 工具
     ├── PrefsHelper.kt      # 加密存储
     ├── MqttManager.kt      # MQTT 管理
@@ -107,10 +113,13 @@ app/src/main/java/com/hualala/linyu/
     ├── SignUtils.kt        # 短信验证码 secret 计算
     ├── AppLogger.kt        # 日志（脱敏 / 滚动 / 崩溃捕获）
     ├── BackgroundManager.kt# 背景图存取（主页 / 使用页两套）
-    └── BackgroundState.kt  # 背景配置状态
+    ├── BackgroundState.kt  # 背景配置状态
+    └── ScanPermission.kt   # 蓝牙扫描权限（按系统版本分流）
 ```
 
-res/ 额外包含 `drawable/ic_flashlight.xml`（扫码手电筒图标）、`drawable/app_logo.png`（应用 logo）、`xml/file_paths.xml`（日志导出 FileProvider）。
+res/ 额外包含 `drawable/ic_flashlight.xml`（扫码手电筒图标）、`drawable/app_logo.png`（应用 logo）、
+`xml/file_paths.xml`（日志导出 FileProvider），以及小组件用的
+`layout/widget_linyu_2x2_*.xml`、`layout/widget_linyu_2x4_*.xml`、`xml/widget_info_*.xml`、`drawable/widget_*.xml`。
 
 ## 🚀 构建
 
@@ -192,25 +201,28 @@ secret = MD5( 手机号前3位 + 手机号后4位 + "klcx" )
 
 ## ⚠️ 已知问题与限制
 
-### ✅ v2.1.0 已修复
+### ✅ 已修复
 
 | 原问题 | 状态 |
 |---|---|
-| ~~短信登录 secret 绑定账号~~ | ✅ **已解决**：secret 由手机号推导，任何手机号可用 |
+| ~~短信登录 secret 绑定账号~~ | ✅ **已解决 (v2.1.0)**：secret 由手机号推导，任何手机号可用 |
+| ~~被挤号后重新登录又被弹出、需要登两次~~ | ✅ **已解决 (v2.2.0)**：旧会话在途请求会清掉新会话凭证，改为会话级作用域整体取消 |
 | ~~热水器自动关停无感知~~ | ✅ **已解决 (v1.2.0)**：解析 `autoDisConTime` 显示闲置倒计时，自动关闭时弹确认框 |
 | ~~关闭失败无提示~~ | ✅ **已解决 (v1.2.0)**：关阀后通过 `closeOrderResult` 确认，失败会提示重试 |
-| ~~切到「我的」页面卡顿~~ | ✅ **已解决**：卡片顺序 / Release 数据改为进程级缓存，避免重复解密与请求 |
-| ~~设备名残留「表」字~~ | ✅ **已解决**：修正正则处理顺序，`热水表-xxx` 不再被截成 `表 xxx` |
-| ~~使用页退出按钮点击无响应~~ | ✅ **已解决**：修正组件层级，按钮不再被上层 Column 拦截点击 |
+| ~~切到「我的」页面卡顿~~ | ✅ **已解决 (v2.1.0)**：卡片顺序 / Release 数据改为进程级缓存 |
+| ~~设备名残留「表」字~~ | ✅ **已解决 (v2.1.0)**：修正正则处理顺序，`热水表-xxx` 不再被截成 `表 xxx` |
+| ~~使用页退出按钮点击无响应~~ | ✅ **已解决 (v2.1.0)**：修正组件层级，按钮不再被上层 Column 拦截点击 |
+| ~~Android 12+ 被迫要定位权限~~ | ✅ **已解决 (v2.2.0)**：`BLUETOOTH_SCAN` 声明 `neverForLocation`，且改由用户主动触发申请 |
 
 ### ❌ 仍未解决
 
 | 问题 | 说明 |
 |---|---|
-| **挤号检测是被动的** | 需触发网络请求（刷新 / 操作）才能发现被挤下线，打开 App 不操作不会主动发现 |
+| **挤号检测有最多 25 秒延迟** | 靠心跳轮询实现，被挤下线最多 25 秒后才提示（此前是完全发现不了） |
 | **无实时扣费** | MQTT 仅在订单结束时推送消费金额，洗澡中看不到实时扣费。官方 App 也是如此 |
 | **消费金额结算延迟** | 账单生成有延迟，最长需等待约 20 秒 |
 | **一卡通余额无法获取** | 易校园 API 有 HMAC-SHA256 native 签名保护，只能手动估算余额 |
+| **小组件不显示实时消费** | 小组件不连 MQTT，使用中只显示预扣金额；停止后也不做账单结算，回 App 才会显示 |
 
 ### 🏫 兼容性
 
@@ -218,6 +230,8 @@ secret = MD5( 手机号前3位 + 手机号后4位 + "klcx" )
 |---|---|
 | **仅在一所学校测试** | 只在金华职业技术大学（projectId=905）男生宿舍测试过几次，其他学校能否使用未知 |
 | **饮水机功能未实机验证** | 饮水机识别与 UI 已实现，但作者所在学校无直饮水机，实际控制流程未验证 |
+| **Android 11 及以下仍需定位权限** | 系统对蓝牙发现的硬性规定，无法绕过；引导卡片里说明了原因 |
+| **自动填充依赖手机密码管理器** | 不同厂商 ROM 行为差异较大，未在多数机型上验证 |
 
 ### 🔒 安全
 

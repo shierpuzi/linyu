@@ -20,10 +20,13 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hualala.linyu.api.NetworkModule
 import com.hualala.linyu.ui.AppBackgroundLayer
@@ -100,6 +103,32 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // 登录后启动挤号心跳；退到后台就停，避免一直在后台轮询耗电。
+                // 用生命周期观察者而不是给 ViewModel 加依赖，省一个库。
+                val lifecycleOwner = LocalLifecycleOwner.current
+                DisposableEffect(lifecycleOwner, isLoggedIn) {
+                    val observer = LifecycleEventObserver { _, event ->
+                        when (event) {
+                            Lifecycle.Event.ON_RESUME ->
+                                if (isLoggedIn) mainViewModel.startKickWatch()
+                            Lifecycle.Event.ON_PAUSE -> mainViewModel.stopKickWatch()
+                            else -> {}
+                        }
+                    }
+                    lifecycleOwner.lifecycle.addObserver(observer)
+                    // 冷启动时可能已经处于 RESUMED（登录态是从本地恢复的），
+                    // 那样就等不到下一次 ON_RESUME 了，这里补一次
+                    if (isLoggedIn &&
+                        lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+                    ) {
+                        mainViewModel.startKickWatch()
+                    }
+                    onDispose {
+                        lifecycleOwner.lifecycle.removeObserver(observer)
+                        mainViewModel.stopKickWatch()
+                    }
+                }
+
                 // 自定义背景开关变化时刷新状态栏（启用→透明，关闭→恢复纯色）
                 val bgHomeEnabled = BackgroundState.config(BackgroundManager.SCOPE_HOME).enabled
                 LaunchedEffect(bgHomeEnabled) {
@@ -114,6 +143,9 @@ class MainActivity : ComponentActivity() {
 
                     if (!isLoggedIn) {
                         LoginScreen(onLoginSuccess = { phone ->
+                            // 开一次全新会话：清掉上一轮被挤号留下的标志与在途请求，
+                            // 否则登录进去会立刻又被弹出去，得反复登第二次
+                            mainViewModel.beginSession()
                             userPhone = phone; isLoggedIn = true; currentTab = 0
                         })
                     } else {
@@ -171,9 +203,13 @@ class MainActivity : ComponentActivity() {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant) },
                             confirmButton = {
                                 Button(onClick = {
-                                    showKickedDialog = false; mainViewModel.kickedOut = false
+                                    showKickedDialog = false
                                     // skipNetwork：loginCode 已失效，只清本地，不再发请求，避免重登后又触发挤号
-                                    mainViewModel.stopShower(skipNetwork = true); PrefsHelper.clear()
+                                    mainViewModel.stopShower(skipNetwork = true)
+                                    // 注意这里不要顺手把 kickedOut 置回 false：
+                                    // 保持 true 直到下次 beginSession()，期间任何残留请求再报"登录失效"
+                                    // 也会被 kickOut() 的重复触发保护挡住，不会重复弹窗
+                                    PrefsHelper.clear()
                                     isLoggedIn = false; userPhone = ""
                                 }, modifier = Modifier.fillMaxWidth()) { Text("确定") }
                             }

@@ -66,6 +66,11 @@ fun CustomBackgroundScreen(onDismiss: () -> Unit) {
                 if (BackgroundManager.saveFromUri(context, uri, bgScope)) {
                     preview = BackgroundManager.loadBitmap(context, bgScope)
                     BackgroundState.setEnabled(bgScope, true)
+                    // 换图后把三个效果参数重置为默认：透明度 100% / 模糊 0 / 亮度 100%，
+                    // 否则会沿用它上一张图调过的参数，新图看着"莫名其妙变暗/变糊"
+                    BackgroundState.setOpacity(bgScope, BackgroundState.DEFAULT_OPACITY)
+                    BackgroundState.setBlur(bgScope, BackgroundState.DEFAULT_BLUR)
+                    BackgroundState.setBrightness(bgScope, BackgroundState.DEFAULT_BRIGHTNESS)
                     BackgroundState.notifyImageChanged() // 让全局背景层重新取图
                     // 自动提取主题色（解码 + 统计放 IO 线程，避免卡 UI）
                     val color = withContext(Dispatchers.IO) {
