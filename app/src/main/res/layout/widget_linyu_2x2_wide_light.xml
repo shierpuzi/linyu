@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  2x2 横向小组件（浅色）
+  与竖向版内容一致，只是把圆形按钮挪到右侧。
+  小组件被拉宽后如果还用竖向布局，按钮会挤在一条窄缝里，所以按实际宽高比切布局。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:background="@drawable/widget_bg_light"
+    android:padding="14dp"
+    android:gravity="center_vertical">
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/widget_emoji"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="15sp"
+                android:text="🚿" />
+
+            <TextView
+                android:id="@+id/widget_device"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textColor="#111827"
+                android:text="未绑定设备" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/widget_sublabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textSize="10sp"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:textColor="#6B7280"
+            android:text="上次使用的设备" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="62dp"
+        android:layout_height="62dp"
+        android:layout_marginStart="10dp">
+
+        <TextView
+            android:id="@+id/widget_action_start"
+            android:layout_width="62dp"
+            android:layout_height="62dp"
+            android:background="@drawable/widget_circle_start_light"
+            android:gravity="center"
+            android:textSize="21sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:text="开" />
+
+        <TextView
+            android:id="@+id/widget_action_stop"
+            android:layout_width="62dp"
+            android:layout_height="62dp"
+            android:background="@drawable/widget_circle_stop_light"
+            android:gravity="center"
+            android:textSize="21sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:text="关"
+            android:visibility="gone" />
+    </FrameLayout>
+</LinearLayout>

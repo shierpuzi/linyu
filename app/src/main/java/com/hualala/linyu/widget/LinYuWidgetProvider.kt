@@ -48,6 +48,22 @@ open class LinYuWidgetProvider : AppWidgetProvider() {
         }
     }
 
+    /**
+     * 用户拖动改变了小组件尺寸。
+     *
+     * 2x2 需要按宽高比在「按钮在下方」和「按钮在右侧」之间切换，
+     * 不重绘的话布局会一直停在添加时的那个方向。
+     */
+    override fun onAppWidgetOptionsChanged(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetId: Int,
+        newOptions: android.os.Bundle
+    ) {
+        WidgetBridge.ensureInit(context)
+        WidgetBridge.render(context, appWidgetId, size)
+    }
+
     override fun onDeleted(context: Context, appWidgetIds: IntArray) {
         // 清掉这个 widget 的过渡态，免得反复增删后残留一堆无用条目
         appWidgetIds.forEach { WidgetBridge.forget(it) }

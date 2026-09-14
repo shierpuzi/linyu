@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 圆形「关水」按钮（浅色）：实心危险色圆，和「开水」在颜色上拉开距离，降低误触 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="#EF4444" />
+</shape>

@@ -1,6 +1,7 @@
 package com.hualala.linyu.widget
 
 import android.app.PendingIntent
+import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
 import android.os.SystemClock
@@ -13,7 +14,10 @@ import com.hualala.linyu.utils.PrefsHelper
 
 /** 小组件尺寸 */
 enum class WidgetSize(val label: String) {
+    /** 2x2，可被拉宽，宽高比决定按钮放在下方还是右侧 */
     SMALL("2x2"),
+
+    /** 2x4 */
     WIDE("2x4")
 }
 
@@ -49,9 +53,8 @@ sealed interface WidgetState {
  * 刻意不含任何网络逻辑——渲染必须随时可调用，网络只发生在 [LinYuWidgetProvider] 里。
  *
  * ⚠️ 这里**一律只用 RemoteViews 的一等公民 API**（setTextViewText / setViewVisibility /
- * setChronometer / setOnClickPendingIntent / setImageViewResource）。
- * 不用 `setInt(id, "setXxx", ...)` 那种反射写法：框架对反射方法有
- * `@RemotableViewMethod` 白名单，赌错会让整个小组件渲染失败（桌面显示"加载失败"）。
+ * setChronometer / setOnClickPendingIntent）。不用 `setInt(id, "setXxx", ...)` 那种反射写法：
+ * 框架对反射方法有 `@RemotableViewMethod` 白名单，赌错会让整个小组件渲染失败。
  */
 object WidgetRenderer {
 
@@ -77,7 +80,7 @@ object WidgetRenderer {
         }
     }
 
-    /** 按状态和当前主题构建 RemoteViews */
+    /** 按状态、主题和实际宽高比构建 RemoteViews */
     fun build(
         context: Context,
         size: WidgetSize,
@@ -86,54 +89,54 @@ object WidgetRenderer {
         disabled: DisabledReason? = null
     ): RemoteViews {
         val dark = PrefsHelper.themeMode.equals("DARK", ignoreCase = true)
-        val views = RemoteViews(context.packageName, layoutRes(size, dark))
+        val wide = size == WidgetSize.SMALL && isWide(context, appWidgetId)
+        val views = RemoteViews(context.packageName, layoutRes(size, dark, wide))
 
-        // 点整张卡片 → 打开 App（RemoteViews 没有 setOnClickListener，只能用 PendingIntent）
+        // 点整张卡片 → 打开 App
         views.setOnClickPendingIntent(R.id.widget_root, openAppIntent(context, appWidgetId))
 
         when (state) {
             WidgetState.LoggedOut -> {
                 views.setTextViewText(R.id.widget_device, "未登录")
                 views.setTextViewText(R.id.widget_emoji, "🔒")
-                setTimerText(views, "点此登录")
-                bindAction(views, stopStyle = false, text = "去登录", onClick = null)
-                bindWideExtras(views, size, status = null, preDeduct = null)
+                // 未登录时不给按钮事件：点击会冒泡到整张卡片的「打开 App」，正好引导用户去登录
+                bindButton(views, stopStyle = false, label = "开", onClick = null)
+                bindSubLabel(views, size, "点此登录")
+                bindMirrorToStatus(views, size, "未登录")
             }
 
             WidgetState.NoDevice -> {
                 views.setTextViewText(R.id.widget_device, "还没有用过设备")
                 views.setTextViewText(R.id.widget_emoji, "🚿")
-                setTimerText(views, "点此打开淋浴")
-                bindAction(views, stopStyle = false, text = "去绑定设备", onClick = null)
-                bindWideExtras(views, size, status = null, preDeduct = null)
+                bindButton(views, stopStyle = false, label = "开", onClick = null)
+                bindSubLabel(views, size, "点此打开淋浴")
+                bindMirrorToStatus(views, size, "未绑定")
             }
 
             is WidgetState.Idle -> {
                 views.setTextViewText(R.id.widget_device, state.deviceName)
                 views.setTextViewText(R.id.widget_emoji, state.emoji)
-                setTimerText(views, disabled?.text ?: "空闲")
-                bindAction(
-                    views, stopStyle = false,
-                    text = disabled?.text ?: "开始使用",
+                bindButton(
+                    views, stopStyle = false, label = "开",
                     onClick = actionIntent(context, appWidgetId, disabled, LinYuWidgetProvider.ACTION_START)
                 )
-                bindWideExtras(views, size, status = disabled?.text ?: "空闲", preDeduct = null)
+                bindSubLabel(views, size, disabled?.text ?: "上次使用的设备")
+                bindMirrorToStatus(views, size, disabled?.text ?: "空闲")
             }
 
             is WidgetState.Running -> {
                 views.setTextViewText(R.id.widget_device, state.deviceName)
                 views.setTextViewText(R.id.widget_emoji, state.emoji)
-                if (disabled != null) {
-                    setTimerText(views, disabled.text)
-                } else {
-                    views.setChronometer(R.id.widget_timer, chronometerBase(state.startedAtMs), null, true)
-                }
-                bindAction(
-                    views, stopStyle = true,
-                    text = disabled?.text ?: "停止使用",
+                bindButton(
+                    views, stopStyle = true, label = "关",
                     onClick = actionIntent(context, appWidgetId, disabled, LinYuWidgetProvider.ACTION_STOP)
                 )
-                bindWideExtras(views, size, status = disabled?.text ?: "● 使用中", preDeduct = state.preDeduct)
+                bindSubLabel(views, size, disabled?.text ?: "上次使用的设备")
+                bindMirrorToStatus(
+                    views, size,
+                    if (disabled != null) disabled.text else null,
+                    chronometerBase = chronometerBase(state.startedAtMs)
+                )
             }
         }
         return views
@@ -145,7 +148,6 @@ object WidgetRenderer {
      * Chronometer 内部用 `SystemClock.elapsedRealtime()`（开机以来的毫秒数）算差值，
      * 而 startedAt 存的是 `System.currentTimeMillis()`（1970 年以来的毫秒数）。
      * 两个时钟原点差了十万八千里，直接传进去会显示成天文数字或负数。
-     * 所以换算成「按开机时钟表示的起始时刻」。
      */
     private fun chronometerBase(startedAtMs: Long): Long {
         if (startedAtMs <= 0L) return SystemClock.elapsedRealtime()
@@ -161,36 +163,16 @@ object WidgetRenderer {
         UNKNOWN("状态未知，点此刷新")
     }
 
-    /** 2x4 专属控件；2x2 布局里没有这些 id，直接跳过 */
-    private fun bindWideExtras(
-        views: RemoteViews,
-        size: WidgetSize,
-        status: String?,
-        preDeduct: Double?
-    ) {
-        if (size != WidgetSize.WIDE) return
-        views.setTextViewText(R.id.widget_status, status ?: "")
-        views.setTextViewText(R.id.widget_prededuct, "¥%.2f".format(preDeduct ?: 0.0))
-    }
+    // ── 各控件的写入 ──
 
     /**
-     * 停止计时并把文字写进 Chronometer。
-     * Chronometer 未启动时就是个普通 TextView，但必须先 setChronometer 再 setTextViewText，
-     * 否则会被它自己的 updateText 覆盖掉。
-     */
-    private fun setTimerText(views: RemoteViews, text: String) {
-        views.setChronometer(R.id.widget_timer, 0L, null, false)
-        views.setTextViewText(R.id.widget_timer, text)
-    }
-
-    /**
-     * 按钮：布局里放了「开始」「停止」两个 TextView，靠 visibility 切换。
+     * 圆形按钮：布局里放了「开」「关」两个 TextView，靠 visibility 切换。
      * 这样就不需要反射改背景（见类注释）。
      */
-    private fun bindAction(
+    private fun bindButton(
         views: RemoteViews,
         stopStyle: Boolean,
-        text: String,
+        label: String,
         onClick: PendingIntent?
     ) {
         val visibleId = if (stopStyle) R.id.widget_action_stop else R.id.widget_action_start
@@ -198,10 +180,36 @@ object WidgetRenderer {
 
         views.setViewVisibility(hiddenId, View.GONE)
         views.setViewVisibility(visibleId, View.VISIBLE)
-        views.setTextViewText(visibleId, text)
-        // 显式写 null 把上一次残留的点击清掉：RemoteViews 是复用同一个 View 对象的，
+        views.setTextViewText(visibleId, label)
+        // 显式写 null 清掉上一次残留的点击：RemoteViews 复用同一个 View 对象，
         // 不写的话"正在开启…"这种禁用态还会带着上一轮的点击动作
         views.setOnClickPendingIntent(visibleId, onClick)
+    }
+
+    /** 2x2 的第二行说明文字；2x4 没有这个控件，跳过 */
+    private fun bindSubLabel(views: RemoteViews, size: WidgetSize, text: String) {
+        if (size != WidgetSize.SMALL) return
+        views.setTextViewText(R.id.widget_sublabel, text)
+    }
+
+    /**
+     * 2x4 右上角的状态位。
+     * [text] 不为空时写死文本（空闲 / 进行中提示）；为 null 时改成走秒的计时器。
+     * 必须先 setChronometer 再 setTextViewText，否则会被它自己的 updateText 覆盖。
+     */
+    private fun bindMirrorToStatus(
+        views: RemoteViews,
+        size: WidgetSize,
+        text: String?,
+        chronometerBase: Long = 0L
+    ) {
+        if (size != WidgetSize.WIDE) return
+        if (text != null) {
+            views.setChronometer(R.id.widget_status, 0L, null, false)
+            views.setTextViewText(R.id.widget_status, text)
+        } else {
+            views.setChronometer(R.id.widget_status, chronometerBase, null, true)
+        }
     }
 
     /**
@@ -221,9 +229,26 @@ object WidgetRenderer {
         else -> null
     }
 
-    private fun layoutRes(size: WidgetSize, dark: Boolean): Int = when (size) {
-        WidgetSize.SMALL -> if (dark) R.layout.widget_linyu_2x2_dark else R.layout.widget_linyu_2x2_light
-        WidgetSize.WIDE -> if (dark) R.layout.widget_linyu_2x4_dark else R.layout.widget_linyu_2x4_light
+    /**
+     * 判断小组件当前是不是"宽"的（宽 > 高），用来决定 2x2 用竖向还是横向布局。
+     * 首选情况下系统会给到当前尺寸；拿不到（为 0）时保守按竖向处理。
+     */
+    private fun isWide(context: Context, appWidgetId: Int): Boolean = try {
+        val options = AppWidgetManager.getInstance(context).getAppWidgetOptions(appWidgetId)
+        val w = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH)
+        val h = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT)
+        w > 0 && h > 0 && w > h
+    } catch (_: Exception) {
+        false
+    }
+
+    private fun layoutRes(size: WidgetSize, dark: Boolean, wide: Boolean): Int = when {
+        size == WidgetSize.WIDE ->
+            if (dark) R.layout.widget_linyu_2x4_dark else R.layout.widget_linyu_2x4_light
+        wide ->
+            if (dark) R.layout.widget_linyu_2x2_wide_dark else R.layout.widget_linyu_2x2_wide_light
+        else ->
+            if (dark) R.layout.widget_linyu_2x2_dark else R.layout.widget_linyu_2x2_light
     }
 
     // ── PendingIntent ──
@@ -241,8 +266,14 @@ object WidgetRenderer {
         )
     }
 
+    /**
+     * ⚠️ 目标组件必须是 **Manifest 里注册过的 receiver**。
+     *
+     * 之前这里指向基类 [LinYuWidgetProvider]，而 Manifest 注册的是两个子类，
+     * 广播发到一个没注册的组件会被系统静默丢弃——表现就是「点按钮毫无反应」。
+     */
     private fun toggleIntent(context: Context, appWidgetId: Int, action: String): PendingIntent {
-        val intent = Intent(context, LinYuWidgetProvider::class.java).apply {
+        val intent = Intent(context, providerClass(context, appWidgetId)).apply {
             this.action = action
             putExtra(LinYuWidgetProvider.EXTRA_APPWIDGET_ID, appWidgetId)
         }
@@ -255,5 +286,15 @@ object WidgetRenderer {
             context, code + appWidgetId, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+    }
+
+    /** 反查这个 widget id 属于哪个已注册的 Provider 子类 */
+    private fun providerClass(context: Context, appWidgetId: Int): Class<*> {
+        val manager = AppWidgetManager.getInstance(context)
+        val small = manager.getAppWidgetIds(
+            android.content.ComponentName(context, LinYuWidget2x2::class.java)
+        )
+        return if (appWidgetId in small) LinYuWidget2x2::class.java
+        else LinYuWidget2x4::class.java
     }
 }

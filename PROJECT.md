@@ -223,7 +223,12 @@ app/src/main/
 - 全程只用 RemoteViews 一等公民 API（`setTextViewText` / `setViewVisibility` / `setChronometer` /
   `setOnClickPendingIntent`），**不用** `setInt(id, "setXxx", ...)` 反射写法——
   框架对反射方法有 `@RemotableViewMethod` 白名单，不通过会让整个小组件渲染失败
-- 「开始 / 停止」两种按钮样式做成两个 TextView 切换 visibility，规避上述反射限制
+- 「开 / 关」两个圆形按钮做成两个 TextView 切换 visibility，规避上述反射限制
+- 2x2 的横竖向由 `onAppWidgetOptionsChanged` 里读实际宽高比（`OPTION_APPWIDGET_MIN_WIDTH/HEIGHT`）决定，
+  拉宽后按钮自动从下方移到右侧；读不到尺寸时保守按竖向处理
+- ⚠️ **PendingIntent 的目标组件必须是 Manifest 里注册过的 receiver**。
+  基类 `LinYuWidgetProvider` 没有注册，把广播发给它会**被系统静默丢弃**（无异常、无日志），
+  表现就是「点按钮毫无反应」。渲染时需反查该 widget id 属于 `LinYuWidget2x2` 还是 `LinYuWidget2x4`
 - 开阀 / 关阀逻辑与 App 共用 `data/ShowerController.kt`；小组件侧只额外限制确认轮询预算（6 秒），
   超时返回「状态未知」并提供手动刷新，而不是谎报成功或失败
 - 状态推送：App 内进入 / 退出洗澡、自动关停时调用 `LinYuWidget.refreshAll(context)`
