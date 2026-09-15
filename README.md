@@ -18,9 +18,9 @@
 
 把喜欢的图片设成界面背景，App 会自动从图里提取主题色作为强调色；主页与使用页各存一套，互不影响。
 
-| 主页 | 使用页 | 背景设置 |
+| 背景设置 | 主页 | 使用页 |
 |---|---|---|
-| <img src="assets/bg_home.png" width="230" alt="主页背景"> | <img src="assets/bg_shower.png" width="230" alt="使用页背景"> | <img src="assets/bg_settings.png" width="230" alt="背景设置"> |
+| <img src="assets/bg_settings.png" width="230" alt="背景设置"> | <img src="assets/bg_home.png" width="230" alt="主页背景"> | <img src="assets/bg_shower.png" width="230" alt="使用页背景"> |
 
 > 使用页套用自定义背景后不再显示设备 emoji——背景图本身就是画面主体。
 
