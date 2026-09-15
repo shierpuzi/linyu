@@ -28,9 +28,9 @@
 
 在桌面直接启停热水，不用打开 App。
 
-| 2x2 | 2x4 · 设备控制 |
-|---|---|
-| <img src="assets/widget_2x2.png" width="170" alt="2x2 小组件"> | <img src="assets/widget_2x4_home.png" width="380" alt="2x4 设备控制"> |
+| 2x2 · 空闲 | 2x2 · 使用中 | 2x4 · 设备控制 |
+|---|---|---|
+| <img src="assets/widget_2x2.png" width="170" alt="2x2 小组件 · 空闲"> | <img src="assets/widget_2x2_using.png" width="170" alt="2x2 小组件 · 使用中"> | <img src="assets/widget_2x4_home.png" width="380" alt="2x4 设备控制"> |
 
 | 2x4 · 附近设备 | 2x4 · 账单 |
 |---|---|
