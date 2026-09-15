@@ -8,11 +8,33 @@
 
 **⬇️ [下载最新 APK (v2.2.1)](https://github.com/yehu-imei/linyu/releases/latest)**
 
-趣智校园第三方 Android 客户端，用于控制校园热水器与直饮水机。相比官方 App，提供更简洁的界面和更流畅的操作体验。
+趣智校园第三方 Android 客户端，用于控制校园热水器。相比官方 App，提供更简洁的界面和更流畅的操作体验。
 
 ## 📱 预览
 
-<img src="assets/screenshots.png" width="1000" alt="淋浴 App 截图" />
+<img src="assets/preview.png" width="900" alt="淋浴 App 界面总览" />
+
+### 背景装扮
+
+把喜欢的图片设成界面背景，App 会自动从图里提取主题色作为强调色；主页与使用页各存一套，互不影响。
+
+| 主页 | 使用页 | 背景设置 |
+|---|---|---|
+| <img src="assets/bg_home.png" width="230" alt="主页背景"> | <img src="assets/bg_shower.png" width="230" alt="使用页背景"> | <img src="assets/bg_settings.png" width="230" alt="背景设置"> |
+
+> 使用页套用自定义背景后不再显示设备 emoji——背景图本身就是画面主体。
+
+### 桌面小组件
+
+在桌面直接启停热水，不用打开 App。
+
+| 2x2 | 2x4 · 设备控制 |
+|---|---|
+| <img src="assets/widget_2x2.png" width="170" alt="2x2 小组件"> | <img src="assets/widget_2x4_home.png" width="380" alt="2x4 设备控制"> |
+
+| 2x4 · 附近设备 | 2x4 · 账单 |
+|---|---|
+| <img src="assets/widget_2x4_nearby.png" width="380" alt="2x4 附近设备"> | <img src="assets/widget_2x4_bill.png" width="380" alt="2x4 账单"> |
 
 ## ✨ 功能
 
