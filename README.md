@@ -3,10 +3,10 @@
 [![Platform](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com)
 [![Language](https://img.shields.io/badge/Language-Kotlin-blue.svg)](https://kotlinlang.org)
 [![UI](https://img.shields.io/badge/UI-Jetpack%20Compose-purple.svg)](https://developer.android.com/jetpack/compose)
-[![Version](https://img.shields.io/badge/Version-v2.2.0-orange.svg)](https://github.com/yehu-imei/linyu/releases/latest)
+[![Version](https://img.shields.io/badge/Version-v2.2.1-orange.svg)](https://github.com/yehu-imei/linyu/releases/latest)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**⬇️ [下载最新 APK (v2.2.0)](https://github.com/yehu-imei/linyu/releases/latest)**
+**⬇️ [下载最新 APK (v2.2.1)](https://github.com/yehu-imei/linyu/releases/latest)**
 
 趣智校园第三方 Android 客户端，用于控制校园热水器与直饮水机。相比官方 App，提供更简洁的界面和更流畅的操作体验。
 
@@ -27,7 +27,10 @@
 - ⏳ **自动关停倒计时** — 显示闲置自动关闭倒计时，关闭时弹出确认框
 - 💰 **消费结算** — 关阀后通过账单自动显示本次消费金额
 - 🚰 **饮水机支持** — 自动识别直饮水机（冷水 ❄️ / 热水 ♨️），绿色主题区分，设备名智能精简
-- 🧩 **桌面小组件** — 2x2（按钮在下方，拉宽后自动移到右侧）/ 2x4（大圆形按钮）两种尺寸，样式对齐 App 内卡片；在桌面直接启停热水，计时由系统 Chronometer 驱动，App 不在也能实时走秒
+- 🧩 **桌面小组件** — 2x2 / 2x4 两种尺寸，桌面直接启停热水；深色液态玻璃卡片，三套布局随尺寸自适应；计时由系统 Chronometer 驱动，App 不在也能实时走秒
+  - 2x4 带侧边导航，可切换「设备控制 / 附近设备 / 账单」三页
+  - 操作状态在桌面上**全局同步**：点任一个组件，所有淋浴组件同时显示「正在开启…」并转圈
+  - 点「上次消费」卡片进 App 账单页；使用中点计时卡片直接关阀
 
 ### 💰 钱包与账单
 
@@ -85,6 +88,7 @@ app/src/main/java/com/hualala/linyu/
 ├── model/                  # 数据模型
 │   ├── LoginModels.kt      # 含账单设备类型判定（热水器 / 饮水机）
 │   ├── DeviceModels.kt     # 含饮水机识别与设备名格式化
+│   ├── WidgetCache.kt      # 小组件离线快照（附近设备 / 账单）
 │   ├── ActiveOrder.kt
 │   └── MqttModels.kt
 ├── ui/                     # 界面
@@ -97,6 +101,7 @@ app/src/main/java/com/hualala/linyu/
 │   ├── AppBackgroundLayer.kt    # 自定义背景渲染层
 │   ├── CustomBackgroundScreen.kt# 背景装扮设置页
 │   ├── LogViewerDialog.kt       # 内置日志查看器
+│   ├── TailEllipsisText.kt      # 尾部优先省略的单行文本（设备名 / MAC）
 │   ├── LinYuToast.kt
 │   ├── DeviceDetailDialog.kt
 │   └── theme/
@@ -119,8 +124,18 @@ app/src/main/java/com/hualala/linyu/
 ```
 
 res/ 额外包含 `drawable/ic_flashlight.xml`（扫码手电筒图标）、`drawable/app_logo.png`（应用 logo）、
-`xml/file_paths.xml`（日志导出 FileProvider），以及小组件用的
-`layout/widget_linyu_2x2_*.xml`、`layout/widget_linyu_2x4_*.xml`、`xml/widget_info_*.xml`、`drawable/widget_*.xml`。
+`xml/file_paths.xml`（日志导出 FileProvider）。
+
+小组件相关资源：
+
+```
+layout/  widget_linyu_2x2.xml / widget_linyu_2x2_wide.xml / widget_linyu_2x4.xml
+xml/     widget_info_2x2.xml / widget_info_2x4.xml
+nodpi/   widget_preview_2x2.png / widget_preview_2x4.png   # 组件选择器里的预览图
+drawable/ widget_glass / widget_inset / widget_badge_* / widget_btn_* /
+          widget_sphere_* / widget_nav_active / widget_avatar
+          ic_widget_*.xml                                  # 小组件用的矢量图标
+```
 
 ## 🚀 构建
 
@@ -221,6 +236,10 @@ secret = MD5( 手机号前3位 + 手机号后4位 + "klcx" )
 | ~~切到「我的」页面卡顿~~ | ✅ **已解决 (v2.1.0)**：卡片顺序 / Release 数据改为进程级缓存 |
 | ~~设备名残留「表」字~~ | ✅ **已解决 (v2.1.0)**：修正正则处理顺序，`热水表-xxx` 不再被截成 `表 xxx` |
 | ~~使用页退出按钮点击无响应~~ | ✅ **已解决 (v2.1.0)**：修正组件层级，按钮不再被上层 Column 拦截点击 |
+| ~~小组件按钮点了没反应~~ | ✅ **已解决 (v2.2.1)**：PendingIntent 指向了未注册的组件，广播被系统静默丢弃 |
+| ~~2x2 拉宽后显示「载入窗口小部件时出现问题」~~ | ✅ **已解决 (v2.2.1)**：给 ImageView 调了 `setTextViewText`，RemoteViews 反射找不到方法 |
+| ~~附近设备页必崩~~ | ✅ **已解决 (v2.2.1)**：旧缓存 JSON 缺字段，Gson 绕过 Kotlin 非空约定给出 null |
+| ~~首页设备名过长会盖到按钮上~~ | ✅ **已解决 (v2.2.1)**：测量省略号宽度时漏算了主题字距，已修正并改为不换行 |
 | ~~Android 12+ 被迫要定位权限~~ | ✅ **已解决 (v2.2.0)**：`BLUETOOTH_SCAN` 声明 `neverForLocation`，且改由用户主动触发申请 |
 
 ### ❌ 仍未解决

@@ -8,7 +8,7 @@
 |---|---|
 | 应用名称 | 淋浴 |
 | 包名 | `com.hualala.linyu` |
-| 版本 | v2.2.0 |
+| 版本 | v2.2.1 |
 | 技术栈 | Kotlin + Jetpack Compose + Material 3 |
 | 最低 Android 版本 | Android 8.0 (API 26) |
 | 目标 Android 版本 | Android 16 (API 36) |
@@ -40,7 +40,7 @@
 | 多设备支持 | 支持同时管理多个活跃设备订单 |
 | 上次使用设备 | 记住上次使用的设备，一键快速开始 |
 | 饮水机支持 | 按 `bigTypeId == 5` 识别直饮水机，绿主题 + ❄️/♨️ 图标 + 名称精简（未实机验证） |
-| 桌面小组件 | 2x2 / 2x4 两种尺寸，桌面直接启停热水；计时由 `Chronometer` 驱动，App 不在也能走秒 |
+| 桌面小组件 | 2x2 / 2x4 两种尺寸，桌面直接启停热水；深色液态玻璃卡片，计时由 `Chronometer` 驱动，App 不在也能走秒 |
 | 主动挤号检测 | 25 秒心跳轮询，被挤下线能及时弹提示（跟随 Activity 生命周期，退后台自动停） |
 
 ### 钱包与账单
@@ -109,6 +109,7 @@ app/src/main/
 │   │   │                                  # CloseOrderResult（含账单设备类型判定）
 │   │   ├── DeviceModels.kt                # DeviceInfo、NearbyDevice（含饮水机识别、
 │   │   │                                  # 设备名格式化、类型 emoji / 颜色）
+│   │   ├── WidgetCache.kt                 # 小组件离线快照（附近设备 / 账单）
 │   │   ├── ActiveOrder.kt                 # 活跃订单模型
 │   │   └── MqttModels.kt                  # MQTT 消息模型
 │   │
@@ -125,6 +126,7 @@ app/src/main/
 │   │   ├── AppBackgroundLayer.kt          # 自定义背景渲染层（透明度/模糊/亮度）
 │   │   ├── CustomBackgroundScreen.kt      # 背景装扮设置页（主页 / 使用页切换）
 │   │   ├── LogViewerDialog.kt             # 内置日志查看器
+│   │   ├── TailEllipsisText.kt            # 尾部优先省略的单行文本（设备名 / MAC）
 │   │   ├── DeviceDetailDialog.kt          # 设备详情弹窗（SN、MAC、预扣金额、状态）
 │   │   ├── LinYuToast.kt                  # 自定义 Toast 组件（应用图标 + 深色背景）
 │   │   └── theme/
@@ -152,10 +154,21 @@ app/src/main/
     ├── drawable/
     │   ├── app_logo.png                   # 应用 logo（Toast 图标）
     │   ├── ic_flashlight.xml              # 扫码手电筒图标
-    │   └── widget_*.xml                   # 小组件卡片底 / 按钮底（浅深各一套）
+    │   ├── widget_glass.xml              # 小组件玻璃卡底（深色中性玻璃 + 高光 + 轮廓）
+    │   ├── widget_inset.xml              # 内嵌玻璃槽（上次消费 / 计时）
+    │   ├── widget_badge_*.xml            # 状态徽章（空闲 / 使用中）
+    │   ├── widget_btn_*.xml              # 按钮底（主操作 / 停止）
+    │   ├── widget_sphere_*.xml           # 横向 2x2 的水滴球开关
+    │   ├── widget_nav_active.xml         # 2x4 侧边栏选中底
+    │   ├── widget_avatar.xml             # 设备头像圆底
+    │   └── ic_widget_*.xml               # 小组件矢量图标
     ├── layout/
-    │   └── widget_linyu_2x2_*.xml         # 小组件布局（2x2 / 2x4 × 浅 / 深）
-    │   └── widget_linyu_2x4_*.xml
+    │   ├── widget_linyu_2x2.xml          # 小组件布局（2x2 竖向）
+    │   ├── widget_linyu_2x2_wide.xml     # 小组件布局（2x2 拉宽成横向）
+    │   └── widget_linyu_2x4.xml          # 小组件布局（2x4，含三页）
+    ├── drawable-nodpi/
+    │   ├── widget_preview_2x2.png        # 组件选择器预览图（不随屏幕密度缩放）
+    │   └── widget_preview_2x4.png
     ├── xml/
     │   ├── network_security_config.xml    # 网络安全配置（仅允许 MQTT 明文）
     │   ├── file_paths.xml                 # 日志导出 FileProvider 路径
@@ -374,6 +387,18 @@ buildTypes {
 ---
 
 ## 版本历史
+
+### v2.2.1 (2026-09-15)
+
+- **桌面小组件重做**：改成深色中性液态玻璃 + 白字的固定配色，不再按壁纸明暗切深浅
+- 小组件布局从 6 套（浅深各半）精简为 **3 套**（2x2 竖向 / 2x2 横向 / 2x4）
+- 开关按钮只留图标；2x4 头部整行铺满、徽章贴最右
+- 附近设备页补 dB 数值与「（x 分钟前）」扫描时间
+- 操作状态全局同步 + 卡片转圈；卡片点击按状态分流（空闲→账单页，使用中→关阀）
+- 深链：附近设备「选用」直接弹出设备详情；账单页 → App 账单页
+- 修复：按钮点击无反应、2x2 拉宽后加载失败、附近设备页崩溃、预扣显示 ¥0.00、
+  两个小组件计时错相位、跨布局徽章颜色不一致
+- 首页设备名 / MAC 改为头部省略且不换行（系统字体放大也不会撑破卡片）
 
 ### v2.2.0 (2026-09-14)
 

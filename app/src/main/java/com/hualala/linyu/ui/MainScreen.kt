@@ -424,10 +424,22 @@ private fun LastDeviceCard(viewModel: MainViewModel, phone: String) {
                 contentAlignment = Alignment.Center) { Text(viewModel.lastDeviceEmoji, fontSize = 22.sp) }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
-                Text(viewModel.lastDeviceName.ifEmpty { "热水器" },
-                    fontWeight = FontWeight.SemiBold, color = AppColors.TextPrimary)
+                // 用尾部优先省略：设备名和 MAC 都是后半段才有辨识度
+                // （房号在末尾、MAC 的厂商前缀是固定的）。同时彻底不换行——
+                // 有的手机系统字体调到很大，普通 Text 会折成两三行把卡片撑变形。
+                TailEllipsisText(
+                    text = viewModel.lastDeviceName.ifEmpty { "热水器" },
+                    modifier = Modifier.fillMaxWidth(),
+                    fontWeight = FontWeight.SemiBold,
+                    color = AppColors.TextPrimary
+                )
                 Spacer(Modifier.height(4.dp))
-                Text("MAC: ${viewModel.lastDeviceMac}", color = AppColors.TextSecondary, fontSize = 12.sp)
+                TailEllipsisText(
+                    text = "MAC: ${viewModel.lastDeviceMac}",
+                    modifier = Modifier.fillMaxWidth(),
+                    color = AppColors.TextSecondary,
+                    fontSize = 12.sp
+                )
             }
             Button(onClick = { viewModel.startLastDevice(phone) },
                 shape = RoundedCornerShape(16.dp),

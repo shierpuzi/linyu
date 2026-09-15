@@ -48,8 +48,19 @@ import com.hualala.linyu.utils.BackgroundState
 import com.hualala.linyu.utils.PrefsHelper
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        /** 从小组件跳进来时要打开哪个底部 tab（0 首页 / 1 账单 / 2 我的） */
+        const val EXTRA_TAB = "linyu_tab"
+        /** 从小组件「选用」跳进来时要直接弹出的设备 MAC */
+        const val EXTRA_BIND_MAC = "linyu_bind_mac"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // 小组件可以带参数跳进来：账单卡片 → 账单页；附近设备「选用」→ 直接弹那台设备
+        val launchTab = intent?.getIntExtra(EXTRA_TAB, 0) ?: 0
+        val launchBindMac = intent?.getStringExtra(EXTRA_BIND_MAC)
         // 启用 edge-to-edge：让内容延伸到状态栏/导航栏下方，
         // 这样自定义背景才能铺满到状态栏（各页面用 statusBarsPadding 自保内容位置）
         androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -80,7 +91,7 @@ class MainActivity : ComponentActivity() {
             // 状态若声明在容器内会被重建（表现为切主题后跳回首页）
             var isLoggedIn by rememberSaveable { mutableStateOf(hasToken) }
             var userPhone by rememberSaveable { mutableStateOf(PrefsHelper.telephone) }
-            var currentTab by rememberSaveable { mutableStateOf(0) }
+            var currentTab by rememberSaveable { mutableStateOf(launchTab) }
             var showKickedDialog by remember { mutableStateOf(false) }
             var showLogoutConfirm by remember { mutableStateOf(false) }
             val mainViewModel: MainViewModel = viewModel()
@@ -96,6 +107,14 @@ class MainActivity : ComponentActivity() {
                     updateStatusBarColor(mode)
                 }
             ) {
+
+                // 小组件「选用」带过来的设备：登录状态下直接弹出它的详情
+                LaunchedEffect(isLoggedIn, launchBindMac) {
+                    if (isLoggedIn && !launchBindMac.isNullOrEmpty()) {
+                        mainViewModel.fetchDeviceInfo(launchBindMac)
+                        currentTab = 0
+                    }
+                }
 
                 LaunchedEffect(mainViewModel.kickedOut, isLoggedIn) {
                     if (mainViewModel.kickedOut && !showKickedDialog && isLoggedIn) {

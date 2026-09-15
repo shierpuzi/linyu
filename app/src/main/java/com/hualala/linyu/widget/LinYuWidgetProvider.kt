@@ -66,7 +66,10 @@ open class LinYuWidgetProvider : AppWidgetProvider() {
 
     override fun onDeleted(context: Context, appWidgetIds: IntArray) {
         // 清掉这个 widget 的过渡态，免得反复增删后残留一堆无用条目
-        appWidgetIds.forEach { WidgetBridge.forget(it) }
+        appWidgetIds.forEach {
+            WidgetBridge.forget(it)
+            PrefsHelper.clearWidgetTab(it)
+        }
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -74,10 +77,20 @@ open class LinYuWidgetProvider : AppWidgetProvider() {
         super.onReceive(context, intent)
 
         val action = intent.action ?: return
-        if (action != ACTION_START && action != ACTION_STOP && action != ACTION_REFRESH) return
+        if (action != ACTION_START && action != ACTION_STOP &&
+            action != ACTION_REFRESH && action != ACTION_SET_TAB
+        ) return
 
         val id = intent.getIntExtra(EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
         if (id == AppWidgetManager.INVALID_APPWIDGET_ID) return
+
+        // 切换 2x4 页面：存下选中项再重绘，不需要走网络，同步处理即可
+        if (action == ACTION_SET_TAB) {
+            WidgetBridge.ensureInit(context)
+            PrefsHelper.setWidgetTab(id, intent.getIntExtra(EXTRA_TAB, 0))
+            WidgetBridge.renderId(context, id)
+            return
+        }
 
         // goAsync：告诉系统"这个广播还没处理完，别回收进程"，最多约 10 秒
         val pending = goAsync()
@@ -88,7 +101,7 @@ open class LinYuWidgetProvider : AppWidgetProvider() {
                 // 小组件里没有地方弹错误，只能落日志；界面靠重新渲染回落到真实状态
                 AppLogger.e("Widget action failed: $action", e)
             } finally {
-                WidgetBridge.clearBusy(id)
+                WidgetBridge.clearBusy()
                 // 必须刷新桌面上的**所有**小组件，不能只刷被点的那个：
                 // 2x2 和 2x4 可能同时摆在桌面上，它们读的是同一份 Prefs，
                 // 只刷一个的话另一个会一直停在旧状态（点了 2x2 开阀，2x4 还显示「空闲」）。
@@ -101,19 +114,20 @@ open class LinYuWidgetProvider : AppWidgetProvider() {
     private suspend fun handleAction(context: Context, appWidgetId: Int, action: String) {
         WidgetBridge.ensureInit(context)
         WidgetBridge.markBusy(
-            appWidgetId,
             when (action) {
                 ACTION_STOP -> WidgetRenderer.DisabledReason.STOPPING
                 ACTION_REFRESH -> WidgetRenderer.DisabledReason.REFRESHING
                 else -> WidgetRenderer.DisabledReason.STARTING
             }
         )
-        // 先画一次"进行中"，让用户点下去立刻有反馈
-        WidgetBridge.renderId(context, appWidgetId)
+        // 先画一次"进行中"，让用户点下去立刻有反馈。
+        // 必须是 renderAll：操作状态是全局的，桌面上每个淋浴小组件都该同时进入
+        // 「正在开启…/正在关闭…」，只重绘被点的那个会让另一个看起来没反应
+        WidgetBridge.renderAll(context)
 
         val snCode = PrefsHelper.lastDeviceSnCode
         if (snCode.isNullOrEmpty() || !PrefsHelper.isLoggedIn) {
-            WidgetBridge.clearBusy(appWidgetId)
+            WidgetBridge.clearBusy()
             return
         }
 
@@ -127,7 +141,7 @@ open class LinYuWidgetProvider : AppWidgetProvider() {
                 // 预算耗尽：不谎报成功也不谎报失败，改成"点击刷新"由用户手动对齐
                 OpenOutcome.Unknown -> {
                     AppLogger.w("Widget 开阀结果未知（预算耗尽）")
-                    WidgetBridge.markUnknown(appWidgetId)
+                    WidgetBridge.markUnknown()
                 }
             }
 
@@ -140,14 +154,14 @@ open class LinYuWidgetProvider : AppWidgetProvider() {
             ACTION_REFRESH -> {
                 val running = ShowerController.reconcile(snCode)
                 AppLogger.i("Widget 手动刷新：服务端状态 running=$running")
-                WidgetBridge.clearUnknown(appWidgetId)
+                WidgetBridge.clearUnknown()
             }
         }
     }
 
     /** 渲染单个 widget（不含"进行中"覆盖） */
     private fun render(context: Context, id: Int): android.widget.RemoteViews {
-        val disabled = WidgetBridge.busyReason(id)
+        val disabled = WidgetBridge.busyReason()
         return WidgetRenderer.build(context, size, WidgetRenderer.readState(), id, disabled)
     }
 
@@ -156,6 +170,8 @@ open class LinYuWidgetProvider : AppWidgetProvider() {
         const val ACTION_START = "com.hualala.linyu.widget.ACTION_START"
         const val ACTION_STOP = "com.hualala.linyu.widget.ACTION_STOP"
         const val ACTION_REFRESH = "com.hualala.linyu.widget.ACTION_REFRESH"
+        const val ACTION_SET_TAB = "com.hualala.linyu.widget.ACTION_SET_TAB"
+        const val EXTRA_TAB = "tab"
     }
 }
 
@@ -210,44 +226,43 @@ internal object WidgetBridge {
 
     // ── 进行中状态 ──
     // 只存在内存里：进程被杀就丢，丢了也只是少一次"正在开启…"的过渡动画，不影响正确性
-    private val busy = mutableMapOf<Int, WidgetRenderer.DisabledReason>()
-    private val unknown = mutableSetOf<Int>()
+    // 全局一份，不按 widget id 分：
+    // 一次操作本来就只可能有一个，按 id 分会造成"只有被点的那个显示正在关闭，
+    // 另一个要等结束才同步"——用户明确反馈过这个问题
+    private var busy: WidgetRenderer.DisabledReason? = null
+    private var unknown = false
 
-    fun markBusy(id: Int, reason: WidgetRenderer.DisabledReason) {
-        unknown.remove(id)
-        busy[id] = reason
+    fun markBusy(reason: WidgetRenderer.DisabledReason) {
+        unknown = false
+        busy = reason
     }
 
-    fun markUnknown(id: Int) {
-        busy.remove(id)
-        unknown.add(id)
+    fun markUnknown() {
+        busy = null
+        unknown = true
     }
 
-    fun clearUnknown(id: Int) {
-        unknown.remove(id)
+    fun clearUnknown() {
+        unknown = false
     }
 
-    fun clearBusy(id: Int) {
-        busy.remove(id)
+    fun clearBusy() {
+        busy = null
         // unknown 不清：它表示"上一次操作结果未知"，要等用户手动刷新或 App 对齐后才消
     }
 
     /** widget 被从桌面删除时调用 */
     fun forget(id: Int) {
-        busy.remove(id)
-        unknown.remove(id)
+        // 状态是全局的，单个 widget 被删不影响它
     }
 
-    /** App 侧刚对过账，桌面上残留的"状态未知"已经不准了，一律清掉 */
+    /** App 侧刚对过账，桌面上残留的"状态未知"已经不准了，清掉 */
     fun clearAllUnknown() {
-        unknown.clear()
+        unknown = false
     }
 
-    fun busyReason(id: Int): WidgetRenderer.DisabledReason? = when {
-        busy.containsKey(id) -> busy[id]
-        unknown.contains(id) -> WidgetRenderer.DisabledReason.UNKNOWN
-        else -> null
-    }
+    fun busyReason(): WidgetRenderer.DisabledReason? =
+        busy ?: if (unknown) WidgetRenderer.DisabledReason.UNKNOWN else null
 
     /** 遍历桌面上所有「淋浴」小组件 */
     fun forEachWidget(context: Context, block: (id: Int, size: WidgetSize) -> Unit) {
@@ -263,7 +278,8 @@ internal object WidgetBridge {
 
     fun render(context: Context, id: Int, size: WidgetSize) {
         val views = WidgetRenderer.build(
-            context, size, WidgetRenderer.readState(), id, busyReason(id)
+            context, size, WidgetRenderer.readState(), id, busyReason(),
+            tab = PrefsHelper.widgetTab(id)
         )
         AppWidgetManager.getInstance(context).updateAppWidget(id, views)
     }
@@ -279,7 +295,7 @@ internal object WidgetBridge {
         forEachWidget(context) { wid, size ->
             if (wid == id) { render(context, id, size); matched = true }
         }
-        if (!matched) clearBusy(id)
+        if (!matched) clearBusy()
     }
 }
 

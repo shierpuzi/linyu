@@ -18,6 +18,8 @@ import com.hualala.linyu.data.OpenOutcome
 import com.hualala.linyu.data.ShowerController
 import com.hualala.linyu.widget.LinYuWidget
 import com.hualala.linyu.model.ActiveOrder
+import com.hualala.linyu.model.CachedBill
+import com.hualala.linyu.model.CachedDevice
 import com.hualala.linyu.model.UseCodeData
 import com.hualala.linyu.model.BillItem
 import com.hualala.linyu.model.DeviceInfo
@@ -142,6 +144,8 @@ class MainViewModel : ViewModel() {
         val e = System.currentTimeMillis() - scanStartTime
         if (e < 600) sessionScope().launch { delay(600 - e); isScanning = false }
         else isScanning = false
+        // 扫描结束时把结果存一份给小组件的「附近设备」页
+        cacheNearbyForWidget()
     }
 
     // ── 扫码绑定 ──
@@ -316,6 +320,44 @@ class MainViewModel : ViewModel() {
      */
     private fun refreshWidgets() {
         appContext?.let { LinYuWidget.refreshAll(it) }
+    }
+
+    /**
+     * 把账单快照存给小组件。
+     * 小组件自己拉不了账单，2x4 的「账单」页读的就是这份数据，界面上会标同步时间。
+     */
+    private fun cacheBillsForWidget(recent: List<BillItem>) {
+        val list = recent.map { b ->
+            CachedBill(
+                emoji = b.consumeBillDTO.deviceEmoji,
+                name = b.consumeBillDTO.displayDesc,
+                timeText = b.consumeBillDTO.consumeDate.take(16),
+                moneyText = "-¥ " + b.consumeBillDTO.consumeMoney
+            )
+        }
+        PrefsHelper.widgetBillJson = gson.toJson(list)
+        PrefsHelper.widgetBillTime = System.currentTimeMillis()
+    }
+
+    /**
+     * 把附近设备快照存给小组件。
+     * 只在扫到东西时才写，避免一次失败的扫描把上次的好数据清空。
+     */
+    private fun cacheNearbyForWidget() {
+        val list = nearbyDevices.take(2).map { d ->
+            CachedDevice(
+                emoji = d.typeEmoji,
+                name = d.displayName,
+                // 设备信息还没拉到时用名字兜底，保证小字那行不会是空的
+                desc = d.deviceInfo?.typeLabel
+                    ?: if (d.name.startsWith("洗手台")) "洗手台热水器" else "卫生间热水器",
+                rssi = d.rssi,
+                mac = d.mac
+            )
+        }
+        if (list.isEmpty()) return
+        PrefsHelper.widgetNearbyJson = gson.toJson(list)
+        PrefsHelper.widgetNearbyTime = System.currentTimeMillis()
     }
 
     /**
@@ -802,6 +844,7 @@ class MainViewModel : ViewModel() {
                 // 账单按月份倒序拉取，所以第一条就是最新的
                 all.firstOrNull()?.consumeBillDTO?.consumeMoney?.toDoubleOrNull()
                     ?.let { PrefsHelper.recordConsume(it) }
+                cacheBillsForWidget(all.take(2))
                 refreshWidgets()
             } catch (e: Exception) { 
                 checkKickEx(e)

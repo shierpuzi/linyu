@@ -40,6 +40,16 @@ data class DeviceInfo(
         else -> "🚿"
     }
 
+    /**
+     * 设备类型说明，给小组件副标题这类"小字"位置用。
+     * 措辞与账单里的 [com.hualala.linyu.model.BillDTO.deviceTypeLabel] 保持一致。
+     */
+    val typeLabel: String get() = when {
+        isDrinkingWater -> if (isHotWater) "直饮水机 · 热水" else "直饮水机 · 冷水"
+        deviceName.startsWith("洗手台") -> "洗手台热水器"
+        else -> "卫生间热水器"
+    }
+
     val typeColor: Color get() = when {
         isDrinkingWater -> Color(0xFF10B981) // 饮水机：绿色
         deviceName.startsWith("洗手台") -> Color(0xFFFFCC80)

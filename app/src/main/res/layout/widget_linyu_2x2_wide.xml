@@ -1,0 +1,240 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  2x2 横向小组件— 第四轮调整
+  · 头部整行：状态点 + 设备名/描述竖排 + 状态胶囊贴最右
+  · 主体：「上次消费」是一块**按内容自适应大小**的内嵌玻璃卡，不会再随小组件拉宽而向右吸附拉伸；
+    右侧是水滴圆球，中间用弹性占位（空 TextView）把它顶到最右
+  · 卡片文字水平垂直都居中、单行不换行
+
+  按钮是 ImageView（圆球），与竖向布局的胶囊按钮（TextView）**用不同 id**：
+  RemoteViews 按控件类型分派操作，混用会静默炸掉整个小组件。
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_glass"
+    android:padding="10dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/widget_status_dot"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="9sp"
+                android:textColor="#22C55E"
+                android:text="●" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/widget_device"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:ellipsize="start"
+                    android:textColor="#FFFFFF"
+                    android:text="未绑定设备" />
+
+                <TextView
+                    android:id="@+id/widget_device_desc"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="8.5sp"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:paddingStart="11dp"
+                    android:textColor="#ADFFFFFF"
+                    android:text="卫生间热水器" />
+            </LinearLayout>
+
+            <FrameLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp">
+
+                <TextView
+                    android:id="@+id/widget_badge_idle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/widget_badge_idle"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:paddingTop="2dp"
+                    android:paddingBottom="2dp"
+                    android:textSize="9.5sp"
+                    android:textStyle="bold"
+                    android:textColor="#F24ADE80"
+                    android:text="● 空闲" />
+
+                <TextView
+                    android:id="@+id/widget_badge_using"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/widget_badge_using"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:paddingTop="2dp"
+                    android:paddingBottom="2dp"
+                    android:textSize="9.5sp"
+                    android:textStyle="bold"
+                    android:textColor="#60A5FA"
+                    android:text="● 使用中"
+                    android:visibility="gone" />
+            </FrameLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <!--
+              固定宽度 + 填满可用高度。之前用 wrap_content，内容只有「¥ —」时
+              卡片会缩成一小块，看着很单薄；给死宽度后不管有没有数据都保持同样的体量，
+              也不会随小组件拉宽而向右吸附拉伸。
+            -->
+            <FrameLayout
+                android:layout_width="96dp"
+                android:layout_height="match_parent"
+                android:background="@drawable/widget_inset">
+
+                <LinearLayout
+                    android:id="@+id/widget_panel_idle"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:orientation="vertical"
+                    android:gravity="center">
+
+                    <TextView
+                        android:id="@+id/widget_panel_label"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="10sp"
+                        android:maxLines="1"
+                        android:textColor="#ADFFFFFF"
+                        android:text="上次消费" />
+
+                    <TextView
+                        android:id="@+id/widget_lastconsume"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="21sp"
+                        android:textStyle="bold"
+                        android:maxLines="1"
+                        android:fontFeatureSettings="tnum"
+                        android:textColor="#FFFFFF"
+                        android:text="¥ —" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/widget_panel_running"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:visibility="gone">
+
+                    <Chronometer
+                        android:id="@+id/widget_timer"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="23sp"
+                        android:textStyle="bold"
+                        android:maxLines="1"
+                        android:fontFeatureSettings="tnum"
+                        android:textColor="#FFFFFF"
+                        android:text="00:00" />
+
+                    <TextView
+                        android:id="@+id/widget_prededuct"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="10sp"
+                        android:textStyle="bold"
+                        android:maxLines="1"
+                        android:textColor="#ADFFFFFF"
+                        android:text="预扣 · ¥0.00" />
+                </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/widget_panel_busy"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:gravity="center"
+                android:visibility="gone">
+
+                <ProgressBar
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:indeterminate="true"
+                    android:indeterminateTint="#FFFFFF" />
+
+                <TextView
+                    android:id="@+id/widget_busy_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:textColor="#FFFFFF"
+                    android:text="正在开启…" />
+            </LinearLayout>
+            </FrameLayout>
+
+            <!-- 弹性占位：把圆球顶到最右。用空 TextView，RemoteViews 白名单里没有 View -->
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <FrameLayout
+                android:layout_width="58dp"
+                android:layout_height="58dp"
+                android:layout_marginEnd="4dp">
+
+                <ImageView
+                    android:id="@+id/widget_sphere_start"
+                    android:layout_width="58dp"
+                    android:layout_height="58dp"
+                    android:background="@drawable/widget_sphere_start"
+                    android:src="@drawable/ic_widget_power"
+                    android:tint="#FFFFFF"
+                    android:padding="16dp"
+                    android:contentDescription="开启热水" />
+
+                <ImageView
+                    android:id="@+id/widget_sphere_stop"
+                    android:layout_width="58dp"
+                    android:layout_height="58dp"
+                    android:background="@drawable/widget_sphere_stop"
+                    android:src="@drawable/ic_widget_stop"
+                    android:tint="#FFFFFF"
+                    android:padding="16dp"
+                    android:contentDescription="停止热水"
+                    android:visibility="gone" />
+            </FrameLayout>
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

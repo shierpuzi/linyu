@@ -58,6 +58,8 @@ object PrefsHelper {
                 .remove("lastDeviceName").remove("lastDeviceMac").remove("lastDeviceSnCode")
                 .remove("lastDeviceEmoji").remove("boundRoom").remove("activeOrders")
                 .remove("lastConsumeMoney").remove("lastConsumeTime")
+                .remove("lastDeviceTypeName").remove("lastDeviceWithholdMoney").remove("widgetNearbyJson").remove("widgetBillJson")
+                .remove("widgetNearbyTime").remove("widgetBillTime")
             // startedAt_/autoDiscon_ 的 key 是「前缀 + snCode」，不是固定名，
             // 原来写成 remove("startedAt_") 是删不掉的——换个账号登录后，
             // 上一任的计时器还在，界面会显示莫名其妙的已用时长。这里按前缀扫掉。
@@ -117,6 +119,41 @@ object PrefsHelper {
 
     var manualBalance: String get() = prefs.getString("manualBalance", "") ?: ""; set(v) = prefs.edit().putString("manualBalance", v).apply()
     var manualBalanceTime: Long get() = prefs.getLong("manualBalanceTime", 0L); set(v) = prefs.edit().putLong("manualBalanceTime", v).apply()
+
+    /**
+     * 上次使用设备的预扣金额。
+     * 小组件开阀时拿不到 DeviceInfo（它只有 snCode），而预扣金额只存在于设备信息里，
+     * 所以单独存一份——否则小组件开阀后卡片上的预扣永远是 ¥0.00。
+     */
+    var lastDeviceWithholdMoney: Float get() = prefs.getFloat("lastDeviceWithholdMoney", 0f)
+        set(v) = prefs.edit().putFloat("lastDeviceWithholdMoney", v).apply()
+
+    /** 上次使用设备的类型名（热水器 / 洗手台 / 饮水机），小组件副标题用 */
+    var lastDeviceTypeName: String get() = prefs.getString("lastDeviceTypeName", "") ?: ""
+        set(v) = prefs.edit().putString("lastDeviceTypeName", v).apply()
+
+    // ── 小组件离线快照 ──
+    // 小组件自己扫不了蓝牙、拉不了账单，所以由 App 在干活时把结果存下来，
+    // 小组件的「附近设备 / 账单」两页读这里，并显示同步时间避免被当成实时数据。
+
+    var widgetNearbyJson: String get() = prefs.getString("widgetNearbyJson", "") ?: ""
+        set(v) = prefs.edit().putString("widgetNearbyJson", v).apply()
+
+    var widgetNearbyTime: Long get() = prefs.getLong("widgetNearbyTime", 0L)
+        set(v) = prefs.edit().putLong("widgetNearbyTime", v).apply()
+
+    var widgetBillJson: String get() = prefs.getString("widgetBillJson", "") ?: ""
+        set(v) = prefs.edit().putString("widgetBillJson", v).apply()
+
+    var widgetBillTime: Long get() = prefs.getLong("widgetBillTime", 0L)
+        set(v) = prefs.edit().putLong("widgetBillTime", v).apply()
+
+    // 2x4 小组件的当前 tab（每个 widget id 各一份，用 "tab_<id>" 作 key）
+    fun widgetTab(id: Int): Int = prefs.getInt("widgetTab_$id", 0)
+    fun setWidgetTab(id: Int, tab: Int) { prefs.edit().putInt("widgetTab_$id", tab).apply() }
+
+    /** 该 widget 是否还在桌面上；被删掉时清掉它的 tab 记录 */
+    fun clearWidgetTab(id: Int) { prefs.edit().remove("widgetTab_$id").apply() }
 
     // ── 上次消费 ──
     // 持久化下来给桌面小组件显示用：小组件不能为了一个数字去轮询账单接口，
