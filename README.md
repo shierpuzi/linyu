@@ -3,10 +3,10 @@
 [![Platform](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com)
 [![Language](https://img.shields.io/badge/Language-Kotlin-blue.svg)](https://kotlinlang.org)
 [![UI](https://img.shields.io/badge/UI-Jetpack%20Compose-purple.svg)](https://developer.android.com/jetpack/compose)
-[![Version](https://img.shields.io/badge/Version-v2.2.1-orange.svg)](https://github.com/yehu-imei/linyu/releases/latest)
+[![Version](https://img.shields.io/badge/Version-v2.2.0-orange.svg)](https://github.com/yehu-imei/linyu/releases/latest)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**⬇️ [下载最新 APK (v2.2.1)](https://github.com/yehu-imei/linyu/releases/latest)**
+**⬇️ [下载最新 APK (v2.2.0)](https://github.com/yehu-imei/linyu/releases/latest)**
 
 趣智校园第三方 Android 客户端，用于控制校园热水器与直饮水机。相比官方 App，提供更简洁的界面和更流畅的操作体验。
 
@@ -45,7 +45,7 @@
 ### 🔧 其他
 
 - 📜 **内置运行日志** — 内存 + 文件双缓冲，敏感信息自动打码，崩溃自动捕获，可一键分享导出
-- 🔄 **应用内更新** — 自动读取 GitHub Release 比对版本、展开查看更新日志，并可直接在应用内下载安装；下载失败或想挂代理时可改用浏览器
+- 🔄 **应用内更新** — 自动读取 GitHub Release 比对版本、展开查看更新日志，并可直接在应用内下载安装
 - 🔐 **加密存储** — 登录凭证加密存储（EncryptedSharedPreferences）
 
 ## 🏗 架构
@@ -171,32 +171,40 @@ KEY_PASSWORD=你的密码
 
 ## 🔧 适配你的学校
 
-本项目仅在**金华职业技术大学（projectId=905）**的男生宿舍测试过，其他学校使用前需要修改以下内容：
+趣智校园在各地的部署不一样，按需要的改动量可以分三类。**先直接下载发行版试，能用就不用管下面的内容。**
 
-### 1. 短信登录
+### ✅ 多数学校：直接装就能用
 
-✅ **v2.1.0 起短信登录已通用化**，任何手机号都可以直接收验证码登录，无需抓包。
+**projectId 不需要手动填，也不需要抓包。** 它由服务器在登录时下发，客户端自动获取并沿用到后续所有请求——项目里没有硬编码任何学校的 projectId。
 
-逆向发现官方 App 的 `secret` 并非随机值，而是按手机号计算得来（见 `utils/SignUtils.kt`）：
+短信验证码登录的 `secret` 同理，是按手机号在本地算出来的（见 `utils/SignUtils.kt`），任何学校、任何手机号都能用：
 
 ```
 secret = MD5( 手机号前3位 + 手机号后4位 + "klcx" )
 ```
 
-由于算法在本地即可算出，所有用户都能正常使用短信登录。若你的学校接口签名算法不同，可在此处替换。
+### ⚠️ 部分学校：可用设备类型不同
 
-### 2. 修改 projectId
+各校接入的设备不一样，已适配的有三类，App 会自动识别并区分显示：
 
-每所学校的 projectId 不同，从 `/user/login` 响应的 `userAccount.projectId` 获取。
-
-### 3. 可能需要修改的位置
-
-| 位置 | 当前值 | 说明 |
+| 设备 | 识别方式 | 界面表现 |
 |---|---|---|
-| `projectId` | 905 | 学校唯一标识 |
-| BLE 设备名过滤 | `KLCXKJ-Water` | 设备蓝牙广播名 |
-| MAC 地址前缀 | `C4:7F:0E` | 凯路创新科技厂商码 |
-| MQTT 服务器 | `tcp://47.107.37.60:1883` | 不同学校可能不同 |
+| 热水器 | 蓝牙广播名 `KLCXKJ-Water` | 🚿 蓝色，正在沐浴中 |
+| 洗手台 | 设备名以「洗手台」开头 | 🪥 橙色，正在洗漱中 |
+| 直饮水机 | `bigTypeId == 5` | ❄️ / ♨️ 绿色，正在接凉水 / 热水 |
+
+如果你们学校的设备名格式特殊（比如不叫「热水器-xxx」），设备名简化和类型识别可能不准，可以在 `model/DeviceModels.kt` 里补规则。
+
+### 🔧 少数学校：需要自行改代码重新编译
+
+只有部署方式与常见情况不同时才需要动，一共两处：
+
+| 位置 | 当前值 | 不改会怎样 |
+|---|---|---|
+| BLE 设备名过滤 | `KLCXKJ-Water` | 扫不到附近设备（扫码绑定不受影响，仍可用） |
+| MQTT 服务器 | `tcp://47.107.37.60:1883` | 收不到实时消费推送（不影响开关阀，HTTP 轮询仍正常） |
+
+改完自行编译即可，构建方法见上方「构建」章节。
 
 ---
 
@@ -229,7 +237,7 @@ secret = MD5( 手机号前3位 + 手机号后4位 + "klcx" )
 
 | 问题 | 说明 |
 |---|---|
-| **仅在一所学校测试** | 只在金华职业技术大学（projectId=905）男生宿舍测试过几次，其他学校能否使用未知 |
+| **各校部署有差异** | 已在多所学校被实际使用，但各校接入的设备类型、BLE 广播名、MQTT 地址可能不同。多数学校装发行版即可，少数需要自行改代码（见上方「适配你的学校」） |
 | **饮水机功能未实机验证** | 饮水机识别与 UI 已实现，但作者所在学校无直饮水机，实际控制流程未验证 |
 | **Android 11 及以下仍需定位权限** | 系统对蓝牙发现的硬性规定，无法绕过；引导卡片里说明了原因 |
 | **自动填充依赖手机密码管理器** | 不同厂商 ROM 行为差异较大，未在多数机型上验证 |

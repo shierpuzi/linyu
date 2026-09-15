@@ -1,20 +1,25 @@
-*.iml
+# ── Android / Gradle 构建产物 ──
+# 用 build/ 而不是 /build：后者只匹配根目录的 build，克隆后一构建就会出现
+# 未跟踪的 app/build/，很容易被误提交
+build/
 .gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
+.kotlin
 /captures
 .externalNativeBuild
 .cxx
+*.hprof
+
+# ── IDE ──
+*.iml
+.idea/
+.DS_Store
+
+# ── 本地配置 ──
+# 里面存着签名密钥路径和密码，绝对不能进仓库
 local.properties
 
-# 签名密钥 - 绝对不能上传！
+# ── 签名密钥与产物 —— 绝对不能上传！ ──
 *.jks
 *.keystore
 *.apk
+*.aab
