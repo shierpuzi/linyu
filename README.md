@@ -3,12 +3,15 @@
 [![Platform](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com)
 [![Language](https://img.shields.io/badge/Language-Kotlin-blue.svg)](https://kotlinlang.org)
 [![UI](https://img.shields.io/badge/UI-Jetpack%20Compose-purple.svg)](https://developer.android.com/jetpack/compose)
-[![Version](https://img.shields.io/badge/Version-v2.2.2-orange.svg)](https://github.com/yehu-imei/linyu/releases/latest)
+[![Version](https://img.shields.io/badge/Version-v2.2.3-orange.svg)](https://github.com/yehu-imei/linyu/releases/latest)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**⬇️ [下载最新 APK (v2.2.2)](https://github.com/yehu-imei/linyu/releases/latest)**
+**⬇️ [下载最新 APK (v2.2.3)](https://github.com/yehu-imei/linyu/releases/latest)**
 
 > 安装包 12.5 MB，仅支持 64 位（arm64-v8a）设备。
+>
+> **国内下载慢？用 Gitee 镜像** → https://gitee.com/yehu-imei/linyu/releases
+> 实测 GitHub Release 附件约 100 KB/s，Gitee 约 2 MB/s。App 内的更新下载默认也走镜像。
 
 趣智校园第三方 Android 客户端，用于控制校园热水器。相比官方 App，提供更简洁的界面和更流畅的操作体验。
 
@@ -273,6 +276,10 @@ secret = MD5( 手机号前3位 + 手机号后4位 + "klcx" )
 | ~~重新登录后余额先闪初始值再跳变~~ | ✅ **已解决 (v2.2.2)**：账单未加载完时不再显示估算结果 |
 | ~~短信验证码倒计时要等网络返回才开始~~ | ✅ **已解决 (v2.2.2)**：倒计时改为点击即开始，发送失败则撤销 |
 | ~~2x2 小组件拉宽后变成圆球布局且不跟着缩放~~ | ✅ **已解决 (v2.2.2)**：取消横向布局，任何尺寸都用同一套卡片布局 |
+| ~~小组件账单页余额比 App 里偏高~~ | ✅ **已解决 (v2.2.3)**：小组件只缓存了 2 笔账单，App 用的是 20 笔，减数偏小。已改为一致 |
+| ~~扫描失败会清空小组件「附近设备」快照~~ | ✅ **已解决 (v2.2.3)**：失败和正常扫完走了同一个回调。已加「是否正常扫完」标志 |
+| ~~预发布版本被当成正式版提示更新~~ | ✅ **已解决 (v2.2.3)**：`fetchReleases()` 未过滤 `prerelease` 字段 |
+| ~~小组件「上次消费」不跟设备走~~ | ✅ **已解决 (v2.2.3)**：改为按 `snCode` 分开存 |
 
 ### ❌ 仍未解决
 
