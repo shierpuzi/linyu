@@ -14,17 +14,17 @@
 | versionCode | 7 |
 | 包名 | `com.hualala.linyu` |
 | 构建类型 | Release（R8 混淆 + 签名） |
-| 安装包大小 | 11.9 MB |
+| 安装包大小 | 12.5 MB |
 | GitHub Release | https://github.com/yehu-imei/linyu/releases/tag/v2.2.2 |
 
-### 包体积优化（42.6 MB → 11.9 MB）
+### 包体积优化（42.6 MB → 12.5 MB）
 
 起因是有用户提 issue 说包太大，拆开一看，超过一半的体积跟功能无关。
 
 | 块 | 之前 | 之后 | 说明 |
 |---|---|---|---|
 | `lib/` native | 19.43 MB | 4.75 MB | 只打包 arm64-v8a |
-| `res/` 图片 | 12.50 MB | 0.33 MB | 图标按密度重建 + 调色板 PNG + WebP |
+| `res/` 图片 | 12.50 MB | 0.90 MB | 图标按密度重建 + 调色板 PNG |
 | dex | 8.42 MB | 5.42 MB | 移除 material-icons-extended |
 | resources.arsc | 1.06 MB | 0.36 MB | 资源语言限定 zh / en |
 | assets（ML Kit 模型） | 0.85 MB | 0.85 MB | 不变 |
@@ -38,7 +38,6 @@
 - **移除 material-icons-extended**：全项目只用到它里面 2 个图标（扫码、账单），
   但 R8 并没能把它裁掉——发布 dex 里实测残留 **10660 个图标类**。
   那两个图标已换成项目自带的矢量图
-- 两张小组件预览图改用 WebP
 
 > ⚠️ **本版本起只支持 64 位（arm64-v8a）手机**。纯 32 位的老机型装不上。
 

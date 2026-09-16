@@ -12,7 +12,7 @@
 | 技术栈 | Kotlin + Jetpack Compose + Material 3 |
 | 最低 Android 版本 | Android 8.0 (API 26) |
 | 目标 Android 版本 | Android 16 (API 36) |
-| APK 体积 | 11.9 MB（含 ML Kit 条码识别 native 库） |
+| APK 体积 | 12.5 MB（含 ML Kit 条码识别 native 库） |
 | 支持的 ABI | 仅 `arm64-v8a` |
 | 后端 API | 趣智校园 `v3-api.china-qzxy.cn` |
 | 适用范围 | 使用趣智校园系统的学校（学校名称可手动修改） |
@@ -166,8 +166,8 @@ app/src/main/
     │   ├── widget_linyu_2x2.xml          # 小组件布局（2x2，任何尺寸都用这套，靠 weight 自适应）
     │   └── widget_linyu_2x4.xml          # 小组件布局（2x4，含三页）
     ├── drawable-nodpi/
-    │   ├── widget_preview_2x2.webp       # 组件选择器预览图（不随屏幕密度缩放）
-    │   └── widget_preview_2x4.webp
+    │   ├── widget_preview_2x2.png        # 组件选择器预览图（不随屏幕密度缩放）
+    │   └── widget_preview_2x4.png
     ├── xml/
     │   ├── network_security_config.xml    # 网络安全配置（仅允许 MQTT 明文）
     │   ├── file_paths.xml                 # 日志导出 FileProvider 路径
@@ -391,11 +391,11 @@ buildTypes {
 
 ### v2.2.2 (2026-09-16)
 
-- **包体积 42.6 MB → 11.9 MB**：
+- **包体积 42.6 MB → 12.5 MB**：
   - 图标原先同一个 1254×1254 PNG 被复制了 16 份（5 密度 × 3 名字 + app_logo），占 11.6 MB；按各密度重建并改用调色板 PNG
   - 只打包 `arm64-v8a`（x86 / x86_64 的 ML Kit so 合计 11.5 MB，只有模拟器用得到）
   - 移除 `material-icons-extended`（只用到 2 个图标，R8 却残留 10660 个图标类）
-  - 资源语言限定 `zh` / `en`；小组件预览图改 WebP
+  - 资源语言限定 `zh` / `en`
   - ⚠️ 由此**不再支持纯 32 位设备**
 - 小组件「选用」改为在桌面后台切换控制设备，不再跳回 App 弹详情
 - 修复：小组件账单页余额不跟消费变化、选用点错设备（PendingIntent requestCode 冲突）、

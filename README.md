@@ -8,7 +8,7 @@
 
 **⬇️ [下载最新 APK (v2.2.2)](https://github.com/yehu-imei/linyu/releases/latest)**
 
-> 安装包 11.9 MB，仅支持 64 位（arm64-v8a）设备。
+> 安装包 12.5 MB，仅支持 64 位（arm64-v8a）设备。
 
 趣智校园第三方 Android 客户端，用于控制校园热水器。相比官方 App，提供更简洁的界面和更流畅的操作体验。
 
@@ -157,7 +157,7 @@ res/ 额外包含 `drawable/ic_flashlight.xml`（扫码手电筒图标）、`dra
 ```
 layout/  widget_linyu_2x2.xml / widget_linyu_2x4.xml
 xml/     widget_info_2x2.xml / widget_info_2x4.xml
-nodpi/   widget_preview_2x2.webp / widget_preview_2x4.webp  # 组件选择器里的预览图
+nodpi/   widget_preview_2x2.png / widget_preview_2x4.png   # 组件选择器里的预览图
 drawable/ widget_glass / widget_inset / widget_badge_* / widget_btn_* /
           widget_nav_active / widget_avatar
           ic_widget_*.xml                                   # 小组件用的矢量图标
@@ -267,7 +267,7 @@ secret = MD5( 手机号前3位 + 手机号后4位 + "klcx" )
 | ~~附近设备页必崩~~ | ✅ **已解决 (v2.2.1)**：旧缓存 JSON 缺字段，Gson 绕过 Kotlin 非空约定给出 null |
 | ~~首页设备名过长会盖到按钮上~~ | ✅ **已解决 (v2.2.1)**：测量省略号宽度时漏算了主题字距，已修正并改为不换行 |
 | ~~Android 12+ 被迫要定位权限~~ | ✅ **已解决 (v2.2.0)**：`BLUETOOTH_SCAN` 声明 `neverForLocation`，且改由用户主动触发申请 |
-| ~~安装包 42.6 MB 偏大~~ | ✅ **已解决 (v2.2.2)**：图标按密度重建、只打包 arm64、移除 material-icons-extended，压到 11.9 MB |
+| ~~安装包 42.6 MB 偏大~~ | ✅ **已解决 (v2.2.2)**：图标按密度重建、只打包 arm64、移除 material-icons-extended，压到 12.5 MB |
 | ~~小组件账单页余额不跟着消费变化~~ | ✅ **已解决 (v2.2.2)**：小组件读的是没减过消费的初始值，改为和 App 共用 `BalanceEstimator` |
 | ~~小组件「选用」点 309 却打开 307~~ | ✅ **已解决 (v2.2.2)**：两行按钮的 PendingIntent requestCode 相同，被 `FLAG_UPDATE_CURRENT` 覆盖 |
 | ~~重新登录后余额先闪初始值再跳变~~ | ✅ **已解决 (v2.2.2)**：账单未加载完时不再显示估算结果 |
