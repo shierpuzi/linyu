@@ -3,10 +3,12 @@
 [![Platform](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com)
 [![Language](https://img.shields.io/badge/Language-Kotlin-blue.svg)](https://kotlinlang.org)
 [![UI](https://img.shields.io/badge/UI-Jetpack%20Compose-purple.svg)](https://developer.android.com/jetpack/compose)
-[![Version](https://img.shields.io/badge/Version-v2.2.1-orange.svg)](https://github.com/yehu-imei/linyu/releases/latest)
+[![Version](https://img.shields.io/badge/Version-v2.2.2-orange.svg)](https://github.com/yehu-imei/linyu/releases/latest)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**⬇️ [下载最新 APK (v2.2.1)](https://github.com/yehu-imei/linyu/releases/latest)**
+**⬇️ [下载最新 APK (v2.2.2)](https://github.com/yehu-imei/linyu/releases/latest)**
+
+> 安装包 11.9 MB，仅支持 64 位（arm64-v8a）设备。
 
 趣智校园第三方 Android 客户端，用于控制校园热水器。相比官方 App，提供更简洁的界面和更流畅的操作体验。
 
@@ -49,10 +51,11 @@
 - ⏳ **自动关停倒计时** — 显示闲置自动关闭倒计时，关闭时弹出确认框
 - 💰 **消费结算** — 关阀后通过账单自动显示本次消费金额
 - 🚰 **饮水机支持（待测试）** — 自动识别直饮水机，绿色主题区分，设备名智能精简
-- 🧩 **桌面小组件** — 2x2 / 2x4 两种尺寸，桌面直接启停热水；深色液态玻璃卡片，三套布局随尺寸自适应；计时由系统 Chronometer 驱动，App 不在也能实时走秒
+- 🧩 **桌面小组件** — 2x2 / 2x4 两种尺寸，桌面直接启停热水；深色液态玻璃卡片，布局随尺寸自适应；计时由系统 Chronometer 驱动，App 不在也能实时走秒
   - 2x4 带侧边导航，可切换「设备控制 / 附近设备 / 账单」三页
   - 操作状态在桌面上**全局同步**：点任一个组件，所有淋浴组件同时显示「正在开启…」并转圈
   - 点「上次消费」卡片进 App 账单页；使用中点计时卡片直接关阀
+  - 附近设备「选用」直接在桌面切换控制设备，不用打开 App
 
 ### 💰 钱包与账单
 
@@ -106,7 +109,8 @@ app/src/main/java/com/hualala/linyu/
 │   └── GithubApi.kt        # GitHub Release / 仓库信息（更新检测）
 ├── data/                   # 数据层
 │   ├── AuthRepository.kt   # 登录认证（密码 / 短信）
-│   └── ShowerController.kt # 开阀/关阀/结算共享层（App 与小组件共用）
+│   ├── ShowerController.kt # 开阀/关阀/结算共享层（App 与小组件共用）
+│   └── BalanceEstimator.kt # 余额估算（主页 / 账单页 / 小组件共用同一份算法）
 ├── model/                  # 数据模型
 │   ├── LoginModels.kt      # 含账单设备类型判定（热水器 / 饮水机）
 │   ├── DeviceModels.kt     # 含饮水机识别与设备名格式化
@@ -151,12 +155,12 @@ res/ 额外包含 `drawable/ic_flashlight.xml`（扫码手电筒图标）、`dra
 小组件相关资源：
 
 ```
-layout/  widget_linyu_2x2.xml / widget_linyu_2x2_wide.xml / widget_linyu_2x4.xml
+layout/  widget_linyu_2x2.xml / widget_linyu_2x4.xml
 xml/     widget_info_2x2.xml / widget_info_2x4.xml
-nodpi/   widget_preview_2x2.png / widget_preview_2x4.png   # 组件选择器里的预览图
+nodpi/   widget_preview_2x2.webp / widget_preview_2x4.webp  # 组件选择器里的预览图
 drawable/ widget_glass / widget_inset / widget_badge_* / widget_btn_* /
-          widget_sphere_* / widget_nav_active / widget_avatar
-          ic_widget_*.xml                                  # 小组件用的矢量图标
+          widget_nav_active / widget_avatar
+          ic_widget_*.xml                                   # 小组件用的矢量图标
 ```
 
 ## 🚀 构建
@@ -263,6 +267,12 @@ secret = MD5( 手机号前3位 + 手机号后4位 + "klcx" )
 | ~~附近设备页必崩~~ | ✅ **已解决 (v2.2.1)**：旧缓存 JSON 缺字段，Gson 绕过 Kotlin 非空约定给出 null |
 | ~~首页设备名过长会盖到按钮上~~ | ✅ **已解决 (v2.2.1)**：测量省略号宽度时漏算了主题字距，已修正并改为不换行 |
 | ~~Android 12+ 被迫要定位权限~~ | ✅ **已解决 (v2.2.0)**：`BLUETOOTH_SCAN` 声明 `neverForLocation`，且改由用户主动触发申请 |
+| ~~安装包 42.6 MB 偏大~~ | ✅ **已解决 (v2.2.2)**：图标按密度重建、只打包 arm64、移除 material-icons-extended，压到 11.9 MB |
+| ~~小组件账单页余额不跟着消费变化~~ | ✅ **已解决 (v2.2.2)**：小组件读的是没减过消费的初始值，改为和 App 共用 `BalanceEstimator` |
+| ~~小组件「选用」点 309 却打开 307~~ | ✅ **已解决 (v2.2.2)**：两行按钮的 PendingIntent requestCode 相同，被 `FLAG_UPDATE_CURRENT` 覆盖 |
+| ~~重新登录后余额先闪初始值再跳变~~ | ✅ **已解决 (v2.2.2)**：账单未加载完时不再显示估算结果 |
+| ~~短信验证码倒计时要等网络返回才开始~~ | ✅ **已解决 (v2.2.2)**：倒计时改为点击即开始，发送失败则撤销 |
+| ~~2x2 小组件拉宽后变成圆球布局且不跟着缩放~~ | ✅ **已解决 (v2.2.2)**：取消横向布局，任何尺寸都用同一套卡片布局 |
 
 ### ❌ 仍未解决
 
@@ -278,6 +288,7 @@ secret = MD5( 手机号前3位 + 手机号后4位 + "klcx" )
 
 | 问题 | 说明 |
 |---|---|
+| **仅支持 64 位设备** | v2.2.2 起安装包只包含 arm64-v8a，纯 32 位的老机型（2016 年前后）装不上 |
 | **各校部署有差异** | 已在多所学校被实际使用，但各校接入的设备类型、BLE 广播名、MQTT 地址可能不同。多数学校装发行版即可，少数需要自行改代码 |
 | **饮水机功能未实机验证** | 饮水机识别与 UI 已实现，但作者所在学校无直饮水机，实际控制流程未验证 |
 | **Android 11 及以下仍需定位权限** | 系统对蓝牙发现的硬性规定，无法绕过；引导卡片里说明了原因 |

@@ -8,11 +8,12 @@
 |---|---|
 | 应用名称 | 淋浴 |
 | 包名 | `com.hualala.linyu` |
-| 版本 | v2.2.1 |
+| 版本 | v2.2.2 |
 | 技术栈 | Kotlin + Jetpack Compose + Material 3 |
 | 最低 Android 版本 | Android 8.0 (API 26) |
 | 目标 Android 版本 | Android 16 (API 36) |
-| APK 体积 | ~42 MB（含 ML Kit 条码识别 native 库） |
+| APK 体积 | 11.9 MB（含 ML Kit 条码识别 native 库） |
+| 支持的 ABI | 仅 `arm64-v8a` |
 | 后端 API | 趣智校园 `v3-api.china-qzxy.cn` |
 | 适用范围 | 使用趣智校园系统的学校（学校名称可手动修改） |
 
@@ -158,17 +159,15 @@ app/src/main/
     │   ├── widget_inset.xml              # 内嵌玻璃槽（上次消费 / 计时）
     │   ├── widget_badge_*.xml            # 状态徽章（空闲 / 使用中）
     │   ├── widget_btn_*.xml              # 按钮底（主操作 / 停止）
-    │   ├── widget_sphere_*.xml           # 横向 2x2 的水滴球开关
     │   ├── widget_nav_active.xml         # 2x4 侧边栏选中底
     │   ├── widget_avatar.xml             # 设备头像圆底
     │   └── ic_widget_*.xml               # 小组件矢量图标
     ├── layout/
-    │   ├── widget_linyu_2x2.xml          # 小组件布局（2x2 竖向）
-    │   ├── widget_linyu_2x2_wide.xml     # 小组件布局（2x2 拉宽成横向）
+    │   ├── widget_linyu_2x2.xml          # 小组件布局（2x2，任何尺寸都用这套，靠 weight 自适应）
     │   └── widget_linyu_2x4.xml          # 小组件布局（2x4，含三页）
     ├── drawable-nodpi/
-    │   ├── widget_preview_2x2.png        # 组件选择器预览图（不随屏幕密度缩放）
-    │   └── widget_preview_2x4.png
+    │   ├── widget_preview_2x2.webp       # 组件选择器预览图（不随屏幕密度缩放）
+    │   └── widget_preview_2x4.webp
     ├── xml/
     │   ├── network_security_config.xml    # 网络安全配置（仅允许 MQTT 明文）
     │   ├── file_paths.xml                 # 日志导出 FileProvider 路径
@@ -237,8 +236,10 @@ app/src/main/
   `setOnClickPendingIntent`），**不用** `setInt(id, "setXxx", ...)` 反射写法——
   框架对反射方法有 `@RemotableViewMethod` 白名单，不通过会让整个小组件渲染失败
 - 「开 / 关」两个圆形按钮做成两个 TextView 切换 visibility，规避上述反射限制
-- 2x2 的横竖向由 `onAppWidgetOptionsChanged` 里读实际宽高比（`OPTION_APPWIDGET_MIN_WIDTH/HEIGHT`）决定，
-  拉宽后按钮自动从下方移到右侧；读不到尺寸时保守按竖向处理
+- 2x2 **只有一套布局**，被拉宽拉高都靠 `layout_weight` 自适应。
+  v2.2.1 曾按宽高比切成「按钮在右侧」的横向版，但横向版里卡片固定 96dp、圆球固定 58dp，
+  都不跟尺寸缩放，拉大只会多出空白；判据 `minWidth > minHeight` 又过于灵敏，
+  稍微一拉就跳过去，v2.2.2 已整体移除
 - ⚠️ **PendingIntent 的目标组件必须是 Manifest 里注册过的 receiver**。
   基类 `LinYuWidgetProvider` 没有注册，把广播发给它会**被系统静默丢弃**（无异常、无日志），
   表现就是「点按钮毫无反应」。渲染时需反查该 widget id 属于 `LinYuWidget2x2` 还是 `LinYuWidget2x4`
@@ -387,6 +388,20 @@ buildTypes {
 ---
 
 ## 版本历史
+
+### v2.2.2 (2026-09-16)
+
+- **包体积 42.6 MB → 11.9 MB**：
+  - 图标原先同一个 1254×1254 PNG 被复制了 16 份（5 密度 × 3 名字 + app_logo），占 11.6 MB；按各密度重建并改用调色板 PNG
+  - 只打包 `arm64-v8a`（x86 / x86_64 的 ML Kit so 合计 11.5 MB，只有模拟器用得到）
+  - 移除 `material-icons-extended`（只用到 2 个图标，R8 却残留 10660 个图标类）
+  - 资源语言限定 `zh` / `en`；小组件预览图改 WebP
+  - ⚠️ 由此**不再支持纯 32 位设备**
+- 小组件「选用」改为在桌面后台切换控制设备，不再跳回 App 弹详情
+- 修复：小组件账单页余额不跟消费变化、选用点错设备（PendingIntent requestCode 冲突）、
+  余额先闪初始值再跳变、短信倒计时延迟
+- 蓝牙扫描 10 秒 → 5 秒；2x2 取消横向圆球布局，任何尺寸都用同一套卡片布局；
+  附近设备页区分「扫过没有」与「没扫过」；密码框加一键清空
 
 ### v2.2.1 (2026-09-15)
 
