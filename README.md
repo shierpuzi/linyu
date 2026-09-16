@@ -81,136 +81,11 @@
   - 更新日志默认只列最近 3 个版本，点「展开全部」看其余
 - 🔐 **加密存储** — 登录凭证加密存储（EncryptedSharedPreferences）
 
-## 🏗 架构
-
-```
-UI (Compose) → ViewModel → Repository → Retrofit API (v3-api.china-qzxy.cn)
-                              ↓
-   MQTT / BLE 扫描 / 扫码(CameraX) / 账单结算 / 加密存储 / 日志 / 背景管理
-```
-
-| 层级 | 技术 |
-|---|---|
-| UI | Jetpack Compose + Material 3 |
-| 状态管理 | ViewModel + StateFlow / Compose State |
-| HTTP | Retrofit 2.9 + OkHttp |
-| 实时推送 | Eclipse Paho MQTT |
-| 蓝牙 / 扫码 | Android BLE API / CameraX + ML Kit |
-| 加密存储 | EncryptedSharedPreferences |
-| 日志 | 自研 AppLogger（环形缓冲 + 文件滚动 + 脱敏） |
-| 桌面小组件 | AppWidgetProvider + RemoteViews |
-| 混淆 | R8 Full Mode |
-
-## 📁 项目结构
-
-```
-app/src/main/java/com/hualala/linyu/
-├── MainActivity.kt         # 主 Activity（导航、弹窗、边到边、状态栏）
-├── QrScanActivity.kt       # 扫码界面 (CameraX + ML Kit + 手电筒)
-├── api/                    # 网络层
-│   ├── QzxyService.kt      # Retrofit 接口
-│   ├── NetworkModule.kt    # OkHttp + 认证拦截器
-│   ├── SafeApi.kt          # 手动 JSON 解析 (避 R8 泛型擦除)
-│   └── GithubApi.kt        # GitHub Release / 仓库信息（更新检测）
-├── data/                   # 数据层
-│   ├── AuthRepository.kt   # 登录认证（密码 / 短信）
-│   ├── ShowerController.kt # 开阀/关阀/结算共享层（App 与小组件共用）
-│   └── BalanceEstimator.kt # 余额估算（主页 / 账单页 / 小组件共用同一份算法）
-├── model/                  # 数据模型
-│   ├── LoginModels.kt      # 含账单设备类型判定（热水器 / 饮水机）
-│   ├── DeviceModels.kt     # 含饮水机识别与设备名格式化
-│   ├── WidgetCache.kt      # 小组件离线快照（附近设备 / 账单）
-│   ├── ActiveOrder.kt
-│   └── MqttModels.kt
-├── ui/                     # 界面
-│   ├── LoginScreen.kt      # 登录（密码 / 短信两种方式）
-│   ├── MainScreen.kt       # 主页 + 设备列表 + 扫码
-│   ├── ShowerScreen.kt     # 洗澡中 (含自动关停倒计时)
-│   ├── WalletScreen.kt     # 钱包 + 账单
-│   ├── UserScreen.kt       # 我的（可排序卡片）
-│   ├── FloatingPillNavBar.kt    # 悬浮胶囊导航栏（弹簧滑块）
-│   ├── AppBackgroundLayer.kt    # 自定义背景渲染层
-│   ├── CustomBackgroundScreen.kt# 背景装扮设置页
-│   ├── LogViewerDialog.kt       # 内置日志查看器
-│   ├── TailEllipsisText.kt      # 尾部优先省略的单行文本（设备名 / MAC）
-│   ├── LinYuToast.kt
-│   ├── DeviceDetailDialog.kt
-│   └── theme/
-│       ├── Theme.kt             # 配色方案（液态玻璃卡片）
-│       └── CircularRevealTheme.kt # 圆形揭示主题切换
-├── widget/                 # 桌面小组件
-│   ├── LinYuWidgetProvider.kt # Provider（2x2 / 2x4 共用逻辑）+ 状态推送
-│   └── WidgetRenderer.kt      # 状态推断 + RemoteViews 渲染
-└── utils/                  # 工具
-    ├── PrefsHelper.kt      # 加密存储
-    ├── MqttManager.kt      # MQTT 管理
-    ├── BluetoothScanner.kt # 蓝牙扫描
-    ├── MD5Utils.kt         # 密码加密
-    ├── SignUtils.kt        # 短信验证码 secret 计算
-    ├── AppLogger.kt        # 日志（脱敏 / 滚动 / 崩溃捕获）
-    ├── BackgroundManager.kt# 背景图存取（主页 / 使用页两套）
-    ├── BackgroundState.kt  # 背景配置状态
-    ├── ScanPermission.kt   # 蓝牙扫描权限（按系统版本分流）
-    └── ApkUpdater.kt       # 更新包下载 + 调起安装器
-```
-
-res/ 额外包含 `drawable/ic_flashlight.xml`（扫码手电筒图标）、`drawable/app_logo.png`（应用 logo）、
-`xml/file_paths.xml`（日志导出 FileProvider）。
-
-小组件相关资源：
-
-```
-layout/  widget_linyu_2x2.xml / widget_linyu_2x4.xml
-xml/     widget_info_2x2.xml / widget_info_2x4.xml
-nodpi/   widget_preview_2x2.png / widget_preview_2x4.png   # 组件选择器里的预览图
-drawable/ widget_glass / widget_inset / widget_badge_* / widget_btn_* /
-          widget_nav_active / widget_avatar
-          ic_widget_*.xml                                   # 小组件用的矢量图标
-```
-
-## 🚀 构建
-
-### 环境要求
-
-- Android Studio（推荐自带 JBR/JDK 21）
-- JDK 17+（实测使用 Android Studio 自带 JBR/JDK 21 构建）
-- Android SDK 36
-- Gradle 9.4.1
-
-### 生成签名密钥
-
-```bash
-keytool -genkey -v -keystore your-key.jks \
-  -keyalg RSA -keysize 2048 -validity 10000 -alias your-alias
-```
-
-### 配置签名
-
-创建 `local.properties`（已在 `.gitignore` 中）：
-
-```properties
-KEYSTORE_FILE=../your-key.jks
-KEYSTORE_PASSWORD=你的密码
-KEY_ALIAS=你的别名
-KEY_PASSWORD=你的密码
-```
-
-### 构建 APK
-
-```bash
-# Debug
-./gradlew assembleDebug
-
-# Release (混淆 + 压缩 + 签名)
-# 若因网络无法下载 lint 依赖而失败，可跳过 lint 检查：
-./gradlew assembleRelease -x lintVitalRelease
-```
-
 ## 📖 文档
 
 | 文档 | 说明 |
 |---|---|
-| [PROJECT.md](PROJECT.md) | 完整项目文档、技术架构、功能清单 |
+| [PROJECT.md](PROJECT.md) | 完整项目文档：技术架构、项目结构、构建方法、功能清单 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本更新日志 |
 | [API-qzxy.md](API-qzxy.md) | 趣智校园 API 逆向工程完整参考 |
 | [开发者指南.md](开发者指南.md) | 面向第三方开发者的开发指南 |
@@ -256,34 +131,7 @@ secret = MD5( 手机号前3位 + 手机号后4位 + "klcx" )
 
 ## ⚠️ 已知问题与限制
 
-### ✅ 已修复
-
-| 原问题 | 状态 |
-|---|---|
-| ~~短信登录 secret 绑定账号~~ | ✅ **已解决 (v2.1.0)**：secret 由手机号推导，任何手机号可用 |
-| ~~被挤号后重新登录又被弹出、需要登两次~~ | ✅ **已解决 (v2.2.0)**：旧会话在途请求会清掉新会话凭证，改为会话级作用域整体取消 |
-| ~~热水器自动关停无感知~~ | ✅ **已解决 (v1.2.0)**：解析 `autoDisConTime` 显示闲置倒计时，自动关闭时弹确认框 |
-| ~~关闭失败无提示~~ | ✅ **已解决 (v1.2.0)**：关阀后通过 `closeOrderResult` 确认，失败会提示重试 |
-| ~~切到「我的」页面卡顿~~ | ✅ **已解决 (v2.1.0)**：卡片顺序 / Release 数据改为进程级缓存 |
-| ~~设备名残留「表」字~~ | ✅ **已解决 (v2.1.0)**：修正正则处理顺序，`热水表-xxx` 不再被截成 `表 xxx` |
-| ~~使用页退出按钮点击无响应~~ | ✅ **已解决 (v2.1.0)**：修正组件层级，按钮不再被上层 Column 拦截点击 |
-| ~~小组件按钮点了没反应~~ | ✅ **已解决 (v2.2.1)**：PendingIntent 指向了未注册的组件，广播被系统静默丢弃 |
-| ~~2x2 拉宽后显示「载入窗口小部件时出现问题」~~ | ✅ **已解决 (v2.2.1)**：给 ImageView 调了 `setTextViewText`，RemoteViews 反射找不到方法 |
-| ~~附近设备页必崩~~ | ✅ **已解决 (v2.2.1)**：旧缓存 JSON 缺字段，Gson 绕过 Kotlin 非空约定给出 null |
-| ~~首页设备名过长会盖到按钮上~~ | ✅ **已解决 (v2.2.1)**：测量省略号宽度时漏算了主题字距，已修正并改为不换行 |
-| ~~Android 12+ 被迫要定位权限~~ | ✅ **已解决 (v2.2.0)**：`BLUETOOTH_SCAN` 声明 `neverForLocation`，且改由用户主动触发申请 |
-| ~~安装包 42.6 MB 偏大~~ | ✅ **已解决 (v2.2.2)**：图标按密度重建、只打包 arm64、移除 material-icons-extended，压到 12.5 MB |
-| ~~小组件账单页余额不跟着消费变化~~ | ✅ **已解决 (v2.2.2)**：小组件读的是没减过消费的初始值，改为和 App 共用 `BalanceEstimator` |
-| ~~小组件「选用」点 309 却打开 307~~ | ✅ **已解决 (v2.2.2)**：两行按钮的 PendingIntent requestCode 相同，被 `FLAG_UPDATE_CURRENT` 覆盖 |
-| ~~重新登录后余额先闪初始值再跳变~~ | ✅ **已解决 (v2.2.2)**：账单未加载完时不再显示估算结果 |
-| ~~短信验证码倒计时要等网络返回才开始~~ | ✅ **已解决 (v2.2.2)**：倒计时改为点击即开始，发送失败则撤销 |
-| ~~2x2 小组件拉宽后变成圆球布局且不跟着缩放~~ | ✅ **已解决 (v2.2.2)**：取消横向布局，任何尺寸都用同一套卡片布局 |
-| ~~小组件账单页余额比 App 里偏高~~ | ✅ **已解决 (v2.2.3)**：小组件只缓存了 2 笔账单，App 用的是 20 笔，减数偏小。已改为一致 |
-| ~~扫描失败会清空小组件「附近设备」快照~~ | ✅ **已解决 (v2.2.3)**：失败和正常扫完走了同一个回调。已加「是否正常扫完」标志 |
-| ~~预发布版本被当成正式版提示更新~~ | ✅ **已解决 (v2.2.3)**：`fetchReleases()` 未过滤 `prerelease` 字段 |
-| ~~小组件「上次消费」不跟设备走~~ | ✅ **已解决 (v2.2.3)**：改为按 `snCode` 分开存 |
-
-### ❌ 仍未解决
+下面这些多数受服务器或系统限制，当前无法解决。已修复的历史问题见 [CHANGELOG](CHANGELOG.md)。
 
 | 问题 | 说明 |
 |---|---|

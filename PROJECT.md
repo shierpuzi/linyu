@@ -318,6 +318,9 @@ KEY_PASSWORD=你的密钥密码
 
 # Release 构建（R8 混淆 + 资源压缩 + 签名）
 ./gradlew assembleRelease
+
+# 若因网络无法下载 lint 依赖而失败，可跳过 lint 检查：
+./gradlew assembleRelease -x lintVitalRelease
 ```
 
 ### APK 输出位置
