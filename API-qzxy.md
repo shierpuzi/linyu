@@ -44,11 +44,19 @@
 | 查询进行中 | POST | `/order/tcpDevice/query/rateOrder/using` | ✅ | 查询设备是否有进行中的订单 |
 | 账单列表 | GET | `/order/query/account/bill/list` | ✅ | 获取月度账单 |
 | 账单详情 | GET | `/order/query/account/bill/detail` | ✅ | 获取单笔账单详情 |
-| 获取使用码 | GET | `/account/useCode/new` | ✅ | 获取当前使用码 |
-| 生成使用码 | POST | `/account/useCode/new/generate` | ✅ | 生成新的使用码 |
+| 获取使用码 | GET | `/account/useCode/new` | ✅ | 获取当前使用码 + 今日能否重新领取 |
+| **换一个**使用码 | POST | `/account/useCode/new/generate` | ✅ | **只换候选码，不生效**，每天 20 次（v3.0.0 修正） |
+| **确定领取**使用码 | POST | `/account/useCode/new/set` | ✅ | 把候选码设为当前生效的码（v3.0.0 新增） |
 | 使用码开关 | POST | `/account/useCode/new/status/update` | ✅ | 开启/关闭使用码 |
 | 发送短信验证码 | GET | `/user/verification/code/get` | ✅ | 发送验证码，secret 由手机号推导（v2.1.0） |
 | 短信验证码登录 | POST | `/user/registerAndLogin` | ✅ | 用验证码注册/登录 |
+| 账号信息 | GET | `/account/info` | ✅ | 姓名 / 学号 / 校园卡绑定状态（v3.0.0 新增） |
+| **一卡通真实余额** | GET | `/settlement/campus/userInfo` | ✅ | 真实校园卡余额，不需破签名（v3.0.0 新增） |
+| 一卡通签约状态 | GET | `/settlement/withhold/sign/status` | ✅ | 免密支付是否已签约 |
+| 项目信息 | GET | `/project/info/triple` | ✅ | 学校名 `projectName` 在这里（v3.0.0 新增） |
+| 更换手机号 | POST | `/user/phone/update` | ✅ | 验证码发到**新**号（v3.0.0 新增） |
+| 修改密码 | POST | `/user/password/update` | ✅ | 需要旧密码（v3.0.0 新增） |
+| **重置密码** | POST | `/user/password/forget` | ✅ | 只需短信验证码，**不需要旧密码**（v3.0.0 新增） |
 
 ---
 
@@ -351,20 +359,38 @@ GET /order/query/account/bill/list?month=2026-05&billRequestType=2
 
 ### 4.7 使用码
 
-**获取使用码**：
+使用码是给热水器**物理键盘**用的：不想掏手机开阀时，在设备上直接输 8 位码。
+一共**三个**接口，分工很容易搞混——v3.0.0 之前一直以为是两个。
+
+#### 三个接口的分工
+
+| 接口 | 干什么 | 会不会改当前生效的码 |
+|---|---|---|
+| `GET /account/useCode/new` | 看当前码 + 今日额度 | 不会 |
+| `POST .../generate` | **换一个**（候选码） | **不会** |
+| `POST .../set` | **确定领取** | **会**，且只有它会 |
+
+> **这是 v3.0.0 抓包才确认的关键一点**：连换 7 次 `generate` 期间，
+> 服务端生效的码一直没变，直到 `set` 那一下 `useCodeStartTime` 才被改写。
+> 所以完全可以做成「先预览、再决定领不领」，**取消是零成本的**。
+
+#### 获取当前使用码
+
 ```
 GET /account/useCode/new
 ```
 
-**响应**：
 ```json
 {
   "success": true,
   "data": {
-    "useCode": "11930960",
+    "useCode": "27389960",
     "useCodeStatus": 1,
     "useCodeRandom": "960",
-    "resetAvailability": 0
+    "useCodeStartTime": "2026-09-17 18:12:05",
+    "useCodeExpiringTime": null,
+    "resetAvailability": 0,
+    "resetAvailabilityWarMark": "1天只能领取一次使用码"
   }
 }
 ```
@@ -372,10 +398,62 @@ GET /account/useCode/new
 | 字段 | 说明 |
 |---|---|
 | `useCode` | 使用码（8 位数字） |
-| `useCodeStatus` | 状态：`1` = 已开启，`0` = 已关闭 |
-| `useCodeRandom` | 随机数部分（后三位，与手机号后三位相同） |
+| `useCodeStatus` | `1` = 已开启，`0` = 已关闭 |
+| `useCodeRandom` | 后三位，与手机号后三位相同 |
+| `useCodeStartTime` | 当前码的生效时间，**每次 `set` 都会被改写** |
+| `resetAvailability` | 今天还能不能**重新领取**：`1` = 能，`0` = 不能 |
+| `resetAvailabilityWarMark` | `resetAvailability` 为 0 时的原因文案 |
 
-**开关使用码**：
+> ⚠️ **没领过使用码的用户，`useCode` 返回的是 `null`**（不是空串也不是 0）。
+> 客户端要能把「还没拉到」和「服务端说这人没有码」区分开，
+> 否则没领过码的人会永远卡在「加载中」。
+
+#### 换一个（不生效）
+
+```
+POST /account/useCode/new/generate
+Content-Type: application/x-www-form-urlencoded
+
+loginCode=xxx&userId=xxx&accountId=xxx&projectId=xxx&
+telephone=xxx&telPhone=xxx&phoneSystem=android&version=6.5.28
+```
+
+```json
+{"success": true, "data": {"useCode": "84663364", "remainTimes": 15}}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `useCode` | 换出来的**候选码**，未生效 |
+| `remainTimes` | **剩余可换次数**，每天 20 次，每换一次减 1 |
+
+实测一次连续换码的 `remainTimes` 变化（本次会话共换 7 次）：
+
+```
+19 → 18 → 17 → 16 → 15 → 14 → 13
+```
+
+即从 20 起算，每调一次扣 1。
+
+> `remainTimes` 和上面 `GET` 里的 `resetAvailability` **不是同一个东西**：
+> 前者是「今天还能换几次」（20 次/天），后者是「今天还能不能**领取**」（1 次/天）。
+
+#### 确定领取（唯一生效的一步）
+
+```
+POST /account/useCode/new/set
+Content-Type: application/x-www-form-urlencoded
+
+useCode=00740364&loginCode=xxx&userId=xxx&...
+```
+
+成功返回 `{"success": true, "data": null}`，此后 `GET` 到的 `useCodeStartTime` 会变成这次调用的时间。
+
+> **换出来的码有 3 分钟领取时限**，超时不 `set` 就作废（官方 App 的行为）。
+> 客户端应该在预览界面挂个倒计时，别让用户挑了半天再点确定却已经被服务端丢掉了。
+
+#### 开关使用码
+
 ```
 POST /account/useCode/new/status/update
 Content-Type: application/x-www-form-urlencoded
@@ -386,6 +464,165 @@ useCodeStatus=1&loginCode=xxx&userId=xxx&...
 | 参数 | 说明 |
 |---|---|
 | `useCodeStatus` | `1` = 开启，`0` = 关闭 |
+
+> 这个接口**也会**改写 `useCodeStartTime`。
+
+---
+
+### 4.9 账号信息与一卡通
+
+v3.0.0 新增。**一卡通余额不再需要破签名**——趣智校园把易校园的接口代理了。
+
+#### 账号信息
+
+```
+GET /account/info
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "projectId": 905,
+    "accountId": 41681,
+    "userId": 18981460,
+    "telephone": "19182692082",
+    "name": "郑豪",
+    "genderName": "未知",
+    "idCardNumber": "202410101080040",
+    "isCard": 0,
+    "cardStatus": -1,
+    "cardStatusName": "未绑定"
+  }
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `name` | 姓名。**学校没同步时会是 `null`** |
+| `idCardNumber` | **学号**（不是身份证号） |
+| `cardStatus` / `cardStatusName` | 校园卡绑定状态，和下面的免密签约是两回事 |
+
+#### 一卡通真实余额
+
+```
+GET /settlement/campus/userInfo?projectId=905&telPhone={手机号}&userId=xxx&accountId=xxx&telephone={手机号}&...
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "studentNumber": "202410101080040",
+    "studentName": "郑豪",
+    "amount": "16.76",
+    "signStatus": 1
+  }
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `amount` | **一卡通余额，字符串**（要自己转 Double） |
+| `signStatus` | `1` = 已签约免密支付，`0` = 未签约 |
+| `studentNumber` / `studentName` | 和 `/account/info` 的学号、姓名一致 |
+
+> ⚠️⚠️ **两个必须知道的坑：**
+>
+> **1. 这个接口出错也返回 HTTP 200。** 错误在 body 里：
+> ```json
+> {"success": false, "errorCode": 1, "errorMessage": "手机号不能为空", "data": null}
+> ```
+> 只看状态码会以为一切正常，然后 `data` 是 null、静默回退到估算余额，
+> 表现成「功能没生效」。判断成功必须看 `success` 字段。
+>
+> **2. 它要的是 `telPhone`，不是 `telephone`。** 绝大多数接口只认 `telephone`，
+> 这个偏偏要 `telPhone`（两个都带最保险）。少传就报上面那个「手机号不能为空」。
+> 如果用拦截器统一补 GET 参数，**两个字段都要补**，见 9.2。
+
+> 未签约（`signStatus == 0`）时服务端不给 `amount`，客户端只能回退到
+> 「初始余额 − 账单消费」的本地估算。
+
+#### 签约状态
+
+```
+GET /settlement/withhold/sign/status
+```
+
+返回是否已签约代扣。签约/解约对应：
+`POST /settlement/campus/agreement/open`（需要 `campusAccount` + `campusPassword`，即学校统一身份认证账密）、
+`POST /settlement/campus/agreement/close`。
+
+#### 学校名
+
+```
+GET /project/info/triple
+```
+
+```json
+{"success": true, "data": {"projectId": 905, "projectName": "金华职业技术大学", ...}}
+```
+
+`projectName` 就是学校名，`projectDescription` 是学院名。
+
+---
+
+### 4.10 手机号与密码
+
+v3.0.0 新增。**验证码的 `typeId` 决定用途**，用错就收不到码。
+
+| `typeId` | 用途 | `telephone` 填哪个号 | 需要登录态 |
+|---|---|---|---|
+| `2` | **重置/修改密码** | 当前绑定号 | ✅ |
+| `3` | 登录 / 注册 | 要登录的号 | ❌ |
+| `5` | **更换手机号** | **新**号 | ✅ |
+
+#### 更换手机号
+
+```
+# 1. 发验证码（注意 telephone 是新号！）
+GET /user/verification/code/get?typeId=5&telephone={新号}&secret={secret}&...
+
+# 2. 提交
+POST /user/phone/update
+Content-Type: application/x-www-form-urlencoded
+
+newTelephone=19182692082&code=396948&loginCode=xxx&telephone={旧号}&telPhone={旧号}&...
+```
+
+> ⚠️ 验证码发到**新**号，旧号只出现在认证参数（`telephone` / `telPhone`）里。
+> 写反了的话用户永远收不到码。这是 v3.0.0 修掉的一个真 bug。
+
+错误码：`29` = 验证码失效，`39` = 新手机号已被其他账号绑定。
+
+#### 修改密码（知道旧密码）
+
+```
+POST /user/password/update
+Content-Type: application/x-www-form-urlencoded
+
+oldPassword=A98BF854DD&password=16BAC22278&loginCode=xxx&...
+```
+
+两个密码都是 **MD5 取后 10 位大写**（见第 3 节），和登录用的是同一套。
+
+#### 重置密码（不知道旧密码）
+
+**这是用验证码注册的账号唯一的出路**——`/user/password/update` 必须带 `oldPassword`，
+而短信注册的账号根本没有旧密码可填。
+
+```
+# 1. 发验证码（typeId=2，发到当前绑定号）
+GET /user/verification/code/get?typeId=2&telephone={当前号}&secret={secret}&...
+
+# 2. 重置
+POST /user/password/forget
+Content-Type: application/x-www-form-urlencoded
+
+password=0AB7065F1C&code=198871&loginCode=xxx&...
+```
+
+**不需要 `oldPassword`。** 新密码同样是 MD5 取后 10 位大写。
 
 ---
 
@@ -659,8 +896,14 @@ scanner.startScan(null, settings, object : ScanCallback() {
 | errorCode | 说明 |
 |---|---|
 | `0` | 成功 |
+| `1` | 参数缺失（如 `手机号不能为空`），**HTTP 仍是 200** |
 | `12` | 手机号或密码错误 |
+| `29` | 验证码已失效 |
+| `39` | 该手机号已绑定其他账号 |
+| `46` | 验证码错误 |
+| `53` | 请勿频繁获取验证码 |
 | `307` | 设备正在使用中 |
+| `4004` | 设备不存在 |
 
 ---
 
@@ -678,6 +921,8 @@ scanner.startScan(null, settings, object : ScanCallback() {
 ### 9.2 POST 请求的双重 telephone 字段
 
 POST 请求的认证参数中，`telephone` 和 `telPhone` 两个字段都需要传，值相同。遗漏任一字段可能导致认证失败。
+
+> **GET 请求有同样的问题**，而且更隐蔽——见 [9.8](#98-get-请求也要补-telphone)。
 
 ### 9.3 orderNo 的异步获取
 
@@ -697,9 +942,47 @@ MQTT 连接可能因网络原因失败。应实现 HTTP 轮询兜底方案，确
 
 趣智校园不支持多设备同时在线。当用户在另一台设备登录时，当前设备的 loginCode 会失效。API 会返回包含"登录"、"token"、"失效"等关键词的错误信息，或返回 HTTP 401/403。
 
-### 9.7 一卡通余额
+### 9.7 一卡通余额（v3.0.0 已解决，下面的老结论作废）
 
-一卡通余额由易校园/小付宝系统管理（`compus.xiaofubao.com`），该 API 有签名保护（`sign` Header），签名算法在网易易盾加固的 native 层中，无法通过常规方式获取。如需显示一卡通余额，建议让用户手动输入。
+**老结论**（v3.0.0 之前）：一卡通余额由易校园/小付宝系统管理（`compus.xiaofubao.com`），
+该 API 有签名保护（`sign` Header），签名算法在网易易盾加固的 native 层中，无法通过常规方式获取。
+
+**真实情况**：**不用去碰易校园，趣智校园自己代理了这个接口。**
+
+```
+GET /settlement/campus/userInfo   →   {"amount":"16.76","signStatus":1,"studentNumber":"...","studentName":"..."}
+```
+
+本 App 从 v3.0.0 起直接读它显示真实余额，未签约时回退本地估算。
+
+> 当初之所以判断「做不了」，是**只盯着易校园的域名**，没注意到趣智校园这边有现成代理。
+> 教训：先在自己已经能认证的系统里找一遍，再去想怎么破第三方的签名。
+
+**唯一的真限制**：学生**没签约免密支付**（`signStatus == 0`）时服务端不给 `amount`，
+这种账号仍然只能本地估算。
+
+详见 [4.9](#49-账号信息与一卡通)。
+
+### 9.8 GET 请求也要补 `telPhone`
+
+9.2 说的是 POST 请求体里 `telephone` 和 `telPhone` 要一起传。
+**GET 请求同样有这个要求**——如果用拦截器统一往 URL 上补认证参数，
+很容易只补了 `telephone`（因为绝大多数接口只认它），然后在
+`/settlement/campus/userInfo` 上吃瘪：
+
+```json
+{"success": false, "errorCode": 1, "errorMessage": "手机号不能为空", "data": null}
+```
+
+**HTTP 还是 200。** 少了 `telPhone` 就报「手机号不能为空」，而状态码一切正常，
+只能靠读 `errorMessage` 发现。两个都补上最省事。
+
+### 9.9 别假设「HTTP 200 = 成功」
+
+趣智校园这边，**接口失败也经常返回 HTTP 200**，错误全在 body 的 `success` / `errorCode` 里。
+上面 9.8 那个「手机号不能为空」就是典型：状态码 200、`data` 是 `null`，
+如果代码是 `resp.data ?: return` 这种写法，就会**静默降级**成「功能没生效」，
+日志里还看不出来。判断成功一律看 `success` 字段。
 
 ---
 
@@ -793,9 +1076,67 @@ interface QzxyService {
     @GET("/account/useCode/new")
     fun getUseCode(): Call<ResponseBody>
 
+    /** 「换一个」：只返回候选码，不生效。每天 20 次 */
     @FormUrlEncoded
     @POST("/account/useCode/new/generate")
     fun generateUseCode(@FieldMap auth: Map<String, String>): Call<ResponseBody>
+
+    /** 「确定领取」：唯一会让候选码生效的一步 */
+    @FormUrlEncoded
+    @POST("/account/useCode/new/set")
+    fun setUseCode(
+        @Field("useCode") useCode: String,
+        @FieldMap auth: Map<String, String>
+    ): Call<ResponseBody>
+
+    // ── 账号信息与一卡通（v3.0.0） ──
+
+    /** 姓名 / 学号 / 校园卡绑定状态。GET 会自动带上认证参数 */
+    @GET("/account/info")
+    fun getAccountInfo(): Call<ResponseBody>
+
+    /**
+     * 一卡通真实余额。
+     *
+     * ⚠️ 它要的是 `telPhone`（不是 `telephone`），少传会返回
+     * `errorCode=1 手机号不能为空`——而且 **HTTP 仍是 200**。
+     * ⚠️ 未签约（signStatus=0）时不给 amount。
+     */
+    @GET("/settlement/campus/userInfo")
+    fun getCampusUserInfo(): Call<ResponseBody>
+
+    /** 项目（学校）信息，projectName 就是学校名 */
+    @GET("/project/info/triple")
+    fun getProjectInfo(): Call<ResponseBody>
+
+    // ── 手机号与密码（v3.0.0） ──
+
+    /** 更换手机号。code 是发到**新**号（typeId=5）的验证码 */
+    @FormUrlEncoded
+    @POST("/user/phone/update")
+    fun updatePhone(
+        @Field("newTelephone") newTelephone: String,
+        @Field("code") code: String,
+        @FieldMap auth: Map<String, String>
+    ): Call<ResponseBody>
+
+    /** 修改密码。两个密码都是 MD5 取后 10 位大写 */
+    @FormUrlEncoded
+    @POST("/user/password/update")
+    fun updatePassword(
+        @Field("oldPassword") oldPassword: String,
+        @Field("password") password: String,
+        @FieldMap auth: Map<String, String>
+    ): Call<ResponseBody>
+
+    /** 重置密码：**不需要旧密码**，只要 typeId=2 发来的验证码 */
+    @FormUrlEncoded
+    @POST("/user/password/forget")
+    fun forgetPassword(
+        @Field("password") password: String,
+        @Field("code") code: String,
+        @FieldMap auth: Map<String, String>
+    ): Call<ResponseBody>
 
     // ── 短信验证码（v2.1.0：secret 由手机号推导，任何手机号可用） ──
     // secret = MD5(手机号前3位 + 手机号后4位 + "klcx")，见 utils/SignUtils.kt
