@@ -98,6 +98,8 @@
 | [PROJECT.md](PROJECT.md) | 完整项目文档：技术架构、项目结构、构建方法、功能清单 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本更新日志 |
 | [SECURITY.md](SECURITY.md) | 安全说明：如何验证正版、我们的安全设计、已知暴露面 |
+| [API-qzxy.md](API-qzxy.md) | 趣智校园 API 逆向工程完整参考 |
+| [开发者指南.md](开发者指南.md) | 面向第三方开发者的开发指南 |
 
 ## 🔧 适配你的学校
 
