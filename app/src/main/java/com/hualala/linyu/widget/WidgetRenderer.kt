@@ -19,6 +19,9 @@ import com.hualala.linyu.utils.ScanPermission
 
 /** 小组件尺寸 */
 enum class WidgetSize(val label: String) {
+    /** 1x1，整块就是一个开关。只有底色和图标，没有任何文字 */
+    TILE("1x1"),
+
     /** 2x2，可自由拉伸；只有一套卡片布局，内容随尺寸自适应 */
     SMALL("2x2"),
 
@@ -127,6 +130,9 @@ object WidgetRenderer {
         disabled: DisabledReason? = null,
         tab: Int = 0
     ): RemoteViews {
+        // 1x1 是另一套结构（没有头/面板/胶囊按钮），单独一条路
+        if (size == WidgetSize.TILE) return buildTile(context, state, appWidgetId, disabled)
+
         // 只有一套固定样式，不分深浅：
         // 小组件压在用户的壁纸上，深浅切换要么看不出变化、要么和壁纸撞色，
         // 不如固定成一个自带背景的高对比卡片——任何壁纸下都一样清楚。
@@ -215,6 +221,94 @@ object WidgetRenderer {
             bindTabs(views, context, appWidgetId, tab)
             bindPage(context, views, appWidgetId, tab)
         }
+        return views
+    }
+
+    /**
+     * 1x1：整块就是一个开关。
+     *
+     * **故意不放设备名、计时、预扣金额**——一格大概四五十 dp，塞这些谁也看不清。
+     * 用户要的就是「点一下开关热水」，详细状态由用水期间那条常驻通知承担。
+     *
+     * 状态只能靠底色 + 图标表达（RemoteViews 改不了背景，所以是三块叠着切 visibility）：
+     *
+     * | 状态 | 底色 | 图标 | 点击 |
+     * |---|---|---|---|
+     * | 空闲 | 玻璃灰 | 电源 | 开阀 |
+     * | 使用中 | 蓝 | 停止方块 | 关阀 |
+     * | 他人使用中 | 橙 | 锁 | 仍是开阀（服务端会拒绝，然后弹占用提示） |
+     * | 未登录 / 还没选过设备 | 玻璃灰 | 电源 | 打开 App |
+     */
+    private fun buildTile(
+        context: Context,
+        state: WidgetState,
+        appWidgetId: Int,
+        disabled: DisabledReason?
+    ): RemoteViews {
+        val views = RemoteViews(context.packageName, R.layout.widget_linyu_1x1)
+
+        val running = state is WidgetState.Running
+        val occupied = (state as? WidgetState.Idle)?.occupied == true
+        // 未登录 / 没有设备：点它没有任何可执行的动作，直接开 App 让用户去处理
+        val needsApp = state is WidgetState.LoggedOut || state is WidgetState.NoDevice
+
+        // 正在开阀 / 关阀（会持续好几秒）→ 盖一层转圈。
+        // 「他人使用中」和「切换失败」是**结果**不是过程，不该转圈——
+        // 前者马上会把整块变成橙色，后者本来就没有对应动作。
+        val spinning = disabled != null &&
+            disabled != DisabledReason.PICK_FAILED &&
+            disabled != DisabledReason.IN_USE_BY_OTHERS
+
+        // 空闲那块是三种情况共用的（真·空闲 / 未登录 / 没选过设备），
+        // 只有顶上的字不同——「未登录」的时候写「空闲」会让人以为能直接开阀
+        val idleLabel = when {
+            state is WidgetState.LoggedOut -> R.string.widget_1x1_state_logged_out
+            state is WidgetState.NoDevice -> R.string.widget_1x1_state_no_device
+            else -> R.string.widget_1x1_state_idle
+        }
+        views.setTextViewText(R.id.widget_tile_idle_label, context.getString(idleLabel))
+
+        val showIdle = !running && !occupied && !spinning
+        views.setViewVisibility(R.id.widget_tile_idle, if (showIdle) View.VISIBLE else View.GONE)
+        views.setViewVisibility(R.id.widget_tile_using, if (running && !spinning) View.VISIBLE else View.GONE)
+        views.setViewVisibility(R.id.widget_tile_occupied, if (occupied && !spinning) View.VISIBLE else View.GONE)
+        views.setViewVisibility(R.id.widget_tile_busy, if (spinning) View.VISIBLE else View.GONE)
+
+        // ⚠️ 隐藏的那几块也占着布局位置、也收得到触摸，必须把点击清掉，
+        // 否则会点到看不见的按钮上
+        val idle = R.id.widget_tile_idle
+        val using = R.id.widget_tile_using
+        val occ = R.id.widget_tile_occupied
+
+        val idleClick = when {
+            !showIdle -> null
+            needsApp -> openAppIntent(context, appWidgetId, TAB_HOME)
+            else -> actionIntent(context, appWidgetId, disabled, LinYuWidgetProvider.ACTION_START)
+        }
+        val usingClick =
+            if (running && !spinning) actionIntent(context, appWidgetId, null, LinYuWidgetProvider.ACTION_STOP)
+            else null
+        // 占用中仍然让点：服务端会拒绝，App 那边会把它记成「占用中」并把通知发出来。
+        // 直接摘掉点击的话，用户点了没反应，更懵
+        val occClick =
+            if (occupied && !spinning) actionIntent(context, appWidgetId, disabled, LinYuWidgetProvider.ACTION_START)
+            else null
+
+        views.setOnClickPendingIntent(idle, idleClick)
+        views.setOnClickPendingIntent(using, usingClick)
+        views.setOnClickPendingIntent(occ, occClick)
+        // 转圈那块永远不接点击：正在操作时连点会叠加请求
+        views.setOnClickPendingIntent(R.id.widget_tile_busy, null)
+
+        // 根布局也挂一份当前的点击动作。布局为了跟应用图标一样大留了 7dp 内边距，
+        // 那圈留白落在根布局上、不在任何一块 tile 里——不补这一下，
+        // 边缘就成了"看得见但点不着"的死区。
+        // 点在内层 tile 上时由内层先接住，不会重复触发。
+        views.setOnClickPendingIntent(
+            R.id.widget_tile_root,
+            if (spinning) null else idleClick ?: usingClick ?: occClick
+        )
+
         return views
     }
 
@@ -628,9 +722,11 @@ object WidgetRenderer {
      * 只有两套布局，按尺寸选，**不再看宽高比**。
      * 竖向那套的中间区域用 `layout_weight=1` 撑满，被拉宽拉高都自己适配。
      */
-    private fun layoutRes(size: WidgetSize): Int =
-        if (size == WidgetSize.WIDE) R.layout.widget_linyu_2x4
-        else R.layout.widget_linyu_2x2
+    private fun layoutRes(size: WidgetSize): Int = when (size) {
+        WidgetSize.WIDE -> R.layout.widget_linyu_2x4
+        WidgetSize.TILE -> R.layout.widget_linyu_1x1
+        else -> R.layout.widget_linyu_2x2
+    }
 
     // ── PendingIntent ──
     // requestCode 必须每个 widget、每个动作都不同，否则会互相覆盖

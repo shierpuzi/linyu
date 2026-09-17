@@ -398,8 +398,15 @@ private fun ActiveOrderCard(order: com.hualala.linyu.model.ActiveOrder, viewMode
                 contentAlignment = Alignment.Center) { Text(order.deviceEmoji, fontSize = 22.sp) }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
-                Text(order.deviceName.ifEmpty { "热水器" },
-                    fontWeight = FontWeight.SemiBold, color = AppColors.TextPrimary)
+                // 和下面的「上次使用」卡片一样用 TailEllipsisText：
+                // 设备名有辨识度的部分在**结尾**（房号），而且必须单行——
+                // 普通 Text 放不下会折成两三行，把这张卡片撑变形。
+                TailEllipsisText(
+                    text = order.deviceName.ifEmpty { "热水器" },
+                    modifier = Modifier.fillMaxWidth(),
+                    fontWeight = FontWeight.SemiBold,
+                    color = AppColors.TextPrimary
+                )
                 Spacer(Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.clip(RoundedCornerShape(6.dp)).background(AppColors.ActiveBg)

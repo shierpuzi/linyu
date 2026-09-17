@@ -104,7 +104,8 @@ object Notifier {
             .setOngoing(true)                        // 划不掉，跟服务同生共死
             .setOnlyAlertOnce(true)                  // 更新时不重复提醒
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setContentIntent(openApp(context, tab = 0))
+            // 点它就是想回使用页看当前状态，不是回首页
+            .setContentIntent(openApp(context, tab = 0, showShower = true))
             .addAction(stopAction(context))
             .build()
 
@@ -231,13 +232,23 @@ object Notifier {
         }
     }
 
-    private fun openApp(context: Context, tab: Int): PendingIntent {
+    /**
+     * 打开 App。
+     *
+     * @param showShower true = 点进来直接落到**使用页**而不是首页。
+     *        点「正在使用」那条通知的人就是想看当前这单用水的状态，
+     *        把他扔到首页还得自己再找一次。
+     */
+    private fun openApp(context: Context, tab: Int, showShower: Boolean = false): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(MainActivity.EXTRA_TAB, tab)
+            if (showShower) putExtra(MainActivity.EXTRA_SHOW_SHOWER, true)
         }
+        // requestCode 要把 showShower 也带上：两个 PendingIntent 只有 extra 不同的话，
+        // FLAG_UPDATE_CURRENT 会让后建的覆盖先建的，结果点哪个都进同一个页面
         return PendingIntent.getActivity(
-            context, 7000 + tab, intent,
+            context, (if (showShower) 7600 else 7000) + tab, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }

@@ -1,5 +1,6 @@
 package com.hualala.linyu
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -47,18 +48,33 @@ import com.hualala.linyu.utils.BackgroundManager
 import com.hualala.linyu.utils.BackgroundState
 import com.hualala.linyu.utils.PrefsHelper
 
+/** 一次「从外部跳进来」的请求：落到哪个 tab、要不要直接进使用页 */
+data class NavRequest(val tab: Int, val showShower: Boolean)
+
 class MainActivity : ComponentActivity() {
     companion object {
         /** 从小组件跳进来时要打开哪个底部 tab（0 首页 / 1 账单 / 2 我的） */
         const val EXTRA_TAB = "linyu_tab"
+
+        /** 从「正在使用」通知点进来：直接落到使用页。见 [com.hualala.linyu.utils.Notifier.showInUse] */
+        const val EXTRA_SHOW_SHOWER = "linyu_show_shower"
     }
+
+    /**
+     * 待处理的跳转请求。
+     *
+     * ⚠️ 不能只在 `onCreate` 里读 intent。通知的 PendingIntent 带的是
+     * `FLAG_ACTIVITY_CLEAR_TOP`，App 已经在跑的时候**不会重建 Activity**，
+     * 而是走 `onNewIntent`——只读 onCreate 的话，第二次点通知就没反应了。
+     */
+    private val navRequest = mutableStateOf<NavRequest?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         // 小组件可以带参数跳进来：账单卡片 → 账单页。
         // （附近设备的「选用」已经改成在桌面后台完成，不再往这里跳了）
-        val launchTab = intent?.getIntExtra(EXTRA_TAB, 0) ?: 0
+        navRequest.value = intent.toNavRequest()
         // 启用 edge-to-edge：让内容延伸到状态栏/导航栏下方，
         // 这样自定义背景才能铺满到状态栏（各页面用 statusBarsPadding 自保内容位置）
         androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -88,10 +104,20 @@ class MainActivity : ComponentActivity() {
             // 状态声明在动画容器之外：切换动画会切换容器内的渲染分支，
             // 状态若声明在容器内会被重建（表现为切主题后跳回首页）
             var isLoggedIn by rememberSaveable { mutableStateOf(hasToken) }
-            var currentTab by rememberSaveable { mutableStateOf(launchTab) }
+            var currentTab by rememberSaveable { mutableStateOf(navRequest.value?.tab ?: 0) }
             var showKickedDialog by remember { mutableStateOf(false) }
             var showLogoutConfirm by remember { mutableStateOf(false) }
             val mainViewModel: MainViewModel = viewModel()
+
+            // 消费跳转请求：冷启动和「App 已在跑时再点通知」走的是同一条路
+            // （后者经 onNewIntent 更新 navRequest，这里会重新触发）
+            LaunchedEffect(navRequest.value, isLoggedIn) {
+                val nav = navRequest.value ?: return@LaunchedEffect
+                if (!isLoggedIn) return@LaunchedEffect   // 还没登录，等登进来再说
+                if (nav.showShower) mainViewModel.restoreShowerScreen(mainViewModel.phone)
+                currentTab = nav.tab
+                navRequest.value = null
+            }
 
             CircularRevealThemeHost(
                 themeModeState = themeModeState,
@@ -251,6 +277,22 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /** App 已经在跑时再点通知/小组件，走这里（见 [navRequest] 的注释） */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.toNavRequest()?.let { navRequest.value = it }
+    }
+
+    /** intent 里没带任何跳转参数时返回 null，避免把用户当前的 tab 冲掉 */
+    private fun Intent?.toNavRequest(): NavRequest? {
+        if (this == null) return null
+        val tab = getIntExtra(EXTRA_TAB, -1)
+        val showShower = getBooleanExtra(EXTRA_SHOW_SHOWER, false)
+        if (tab < 0 && !showShower) return null
+        return NavRequest(tab = if (tab >= 0) tab else 0, showShower = showShower)
     }
 
     private fun updateStatusBarColor(themeMode: ThemeMode) {

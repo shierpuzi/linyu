@@ -172,6 +172,10 @@ suspend fun QzxyService.registerAndLoginSafe(telephone: String, smsCode: String)
 suspend fun QzxyService.getAccountInfoSafe(): BaseResponse<AccountInfo> =
     parse(getAccountInfo().awaitString(), AccountInfo::class.java)
 
+/** 字段是 [getAccountInfoSafe] 的超集，复用同一个模型即可（Gson 只映射存在的字段） */
+suspend fun QzxyService.getBindCardInfoSafe(): BaseResponse<AccountInfo> =
+    parse(getBindCardInfo().awaitString(), AccountInfo::class.java)
+
 suspend fun QzxyService.forgetPasswordSafe(
     password: String,
     code: String,

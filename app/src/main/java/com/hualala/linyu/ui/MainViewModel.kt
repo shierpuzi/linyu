@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.hualala.linyu.api.NetworkModule
 import com.hualala.linyu.api.getAccountInfoSafe
 import com.hualala.linyu.api.getBillListSafe
+import com.hualala.linyu.api.getBindCardInfoSafe
 import com.hualala.linyu.api.getCampusUserInfoSafe
 import com.hualala.linyu.api.getDeviceInfoSafe
 import com.hualala.linyu.api.forgetPasswordSafe
@@ -628,6 +629,27 @@ class MainViewModel : ViewModel() {
     }
 
     /**
+     * 把使用页拉回来。点「正在使用」通知进来时调用。
+     *
+     * 界面可能是三种状态之一：
+     * - **已经停在使用页** → 什么都不用做
+     * - **之前点了「最小化」** → `isShowering` 是 false，但设备还在跑
+     * - **App 被杀过** → 同上，而且内存里的活跃订单也没了
+     *
+     * 后两种都要先从 Prefs 把活跃订单读回来，再走「恢复订单」那条路——
+     * `openValve` 查到已有订单且是自己的时候返回 `Resumed`，**不会重新开阀**，
+     * 正好是首页那张「使用中的设备」卡片上「恢复」按钮的行为。
+     */
+    fun restoreShowerScreen(phone: String) {
+        if (isShowering) return
+        syncActiveOrdersFromPrefs()
+        val order = activeOrders.firstOrNull() ?: return
+        lastDeviceSnCode = order.snCode
+        lastDeviceMac = order.deviceMac
+        startLastDevice(phone)
+    }
+
+    /**
      * 最小化使用界面：退出界面但**不结束用水**。
      * 订单保留在 activeOrders，计时器（startedAt）继续累计，可随时通过"恢复"回到界面。
      */
@@ -976,12 +998,52 @@ class MainViewModel : ViewModel() {
         if (!PrefsHelper.isLoggedIn) return
         sessionScope().launch {
             try {
-                val d = NetworkModule.apiService.getAccountInfoSafe().data ?: return@launch
-                accountInfo = d
-                d.name?.takeIf { it.isNotEmpty() }?.let { PrefsHelper.userName = it }
-                d.idCardNumber?.takeIf { it.isNotEmpty() }?.let { PrefsHelper.userStudentId = it }
+                NetworkModule.apiService.getAccountInfoSafe().data?.let {
+                    applyIdentity(it.name, it.idCardNumber, it)
+                }
+                // 姓名靠学校同步学籍数据，没同步的账号 /account/info 返回的 name 就是 null
+                // （实测同学的两个号都是这样）。换个接口再要一次——绑定卡信息里也有姓名和学号，
+                // 两个接口数据来源不同，一个没有另一个可能有。
+                if (PrefsHelper.userName.isEmpty() || PrefsHelper.userStudentId.isEmpty()) {
+                    NetworkModule.apiService.getBindCardInfoSafe().data?.let {
+                        applyIdentity(it.name, it.idCardNumber, null)
+                    }
+                }
             } catch (_: Exception) {}
         }
+    }
+
+    /**
+     * 把姓名 / 学号落到 Prefs **和** [accountInfo] 上。
+     *
+     * 现在有三个接口都能给这两个字段（`/account/info`、`/account/card/getBindCardInfo`、
+     * `/settlement/campus/userInfo`），谁先拿到算谁的。所以统一走这里收口，
+     * 免得每个调用点各写一遍「判空 → 写 Prefs」。
+     *
+     * ⚠️ 必须同时更新 [accountInfo]：界面读的是这个 State，只写 Prefs 不会触发重组，
+     * 数据回来了界面也不刷新。
+     *
+     * @param extra 该来源额外的字段（卡状态之类），为 null 时保留已有的
+     */
+    private fun applyIdentity(name: String?, studentId: String?, extra: AccountInfo?) {
+        val n = name?.takeIf { it.isNotBlank() }
+        val s = studentId?.takeIf { it.isNotBlank() }
+        if (n != null) PrefsHelper.userName = n
+        if (s != null) PrefsHelper.userStudentId = s
+        if (n == null && s == null && extra == null) return
+
+        val cur = accountInfo
+        val merged = AccountInfo(
+            name = n ?: cur?.name,
+            idCardNumber = s ?: cur?.idCardNumber,
+            telephone = extra?.telephone ?: cur?.telephone,
+            genderName = extra?.genderName ?: cur?.genderName,
+            cardStatus = extra?.cardStatus ?: cur?.cardStatus,
+            cardStatusName = extra?.cardStatusName ?: cur?.cardStatusName,
+            gradeName = extra?.gradeName ?: cur?.gradeName,
+            className = extra?.className ?: cur?.className
+        )
+        if (merged != cur) accountInfo = merged
     }
 
     /**
@@ -1025,10 +1087,10 @@ class MainViewModel : ViewModel() {
                     // 用户看到的就是「App 里是真余额、桌面上还是估算」。
                     appContext?.let { LinYuWidget.refreshAll(it) }
                 }
-                // 这个接口顺带也给学号，作为 /account/info 的兜底
-                d.studentNumber?.takeIf { it.isNotEmpty() }?.let {
-                    if (PrefsHelper.userStudentId.isEmpty()) PrefsHelper.userStudentId = it
-                }
+                // 这个接口顺带也给姓名和学号。它是从**校园卡**那边查的，
+                // 和 /account/info 的数据来源不同——学校没同步学籍时前者为 null、
+                // 这里却有值，正好互补。以前只取了学号，把姓名漏了。
+                applyIdentity(d.studentName, d.studentNumber, null)
             } catch (_: Exception) {}
         }
     }

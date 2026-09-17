@@ -3,10 +3,10 @@
 [![Platform](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com)
 [![Language](https://img.shields.io/badge/Language-Kotlin-blue.svg)](https://kotlinlang.org)
 [![UI](https://img.shields.io/badge/UI-Jetpack%20Compose-purple.svg)](https://developer.android.com/jetpack/compose)
-[![Version](https://img.shields.io/badge/Version-v3.0.0-orange.svg)](https://github.com/yehu-imei/linyu/releases/latest)
+[![Version](https://img.shields.io/badge/Version-v3.0.1-orange.svg)](https://github.com/yehu-imei/linyu/releases/latest)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**⬇️ [下载最新 APK (v3.0.0)](https://github.com/yehu-imei/linyu/releases/latest)**
+**⬇️ [下载最新 APK (v3.0.1)](https://github.com/yehu-imei/linyu/releases/latest)**
 
 > 安装包 12.5 MB，仅支持 64 位（arm64-v8a）设备。
 >
@@ -55,7 +55,7 @@
 - 🔕 **系统通知** — 用水期间通知栏常驻状态条（显示已用时间）并带「结束用水」按钮；结束和超时自动关停也有提醒，每个通知可单独开关
 - 💰 **消费结算** — 关阀后通过账单自动显示本次消费金额
 - 🚰 **饮水机支持（待测试）** — 自动识别直饮水机，绿色主题区分，设备名智能精简
-- 🧩 **桌面小组件** — 2x2 / 2x4 两种尺寸，桌面直接启停热水；深色液态玻璃卡片，布局随尺寸自适应
+- 🧩 **桌面小组件** — 1x1 / 2x2 / 2x4 三种尺寸，桌面直接启停热水；深色液态玻璃卡片，布局随尺寸自适应
   - 2x4 带侧边导航，可切换「设备控制 / 附近设备 / 账单」三页
   - 操作状态在桌面上**全局同步**：点任一个组件，所有淋浴组件同时显示「正在开启…」并转圈
   - 点「上次消费」卡片进 App 账单页；使用中点计时卡片直接关阀
@@ -70,7 +70,7 @@
 
 - 🪪 **个人信息卡片** — 姓名、学号、学校自动获取，不用手填
 - 📱 **更换手机号** — 验证码发到新号码，改完即时生效
-- 🔑 **修改密码** — 支持密码方式和**短信验证码方式**
+- 🔑 **修改密码** — 支持密码方式和**短信验证码方式**（没设过密码、或忘了密码都能用）
 - 🎫 **使用码** — 领取 / 重新领取前可先预览，「换一个」每天 20 次，确定领取才真正替换；取消不会影响正在用的码
 
 ### 🎨 个性化
@@ -171,7 +171,7 @@ secret = MD5( 手机号前3位 + 手机号后4位 + "klcx" )
 
 | 问题 | 说明 |
 |---|---|
-| **深色模式不全** | 登录页和洗澡页为硬编码颜色切换，非完全跟随系统；扫码页固定深色 |
+| **深色模式不完整** | 登录页和洗澡页为硬编码颜色切换，非完全跟随系统；扫码页固定深色（相机画面上深浅模式没有意义） |
 | **仅中文界面** | 无多语言支持 |
 
 > 欢迎提 Issue 或 PR 帮助改进！

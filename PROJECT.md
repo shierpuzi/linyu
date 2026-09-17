@@ -8,7 +8,7 @@
 |---|---|
 | 应用名称 | 淋浴 |
 | 包名 | `com.hualala.linyu` |
-| 版本 | v3.0.0 |
+| 版本 | v3.0.1 |
 | 技术栈 | Kotlin + Jetpack Compose + Material 3 |
 | 最低 Android 版本 | Android 8.0 (API 26) |
 | 目标 Android 版本 | Android 16 (API 36) |
@@ -41,7 +41,7 @@
 | 多设备支持 | 支持同时管理多个活跃设备订单 |
 | 上次使用设备 | 记住上次使用的设备，一键快速开始 |
 | 饮水机支持 | 按 `bigTypeId == 5` 识别直饮水机，绿主题 + ❄️/♨️ 图标 + 名称精简（未实机验证） |
-| 桌面小组件 | 2x2 / 2x4 两种尺寸，桌面直接启停热水；深色液态玻璃卡片，计时由 `Chronometer` 驱动，App 不在也能走秒 |
+| 桌面小组件 | 1x1 / 2x2 / 2x4 三种尺寸，桌面直接启停热水；深色液态玻璃卡片，计时由 `Chronometer` 驱动，App 不在也能走秒 |
 | 主动挤号检测 | 25 秒心跳轮询，被挤下线能及时弹提示（跟随 Activity 生命周期，退后台自动停） |
 
 ### 钱包与账单
@@ -91,7 +91,7 @@ app/src/main/
 ├── AndroidManifest.xml                    # 应用清单，权限声明
 ├── java/com/hualala/linyu/
 │   ├── MainActivity.kt                    # 主 Activity，导航、弹窗、主题管理
-│   ├── QrScanActivity.kt                  # 扫码界面（CameraX + ML Kit + 手电筒）
+│   ├── QrScanActivity.kt                  # 扫码界面（CameraX + ML Kit，支持相册选图 / 手电筒）
 │   │
 │   ├── api/                               # 网络层
 │   │   ├── QzxyService.kt                 # Retrofit 接口定义（16 个 API）
@@ -101,7 +101,9 @@ app/src/main/
 │   │
 │   ├── data/                              # 数据层
 │   │   ├── AuthRepository.kt              # 登录认证逻辑（密码 / 短信）
-│   │   └── ShowerController.kt            # 开阀 / 关阀 / 结算共享层（App 与小组件共用）
+│   │   ├── ShowerController.kt            # 开阀 / 关阀 / 结算共享层（App 与小组件共用）
+│   │   ├── ShowerEvents.kt                # 服务 → 界面的进程内事件（无 replay，App 不在就丢）
+│   │   └── BalanceEstimator.kt            # 余额口径（真实值优先，拿不到才本地估算，三处共用）
 │   │
 │   ├── model/                             # 数据模型
 │   │   ├── LoginModels.kt                 # BaseResponse<T>、LoginData、UserAccount、
@@ -113,6 +115,9 @@ app/src/main/
 │   │   ├── WidgetCache.kt                 # 小组件离线快照（附近设备 / 账单）
 │   │   ├── ActiveOrder.kt                 # 活跃订单模型
 │   │   └── MqttModels.kt                  # MQTT 消息模型
+│   │
+│   ├── service/                           # 前台服务
+│   │   └── ShowerWatchService.kt           # 用水监控（超时自动关停 / 订单轮询，脱离界面）
 │   │
 │   ├── ui/                                # UI 层
 │   │   ├── LoginScreen.kt                 # 登录页面（密码 / 短信双模式）
@@ -135,7 +140,7 @@ app/src/main/
 │   │       └── CircularRevealTheme.kt     # 圆形揭示主题切换容器
 │   │
 │   ├── widget/                            # 桌面小组件
-│   │   ├── LinYuWidgetProvider.kt         # Provider 基类（2x2 / 2x4 共用）+ 状态推送
+│   │   ├── LinYuWidgetProvider.kt         # Provider 基类（1x1 / 2x2 / 2x4 共用）+ 状态推送
 │   │   └── WidgetRenderer.kt              # 状态推断 + RemoteViews 渲染（无反射调用）
 │   │
 │   └── utils/                             # 工具层
@@ -145,6 +150,7 @@ app/src/main/
 │       ├── BluetoothScanner.kt            # BLE 蓝牙扫描（过滤 KLCXKJ-Water 设备）
 │       ├── MD5Utils.kt                    # 密码加密（MD5 取后 10 位）
 │       ├── SignUtils.kt                   # 短信验证码 secret 计算（按手机号推导）
+│       ├── Notifier.kt                    # 系统通知（三条渠道：用水状态 / 静默 / 事件）
 │       ├── AppLogger.kt                   # 运行日志（脱敏 / 滚动 / 崩溃捕获）
 │       ├── BackgroundManager.kt           # 背景图存取（主页 / 使用页两套配置）
 │       ├── BackgroundState.kt             # 背景配置状态（Compose State）
@@ -163,14 +169,17 @@ app/src/main/
     │   ├── widget_avatar.xml             # 设备头像圆底
     │   └── ic_widget_*.xml               # 小组件矢量图标
     ├── layout/
+    │   ├── widget_linyu_1x1.xml          # 小组件布局（1x1，整块一个开关，四态叠放切 visibility）
     │   ├── widget_linyu_2x2.xml          # 小组件布局（2x2，任何尺寸都用这套，靠 weight 自适应）
     │   └── widget_linyu_2x4.xml          # 小组件布局（2x4，含三页）
     ├── drawable-nodpi/
-    │   ├── widget_preview_2x2.png        # 组件选择器预览图（不随屏幕密度缩放）
+    │   ├── widget_preview_1x1.png        # 组件选择器预览图（不随屏幕密度缩放）
+    │   ├── widget_preview_2x2.png
     │   └── widget_preview_2x4.png
     ├── xml/
     │   ├── network_security_config.xml    # 网络安全配置（仅允许 MQTT 明文）
     │   ├── file_paths.xml                 # 日志导出 FileProvider 路径
+    │   ├── widget_info_1x1.xml            # 小组件配置（1x1）
     │   ├── widget_info_2x2.xml            # 小组件配置（2x2）
     │   ├── widget_info_2x4.xml            # 小组件配置（2x4）
     │   ├── backup_rules.xml               # 备份规则
@@ -392,6 +401,13 @@ buildTypes {
 
 ## 版本历史
 
+### v3.0.1 (2026-09-17)
+
+- **新增 1x1 小组件** — 一格大小，点一下开关热水。顶部小字标状态（空闲 / 使用中 / 占用中），操作中显示转圈（用系统 `ProgressBar`，因为 RemoteViews 跑不了动画）
+- **姓名拿不到的根因修掉了** — `/account/info` 的姓名依赖学校同步学籍，没同步的账号返回 `null`。现在三个来源汇总：新增 `/account/card/getBindCardInfo`，并补上从 `/settlement/campus/userInfo` 取 `studentName`（原来只取了学号）
+- 修复：首页「使用中的设备」名字长了换行把卡片撑变形、点「正在使用」通知回到首页而不是使用页、通知权限提示块没占满一行、关掉通知总开关后仍提示打开权限
+- 详见 [CHANGELOG](CHANGELOG.md)
+
 ### v3.0.0 (2026-09-17)
 
 2.0 以来最大的一次更新。三个"一直做不到"的限制被解掉了。
@@ -439,7 +455,7 @@ buildTypes {
 
 ### v2.2.0 (2026-09-14)
 
-- **桌面小组件**（2x2 / 2x4，桌面直接启停热水，Chronometer 实时计时）
+- **桌面小组件**（1x1 / 2x2 / 2x4，桌面直接启停热水，Chronometer 实时计时）
 - **扫描权限按需申请**（Android 12+ 不再需要定位权限）
 - **登录页接入系统自动填充**（保存 / 回填账号密码）
 - **挤号检测改为主动**（25 秒心跳轮询）

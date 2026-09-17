@@ -288,6 +288,11 @@ open class LinYuWidgetProvider : AppWidgetProvider() {
     }
 }
 
+/** 1x1 小组件入口：一个按钮开关热水 */
+class LinYuWidget1x1 : LinYuWidgetProvider() {
+    override val size = WidgetSize.TILE
+}
+
 /** 2x2 小组件入口 */
 class LinYuWidget2x2 : LinYuWidgetProvider() {
     override val size = WidgetSize.SMALL
@@ -425,7 +430,9 @@ internal object WidgetBridge {
     /** 遍历桌面上所有「淋浴」小组件 */
     fun forEachWidget(context: Context, block: (id: Int, size: WidgetSize) -> Unit) {
         val manager = AppWidgetManager.getInstance(context)
+        // ⚠️ 每加一个尺寸都要在这里登记，否则那个尺寸的组件收不到重绘
         val entries = listOf(
+            LinYuWidget1x1::class.java to WidgetSize.TILE,
             LinYuWidget2x2::class.java to WidgetSize.SMALL,
             LinYuWidget2x4::class.java to WidgetSize.WIDE
         )

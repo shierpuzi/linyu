@@ -128,6 +128,19 @@ interface QzxyService {
     fun getAccountInfo(): Call<ResponseBody>
 
     /**
+     * 已绑定卡片的账号信息。
+     *
+     * 字段是 [/account/info] 的超集（还多了 `lastConsumeTime`、`useCount`、`cardCost`），
+     * 姓名和学号都在。
+     *
+     * ⚠️ 存在的意义是**兜底**：`/account/info` 的 `name` 要学校把学籍数据同步过来才有，
+     * 没同步的账号（实测室友的号就是）返回的是 `null`。这两个接口数据来源不同，
+     * 一个没有另一个可能有。
+     */
+    @GET("/account/card/getBindCardInfo")
+    fun getBindCardInfo(): Call<ResponseBody>
+
+    /**
      * 一卡通余额与免密支付签约状态。
      *
      * 没签约（signStatus = 0）时服务端不给 amount，调用方要能回退。

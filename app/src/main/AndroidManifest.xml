@@ -73,7 +73,27 @@
             android:exported="false"
             android:screenOrientation="portrait" />
 
-        <!-- 桌面小组件：2x2 与 2x4 各注册一个，共用同一个 Provider 基类的逻辑 -->
+        <!--
+          桌面小组件：1x1 / 2x2 / 2x4 各注册一个，共用同一个 Provider 基类的逻辑。
+
+          ⚠️ 每个 receiver 的 intent-filter 都要把 ACTION_START / STOP / REFRESH 列全。
+          广播是靠 action 找 receiver 的，漏掉哪个，那个尺寸的组件点了就没反应。
+        -->
+        <receiver
+            android:name=".widget.LinYuWidget1x1"
+            android:exported="false"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.hualala.linyu.widget.ACTION_START" />
+                <action android:name="com.hualala.linyu.widget.ACTION_STOP" />
+                <action android:name="com.hualala.linyu.widget.ACTION_REFRESH" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_info_1x1" />
+        </receiver>
+
         <receiver
             android:name=".widget.LinYuWidget2x2"
             android:exported="false"
