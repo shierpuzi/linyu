@@ -2,14 +2,19 @@ package com.hualala.linyu.widget
 
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import com.hualala.linyu.api.NetworkModule
 import com.hualala.linyu.data.CloseOutcome
 import com.hualala.linyu.data.OpenOutcome
 import com.hualala.linyu.data.ShowerController
+import com.hualala.linyu.service.ShowerWatchService
 import com.hualala.linyu.utils.AppLogger
+import com.hualala.linyu.utils.Notifier
 import com.hualala.linyu.utils.PrefsHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -51,8 +56,8 @@ open class LinYuWidgetProvider : AppWidgetProvider() {
     /**
      * 用户拖动改变了小组件尺寸。
      *
-     * 2x2 需要按宽高比在「按钮在下方」和「按钮在右侧」之间切换，
-     * 不重绘的话布局会一直停在添加时的那个方向。
+     * 布局本身不再随尺寸切换了（2x2 只有一套，靠 weight 自适应），
+     * 留着这个回调是为了顺手重新渲染一次，让拉伸后的内容跟当前状态对齐。
      */
     override fun onAppWidgetOptionsChanged(
         context: Context,
@@ -78,7 +83,8 @@ open class LinYuWidgetProvider : AppWidgetProvider() {
 
         val action = intent.action ?: return
         if (action != ACTION_START && action != ACTION_STOP &&
-            action != ACTION_REFRESH && action != ACTION_SET_TAB
+            action != ACTION_REFRESH && action != ACTION_SET_TAB &&
+            action != ACTION_PICK_DEVICE
         ) return
 
         val id = intent.getIntExtra(EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
@@ -92,27 +98,82 @@ open class LinYuWidgetProvider : AppWidgetProvider() {
             return
         }
 
+        val pickMac = intent.getStringExtra(EXTRA_PICK_MAC) ?: ""
+
         // goAsync：告诉系统"这个广播还没处理完，别回收进程"，最多约 10 秒
         val pending = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                handleAction(context, id, action)
+                handleAction(context, id, action, pickMac)
             } catch (e: Exception) {
                 // 小组件里没有地方弹错误，只能落日志；界面靠重新渲染回落到真实状态
                 AppLogger.e("Widget action failed: $action", e)
             } finally {
-                WidgetBridge.clearBusy()
-                // 必须刷新桌面上的**所有**小组件，不能只刷被点的那个：
-                // 2x2 和 2x4 可能同时摆在桌面上，它们读的是同一份 Prefs，
-                // 只刷一个的话另一个会一直停在旧状态（点了 2x2 开阀，2x4 还显示「空闲」）。
-                WidgetBridge.renderAll(context)
-                pending.finish()
+                finishAction(context, pending)
             }
         }
     }
 
-    private suspend fun handleAction(context: Context, appWidgetId: Int, action: String) {
+    /**
+     * 广播收尾。
+     *
+     * 正常路径：清掉「进行中」再重绘——必须刷新桌面上的**所有**小组件，不能只刷被点的那个。
+     * 2x2 和 2x4 可能同时摆在桌面上，它们读的是同一份 Prefs，只刷一个的话另一个会一直停在旧状态
+     * （点了 2x2 开阀，2x4 还显示「空闲」）。
+     *
+     * 例外：本次操作留了一条要短暂展示的提示（「选用」失败）。小组件没有 toast 可弹，
+     * 所以先把提示画出来，几秒后再清掉重绘。
+     */
+    private fun finishAction(context: Context, pending: BroadcastReceiver.PendingResult) {
+        // 这次操作已经交给前台服务了（停止用水），busy 归服务管，这里什么都不做
+        if (WidgetBridge.consumeDelegated()) {
+            pending.finish()
+            return
+        }
+        val notice = WidgetBridge.takeNotice()
+        if (notice == null) {
+            WidgetBridge.clearBusy()
+            WidgetBridge.renderAll(context)
+            pending.finish()
+            return
+        }
+        WidgetBridge.renderAll(context)
+        Handler(Looper.getMainLooper()).postDelayed({
+            // 只在提示还挂着时清它。这几秒里用户又点了别的按钮的话，
+            // busy 已经是那次操作的状态了，别去动它
+            WidgetBridge.clearNotice(notice)
+            WidgetBridge.renderAll(context)
+        }, NOTICE_DURATION_MS)
+        pending.finish()
+    }
+
+    private suspend fun handleAction(
+        context: Context,
+        appWidgetId: Int,
+        action: String,
+        pickMac: String = ""
+    ) {
         WidgetBridge.ensureInit(context)
+
+        // 「选用」只换设备、不开阀，所以放在下面的 snCode 校验之前——
+        // 这个动作本来就是要把「还没有设备」变成「有设备」
+        if (action == ACTION_PICK_DEVICE) {
+            WidgetBridge.markBusy(WidgetRenderer.DisabledReason.SWITCHING)
+            // 先切回设备控制页再重绘：用户点完"选用"最想看的就是那一页，
+            // 而切换又需要一次网络往返，正好利用这段时间显示「正在切换设备…」
+            PrefsHelper.setWidgetTab(appWidgetId, 0)
+            WidgetBridge.renderAll(context)
+
+            if (ShowerController.pickDevice(pickMac)) {
+                AppLogger.i("Widget 选用设备成功 ($pickMac)")
+            } else {
+                // 新设备没查出来就保持原样，只报个错，别把用户原来那台也弄丢
+                AppLogger.w("Widget 选用设备失败 ($pickMac)")
+                WidgetBridge.markNotice(WidgetRenderer.DisabledReason.PICK_FAILED)
+            }
+            return
+        }
+
         WidgetBridge.markBusy(
             when (action) {
                 ACTION_STOP -> WidgetRenderer.DisabledReason.STOPPING
@@ -134,8 +195,44 @@ open class LinYuWidgetProvider : AppWidgetProvider() {
         when (action) {
             ACTION_START -> when (val outcome = ShowerController.openValve(snCode)) {
                 // Opened / Resumed：状态已落盘，重新渲染就会变成「使用中」
-                is OpenOutcome.Opened, is OpenOutcome.Resumed ->
+                is OpenOutcome.Opened, is OpenOutcome.Resumed -> {
                     AppLogger.i("Widget 开阀成功 ($snCode)")
+                    // 开起来了，之前记下的「占用中」不再成立
+                    PrefsHelper.occupiedSnCode = ""
+                    // 先把「使用中」通知发出去，**再**去起服务。
+                    //
+                    // 顺序很重要：通知本来就由服务负责挂（前台服务必须有一条），
+                    // 但服务是 startForegroundService 冷启动的，要等它起来才看得到通知；
+                    // 而小组件点一下的时候 App 在后台，服务能不能起来还不一定
+                    // （Android 12+ 对后台启动前台服务有限制）。先自己发一条，
+                    // 用户点完立刻能看到反馈，服务随后起来也只是更新同一条（id 相同）。
+                    Notifier.showInUse(
+                        context,
+                        PrefsHelper.lastDeviceName.ifEmpty { "热水器" },
+                        PrefsHelper.getStartedAt(snCode)
+                    )
+                    // 交给前台服务持续盯着：超时自动关停、被外部关闭，都要能立刻发现
+                    ShowerWatchService.start(context, snCode)
+                }
+
+                /**
+                 * 设备正被别人用着。
+                 *
+                 * ⚠️ 这里**绝不能**当成 Resumed 处理——那会把别人的订单记成自己的，
+                 * 卡片显示「使用中」并开始计时，用户点停止时还会拿别人的 orderNo 去关阀。
+                 * App 内的设备详情弹窗靠 isOwner 把按钮置灰，小组件没有界面，
+                 * 只能在这里拦住，然后用徽章 + 短暂提示告诉用户。
+                 */
+                is OpenOutcome.InUseByOthers -> {
+                    AppLogger.w("Widget 开阀被拒（他人使用中）$snCode")
+                    PrefsHelper.occupiedSnCode = snCode
+                    WidgetBridge.markNotice(WidgetRenderer.DisabledReason.IN_USE_BY_OTHERS)
+                    Notifier.showOccupied(
+                        context,
+                        PrefsHelper.lastDeviceName.ifEmpty { "该设备" }
+                    )
+                }
+
                 is OpenOutcome.Failed ->
                     AppLogger.w("Widget 开阀失败: ${outcome.message}")
                 // 预算耗尽：不谎报成功也不谎报失败，改成"点击刷新"由用户手动对齐
@@ -145,9 +242,20 @@ open class LinYuWidgetProvider : AppWidgetProvider() {
                 }
             }
 
-            ACTION_STOP -> when (val outcome = ShowerController.closeValve(snCode, "")) {
-                is CloseOutcome.Closed -> AppLogger.i("Widget 关阀成功 ($snCode)")
-                is CloseOutcome.Failed -> AppLogger.w("Widget 关阀失败: ${outcome.message}")
+            /**
+             * 停止也交给服务做。
+             *
+             * 关阀确认要 5 秒、账单结算最多再要 7 秒，合起来超过广播 `goAsync()` 约 10 秒的预算——
+             * 在这里做完的话，最后那条带金额的通知根本发不出去。
+             * 服务没有这个时限，所以整条停止流程（关阀 → 结算 → 通知）都搬过去了。
+             */
+            ACTION_STOP -> {
+                AppLogger.i("Widget 请求停止 $snCode")
+                // 告诉广播收尾：别清「正在关闭…」。关阀要 5 秒，
+                // 广播是立刻返回的，清了 busy 卡片会先弹回「使用中」再变空闲，
+                // 中间闪一下很难看。busy 交给服务完成后自己清。
+                WidgetBridge.markDelegated()
+                ShowerWatchService.finishShower(context, snCode)
             }
 
             // 「状态未知」状态下用户点按钮：按一次服务端真实状态，把本地对齐
@@ -171,7 +279,12 @@ open class LinYuWidgetProvider : AppWidgetProvider() {
         const val ACTION_STOP = "com.hualala.linyu.widget.ACTION_STOP"
         const val ACTION_REFRESH = "com.hualala.linyu.widget.ACTION_REFRESH"
         const val ACTION_SET_TAB = "com.hualala.linyu.widget.ACTION_SET_TAB"
+        const val ACTION_PICK_DEVICE = "com.hualala.linyu.widget.ACTION_PICK_DEVICE"
         const val EXTRA_TAB = "tab"
+        const val EXTRA_PICK_MAC = "pickMac"
+
+        /** 「选用」失败这类提示在桌面上停留多久 */
+        private const val NOTICE_DURATION_MS = 3_000L
     }
 }
 
@@ -232,9 +345,54 @@ internal object WidgetBridge {
     private var busy: WidgetRenderer.DisabledReason? = null
     private var unknown = false
 
+    /** 需要短暂停留在桌面上的提示（目前只有「选用」失败），由 [takeNotice] 取走 */
+    private var notice: WidgetRenderer.DisabledReason? = null
+
     fun markBusy(reason: WidgetRenderer.DisabledReason) {
+        notice = null            // 新操作开始，上一次留下的提示作废
         unknown = false
         busy = reason
+    }
+
+    /**
+     * 记一条「过几秒自己消失」的提示。
+     *
+     * 小组件弹不了 toast，失败信息只能借「进行中」这个位置显示一会儿。
+     * 显示时长由调用方（Provider 的 `postDelayed`）控制。
+     */
+    fun markNotice(reason: WidgetRenderer.DisabledReason) {
+        unknown = false
+        notice = reason
+        busy = reason
+    }
+
+    /**
+     * 这次操作交给了前台服务，busy 由服务完成后清。
+     *
+     * 用于「停止用水」：广播立刻返回，而关阀要 5 秒。若收尾时按常规清 busy，
+     * 卡片会先弹回「使用中」（订单还在）、等关阀完再变空闲，中间闪一下。
+     */
+    private var delegated = false
+
+    fun markDelegated() { delegated = true }
+
+    /** 取走「已交给服务」标记。服务自己那条路径不走广播，所以取过即清 */
+    fun consumeDelegated(): Boolean {
+        val v = delegated
+        delegated = false
+        return v
+    }
+
+    /** 取走待展示的提示，取过即失效（提示只该展示一次） */
+    fun takeNotice(): WidgetRenderer.DisabledReason? {
+        val n = notice
+        notice = null
+        return n
+    }
+
+    /** 只在这个提示还挂在屏幕上时清掉它；期间用户又点了别的按钮就交给那次操作收尾 */
+    fun clearNotice(reason: WidgetRenderer.DisabledReason) {
+        if (busy == reason) busy = null
     }
 
     fun markUnknown() {

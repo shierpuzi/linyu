@@ -86,6 +86,21 @@
                     android:textColor="#60A5FA"
                     android:text="● 使用中"
                     android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/widget_badge_occupied"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/widget_badge_occupied"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:paddingTop="2dp"
+                    android:paddingBottom="2dp"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:textColor="#F2FBBF24"
+                    android:text="● 占用中"
+                    android:visibility="gone" />
             </FrameLayout>
         </LinearLayout>
 

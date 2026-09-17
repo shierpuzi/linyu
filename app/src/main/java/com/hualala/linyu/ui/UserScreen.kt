@@ -1,5 +1,10 @@
 package com.hualala.linyu.ui
 
+import android.content.Intent
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -9,12 +14,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -31,20 +36,32 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hualala.linyu.BuildConfig
+import com.hualala.linyu.R
+import com.hualala.linyu.utils.MD5Utils
+import com.hualala.linyu.utils.Notifier
 import com.hualala.linyu.api.GithubApi
 import com.hualala.linyu.api.GithubAsset
 import com.hualala.linyu.api.GithubRelease
 import com.hualala.linyu.api.GithubRepoInfo
 import com.hualala.linyu.api.NetworkModule
+import com.hualala.linyu.data.AuthRepository
+import com.hualala.linyu.api.forgetPasswordSafe
+import com.hualala.linyu.api.updatePasswordSafe
+import com.hualala.linyu.api.updatePhoneSafe
 import com.hualala.linyu.api.updateUseCodeStatusSafe
+import com.hualala.linyu.model.DeviceInfo
 import com.hualala.linyu.model.UseCodeData
 import com.hualala.linyu.ui.theme.AppColors
 import com.hualala.linyu.ui.theme.LocalThemeMode
@@ -54,14 +71,16 @@ import com.hualala.linyu.utils.ApkDownloadState
 import com.hualala.linyu.utils.ApkInstallResult
 import com.hualala.linyu.utils.ApkUpdater
 import com.hualala.linyu.utils.PrefsHelper
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** 「我的」页面中可编辑的卡片类型（声明顺序即默认顺序） */
 enum class UserCardType(val title: String) {
     ACCOUNT("账号信息"),
-    BOUND_ROOM("绑定寝室"),
     USE_CODE("使用码"),
+    NOTIFY("通知"),
     BACKGROUND("背景装扮"),
+    BOUND_ROOM("绑定寝室"),
     UPDATE("软件更新"),
     ABOUT("关于项目"),
     LOG("运行日志")
@@ -69,17 +88,27 @@ enum class UserCardType(val title: String) {
 
 // ── 卡片顺序 / 隐藏状态的读写 ──
 
-/** 旧版本的默认顺序（「运行日志」在「关于项目」之前），用于识别"从未自定义过排序"的用户 */
-private val LEGACY_DEFAULT_ORDER = listOf(
-    "ACCOUNT", "BOUND_ROOM", "USE_CODE", "BACKGROUND", "UPDATE", "LOG", "ABOUT"
+/**
+ * 历代的默认顺序。
+ *
+ * 存下来的顺序**恰好等于**其中任意一条，就说明用户从没手动排过（只是某次进页面时
+ * 顺手存了默认值），这时应该用当前的新默认顺序，而不是把他锁在旧排序里。
+ *
+ * 代价是：用户真的手动排成了和某条默认完全一样的顺序时，会跟着新默认走。
+ * 这种巧合概率极低，换来的是改默认顺序时老用户能跟着更新——值得。
+ */
+private val SUPERSEDED_DEFAULT_ORDERS = listOf(
+    // v2.2.x 早期：「运行日志」在「关于项目」之前
+    listOf("ACCOUNT", "BOUND_ROOM", "USE_CODE", "BACKGROUND", "UPDATE", "LOG", "ABOUT"),
+    // 之后：补上了「通知」，但顺序仍是旧的
+    listOf("ACCOUNT", "BOUND_ROOM", "USE_CODE", "BACKGROUND", "UPDATE", "NOTIFY", "ABOUT", "LOG")
 )
 
 private fun loadCardOrder(): List<UserCardType> {
     val all = UserCardType.values().toList()
     val savedNames = PrefsHelper.userCardOrder.split(",")
         .map { it.trim() }.filter { it.isNotEmpty() }
-    // 保存的顺序若恰好等于旧版默认顺序，说明用户没有手动排过，改用新默认顺序
-    val effective = if (savedNames == LEGACY_DEFAULT_ORDER) emptyList() else savedNames
+    val effective = if (savedNames in SUPERSEDED_DEFAULT_ORDERS) emptyList() else savedNames
     val saved = effective.mapNotNull { name -> all.find { it.name == name } }
     // 已保存的顺序 + 新增卡片（追加到末尾），并去重
     return (saved + all).distinct()
@@ -125,7 +154,14 @@ private object UserPageCache {
 
 @Composable
 fun UserScreen(phone: String, onLogout: () -> Unit, viewModel: MainViewModel? = null) {
-    LaunchedEffect(Unit) { viewModel?.loadUseCode() }
+    LaunchedEffect(Unit) {
+        viewModel?.loadUseCode()
+        // 姓名 / 学号走 /account/info，一卡通余额走 /settlement/campus/userInfo。
+        // 这两个都写进 Prefs，但界面读的是 ViewModel 的 State——
+        // 直接读 Prefs 不会触发重组，拉完数据界面不会自己刷新。
+        viewModel?.loadAccountInfo()
+        viewModel?.loadCampusBalance()
+    }
     val useCode = viewModel?.useCodeData
 
     // 编辑模式与卡片布局
@@ -137,10 +173,8 @@ fun UserScreen(phone: String, onLogout: () -> Unit, viewModel: MainViewModel? = 
         mutableStateOf(UserPageCache.hiddenCards ?: loadHiddenCards().also { UserPageCache.hiddenCards = it })
     }
 
-    var showSchoolDialog by remember { mutableStateOf(false) }
     var showLogViewer by remember { mutableStateOf(false) }
     var showBackgroundScreen by remember { mutableStateOf(false) }
-    var schoolInput by remember { mutableStateOf(PrefsHelper.schoolName) }
     var themeMode by LocalThemeMode.current
     val themeReveal = LocalThemeReveal.current
     var themeBtnPos by remember { mutableStateOf(Offset.Zero) }
@@ -191,11 +225,12 @@ fun UserScreen(phone: String, onLogout: () -> Unit, viewModel: MainViewModel? = 
                 }
             ) {
                 when (type) {
-                    UserCardType.ACCOUNT -> AccountCard(phone) { showSchoolDialog = true }
+                    UserCardType.ACCOUNT -> AccountCard(phone, viewModel)
                     UserCardType.BOUND_ROOM -> BoundRoomCard(viewModel)
                     UserCardType.USE_CODE -> UseCodeCard(useCode, viewModel)
                     UserCardType.BACKGROUND -> BackgroundCard { showBackgroundScreen = true }
                     UserCardType.UPDATE -> UpdateCard()
+                    UserCardType.NOTIFY -> NotifyCard()
                     UserCardType.LOG -> LogCard { showLogViewer = true }
                     UserCardType.ABOUT -> AboutCard()
                 }
@@ -215,32 +250,6 @@ fun UserScreen(phone: String, onLogout: () -> Unit, viewModel: MainViewModel? = 
         Text("Hualala v${BuildConfig.VERSION_NAME} · 哗啦啦啦啦让我去淋浴~",
             color = AppColors.TextSecondary, fontSize = 12.sp)
         Spacer(Modifier.height(100.dp)) // 底部留出悬浮导航栏空间
-    }
-
-    if (showSchoolDialog) {
-        AlertDialog(
-            onDismissRequest = { showSchoolDialog = false },
-            title = { Text("修改学校名称", fontWeight = FontWeight.Bold) },
-            text = {
-                OutlinedTextField(
-                    value = schoolInput,
-                    onValueChange = { schoolInput = it },
-                    label = { Text("学校名称") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            },
-            confirmButton = {
-                Button(onClick = {
-                    PrefsHelper.schoolName = schoolInput
-                    showSchoolDialog = false
-                }) { Text("保存") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showSchoolDialog = false }) { Text("取消") }
-            }
-        )
     }
 
     if (showLogViewer) {
@@ -300,7 +309,9 @@ private fun EditableCardSlot(
                 }
                 IconButton(onClick = onToggleHide, modifier = Modifier.size(34.dp)) {
                     Icon(
-                        if (isHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                        painterResource(
+                            if (isHidden) R.drawable.ic_visibility else R.drawable.ic_visibility_off
+                        ),
                         if (isHidden) "显示" else "隐藏",
                         tint = if (isHidden) AppColors.Success else AppColors.TextSecondary
                     )
@@ -315,15 +326,97 @@ private fun EditableCardSlot(
 }
 
 @Composable
-private fun AccountCard(phone: String, onEditSchool: () -> Unit) {
+private fun AccountCard(
+    phone: String,
+    viewModel: MainViewModel?
+) {
+    var showChangePhone by remember { mutableStateOf(false) }
+    var showChangePassword by remember { mutableStateOf(false) }
+    var manageExpanded by remember { mutableStateOf(false) }
+
+    // ViewModel 的 State 优先（能触发重组），没有就退回 Prefs 里的持久化值
+    val info = viewModel?.accountInfo
+    val name = info?.name?.takeIf { it.isNotEmpty() }
+        ?: PrefsHelper.userName.takeIf { it.isNotEmpty() }
+    val studentId = info?.idCardNumber?.takeIf { it.isNotEmpty() }
+        ?: PrefsHelper.userStudentId.takeIf { it.isNotEmpty() }
+    // 学校名走 /project/info/triple 自动填，不再让用户手输——服务端本来就有
+    val school = viewModel?.schoolName?.takeIf { it.isNotEmpty() } ?: PrefsHelper.schoolName
+
     BaseCard {
         Column(Modifier.padding(20.dp)) {
-            InfoRow("姓名", PrefsHelper.userName.ifEmpty { "未设置" })
-            Spacer(Modifier.height(10.dp))
+            // 没值就**整行不显示**。以前写死「未设置」，大多数人看到的是那三个字，
+            // 既像报错又占位置——而学校没同步姓名是服务端的事，用户改不了。
+            if (name != null) {
+                InfoRow("姓名", name)
+                Spacer(Modifier.height(10.dp))
+            }
             InfoRow("手机号", phone)
             Spacer(Modifier.height(10.dp))
-            EditableInfoRow("学校", PrefsHelper.schoolName) { onEditSchool() }
+            InfoRow("学校", school)
+            // 学号跟在**学校**下面：这两个是同一类信息（学籍），挨着放一眼能对上；
+            // 夹在手机号和学校之间会把「账号」和「学籍」两组信息切得七零八落
+            if (studentId != null) {
+                Spacer(Modifier.height(10.dp))
+                InfoRow("学号", studentId)
+            }
+
+            // 账号管理默认收起。这两件事一年用不上一次，铺在卡片里纯占地方；
+            // 但换手机号/改密码又是必须有的出口，所以做成可展开而不是直接删掉。
+            Spacer(Modifier.height(12.dp))
+            HorizontalDivider(color = AppColors.Border)
+            CollapsibleHeader("账号管理", manageExpanded) { manageExpanded = !manageExpanded }
+            if (manageExpanded) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    TextButton(onClick = { showChangePhone = true }) {
+                        Text("更换手机号", fontSize = 13.sp, color = AppColors.Accent)
+                    }
+                    TextButton(onClick = { showChangePassword = true }) {
+                        Text("修改密码", fontSize = 13.sp, color = AppColors.Accent)
+                    }
+                }
+            }
         }
+    }
+
+    if (showChangePhone) {
+        ChangePhoneDialog(viewModel) { showChangePhone = false }
+    }
+    if (showChangePassword) {
+        ChangePasswordDialog(viewModel) { showChangePassword = false }
+    }
+}
+
+/**
+ * 折叠区的标题行：一行字 + 右端箭头，整行可点。
+ *
+ * 「我的」页面的折叠区都走这一个，免得每处自己写一遍箭头方向，
+ * 出现有的地方展开了箭头朝上、有的朝下。
+ */
+@Composable
+private fun CollapsibleHeader(
+    title: String,
+    expanded: Boolean,
+    onToggle: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable { onToggle() }
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, fontSize = 13.sp, color = AppColors.Accent)
+        Spacer(Modifier.width(4.dp))
+        Icon(
+            if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+            null, tint = AppColors.Accent, modifier = Modifier.size(18.dp)
+        )
     }
 }
 
@@ -381,25 +474,32 @@ private fun BoundRoomCard(viewModel: MainViewModel?) {
                 }
                 OutlinedButton(onClick = { showRoomPicker = true },
                     shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)) {
-                    Text("从附近设备选")
+                    Text("选择附近")
                 }
             }
         }
     }
 
     if (showRoomPicker) {
+        // 只取房间那一截（「某小区 3号楼南 320房」→「320房」）。
+        // 列表本来就窄，全称会被省略号截成「某小区 3号楼…」，几栋楼看起来一模一样。
+        // 同一间房的热水器和洗手台是两个设备，但房间是同一个——去重后只出现一次。
         val devices = viewModel?.nearbyDevices?.mapNotNull {
-            val n = it.deviceInfo?.deviceName ?: it.name
-            viewModel.extractLocationFromDevice(n).takeIf { it.isNotBlank() }
+            DeviceInfo.roomLabel(it.deviceInfo?.deviceName ?: it.name)
         }?.distinct() ?: emptyList()
         AlertDialog(
             onDismissRequest = { showRoomPicker = false },
             title = { Text("选择设备位置", fontWeight = FontWeight.Bold) },
             text = {
                 if (devices.isEmpty()) {
-                    Text("附近暂无设备，请先到热水器旁扫描后再试", color = AppColors.TextSecondary)
+                    Text("附近暂无设备", color = AppColors.TextSecondary)
                 } else {
-                    LazyColumn(Modifier.height(300.dp)) {
+                    // heightIn 而不是固定高度：只有一两个寝室时卡片会跟着变矮，
+                    // 固定 300dp 会拖出一大块空白，看着像还没加载完
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 210.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
                         items(devices) { loc ->
                             TextButton(
                                 onClick = {
@@ -412,7 +512,7 @@ private fun BoundRoomCard(viewModel: MainViewModel?) {
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(loc, color = AppColors.TextPrimary, maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis)
+                                    overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
                             }
                         }
                     }
@@ -429,6 +529,16 @@ private fun UseCodeCard(useCode: UseCodeData?, viewModel: MainViewModel?) {
     var localCodeOn by remember { mutableStateOf(useCode?.useCodeStatus == 1) }
     LaunchedEffect(useCode?.useCodeStatus) { useCode?.useCodeStatus?.let { localCodeOn = it == 1 } }
     val scope = rememberCoroutineScope()
+    var showRedeem by remember { mutableStateOf(false) }
+    var redeemExpanded by remember { mutableStateOf(false) }
+
+    val code = useCode?.useCode
+    // 区分两种「没有码」：还没拉到（加载中）vs 服务端说这人就没有（尚未领取）。
+    // 没领过码的人 `useCode` 返回的是 null，以前一律显示「加载中...」，永远等不到。
+    val loaded = viewModel?.useCodeLoaded == true
+    // resetAvailability == 0 = 今天已经领过了，服务端不让再领（实测文案「1天只能领取一次使用码」）。
+    // 没拉到数据时是 null，按「可以点」处理——让请求自己去报错，好过凭空禁用。
+    val canRedeem = useCode?.resetAvailability != 0
 
     BaseCard {
         Column(Modifier.padding(20.dp)) {
@@ -441,19 +551,21 @@ private fun UseCodeCard(useCode: UseCodeData?, viewModel: MainViewModel?) {
                 Text("后三位为手机号后三位", color = AppColors.TextSecondary, fontSize = 11.sp)
             }
             Spacer(Modifier.height(4.dp))
-            val code = useCode?.useCode
-            if (!code.isNullOrEmpty()) {
-                val prefix = code.dropLast(3)
-                val suffix = code.takeLast(3)
-                Text(
-                    buildAnnotatedString {
-                        withStyle(SpanStyle(color = AppColors.TextPrimary)) { append(prefix) }
-                        withStyle(SpanStyle(color = AppColors.Accent)) { append(suffix) }
-                    },
-                    fontSize = 28.sp, fontWeight = FontWeight.Black, letterSpacing = 6.sp
-                )
-            } else {
-                Text("加载中...", fontSize = 28.sp, fontWeight = FontWeight.Black,
+            when {
+                !code.isNullOrEmpty() -> {
+                    val prefix = code.dropLast(3)
+                    val suffix = code.takeLast(3)
+                    Text(
+                        buildAnnotatedString {
+                            withStyle(SpanStyle(color = AppColors.TextPrimary)) { append(prefix) }
+                            withStyle(SpanStyle(color = AppColors.Accent)) { append(suffix) }
+                        },
+                        fontSize = 28.sp, fontWeight = FontWeight.Black, letterSpacing = 6.sp
+                    )
+                }
+                loaded -> Text("尚未领取", fontSize = 28.sp, fontWeight = FontWeight.Black,
+                    color = AppColors.TextSecondary, letterSpacing = 6.sp)
+                else -> Text("加载中...", fontSize = 28.sp, fontWeight = FontWeight.Black,
                     color = AppColors.TextPrimary, letterSpacing = 6.sp)
             }
             Spacer(Modifier.height(4.dp))
@@ -487,8 +599,211 @@ private fun UseCodeCard(useCode: UseCodeData?, viewModel: MainViewModel?) {
             }
             Text("在热水器物理键盘上输入此码",
                 color = AppColors.TextSecondary, fontSize = 12.sp)
+
+            // 领取入口同样收起。⚠️ 今天已领过时**按钮照样能点**——
+            // 置灰虽然「正确」，但用户看不懂为什么不给点；让他点、然后弹一句
+            // 「1天只能领取一次使用码」，比一个灰按钮说得多。
+            Spacer(Modifier.height(12.dp))
+            HorizontalDivider(color = AppColors.Border)
+            CollapsibleHeader(
+                if (code.isNullOrEmpty()) "领取使用码" else "重新领取",
+                redeemExpanded
+            ) { redeemExpanded = !redeemExpanded }
+            if (redeemExpanded) {
+                if (!canRedeem) {
+                    useCode?.resetAvailabilityWarMark?.let {
+                        Text(it, color = AppColors.TextSecondary, fontSize = 11.sp,
+                            modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                }
+                Button(
+                    onClick = { showRedeem = true },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent)
+                ) {
+                    Text(if (code.isNullOrEmpty()) "领取使用码" else "重新领取")
+                }
+            }
         }
     }
+
+    if (showRedeem) {
+        UseCodeRedeemDialog(useCode, viewModel) { showRedeem = false }
+    }
+}
+
+/** 换出来的使用码领取时限：3 分钟，超时作废 */
+private const val RedeemTtlSec = 180
+
+/**
+ * 领取 / 重新领取使用码。
+ *
+ * **关键在于「换一个」不会动当前生效的码**——服务端的 `generate` 只是把候选码
+ * 发过来（扣一次当日额度），真正生效要等 `set`，也就是「确定领取」那一下。
+ * 所以「取消」是零成本的，当前码纹丝不动，这正是和官方那套的区别：
+ * 官方点开页面就先自动换一个，我们让用户自己决定换不换。
+ *
+ * 换出来的码有 3 分钟领取时限，所以挂了个倒计时——超时后按钮置灰，
+ * 得重新「换一个」。
+ */
+@Composable
+private fun UseCodeRedeemDialog(
+    useCode: UseCodeData?,
+    viewModel: MainViewModel?,
+    onDismiss: () -> Unit
+) {
+    val currentCode = useCode?.useCode
+    var candidate by remember { mutableStateOf<String?>(null) }
+    var remainTimes by remember { mutableStateOf<Int?>(null) }
+    var swapping by remember { mutableStateOf(false) }
+    var claiming by remember { mutableStateOf(false) }
+    var leftSec by remember { mutableStateOf(RedeemTtlSec) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    // 每换出一个新码就重置倒计时。key 用 candidate，换一次重新计一次
+    LaunchedEffect(candidate) {
+        if (candidate == null) return@LaunchedEffect
+        leftSec = RedeemTtlSec
+        while (leftSec > 0) {
+            delay(1000)
+            leftSec--
+        }
+    }
+
+    val expired = candidate != null && leftSec <= 0
+
+    val swap: () -> Unit = {
+        if (!swapping && !claiming) {
+            swapping = true
+            error = null
+            if (viewModel == null) {
+                error = "当前无法换码"
+                swapping = false
+            } else {
+                viewModel.generateUseCode { r ->
+                    if (r == null) error = "换码失败，请重试"
+                    else {
+                        candidate = r.first
+                        remainTimes = r.second
+                    }
+                    swapping = false
+                }
+            }
+        }
+    }
+
+    // 服务端说今天已经领过了。**不是不给点，而是点了告诉用户为什么**——
+    // 所以这里不拦入口，只把弹窗内容换成一句说明。
+    val blocked = useCode?.resetAvailability == 0
+    val blockReason = useCode?.resetAvailabilityWarMark ?: "1天只能领取一次使用码"
+
+    // 手上没有码时弹窗里空空如也，先自动换一个出来
+    LaunchedEffect(Unit) { if (!blocked && currentCode.isNullOrEmpty()) swap() }
+
+    AlertDialog(
+        onDismissRequest = { if (!claiming) onDismiss() },
+        title = {
+            Text(
+                if (blocked) "无法领取"
+                else if (currentCode.isNullOrEmpty()) "领取使用码"
+                else "重新领取使用码",
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            if (blocked) {
+                Text(blockReason, color = AppColors.TextPrimary, fontSize = 14.sp)
+            } else
+            Column {
+                if (!currentCode.isNullOrEmpty()) {
+                    Row(Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("当前使用码", color = AppColors.TextSecondary, fontSize = 12.sp)
+                        Text(currentCode, color = AppColors.TextSecondary,
+                            fontSize = 12.sp, letterSpacing = 1.sp)
+                    }
+                    Spacer(Modifier.height(14.dp))
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("领取后替换为", color = AppColors.TextSecondary, fontSize = 12.sp)
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            candidate ?: "— — — — — — — —",
+                            fontSize = 24.sp, fontWeight = FontWeight.Black,
+                            letterSpacing = 3.sp,
+                            color = if (candidate == null || expired) AppColors.TextSecondary
+                            else AppColors.Accent
+                        )
+                    }
+                    TextButton(onClick = swap, enabled = !swapping && !claiming) {
+                        Icon(Icons.Default.Refresh, null, tint = AppColors.Accent,
+                            modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            if (swapping) "换码中"
+                            else if (candidate == null) "获取" else "换一个",
+                            fontSize = 13.sp, color = AppColors.Accent
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(6.dp))
+                if (candidate != null) {
+                    Text(
+                        if (expired) "已超时，请重新换一个"
+                        else "请在 %d:%02d 内领取".format(leftSec / 60, leftSec % 60),
+                        color = if (expired) AppColors.Danger else AppColors.TextSecondary,
+                        fontSize = 11.sp
+                    )
+                }
+                remainTimes?.let {
+                    Spacer(Modifier.height(2.dp))
+                    Text("今日还能换 $it 次", color = AppColors.TextSecondary, fontSize = 11.sp)
+                }
+                error?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(it, color = AppColors.Danger, fontSize = 12.sp)
+                }
+            }
+        },
+        confirmButton = {
+            if (blocked) {
+                TextButton(onClick = onDismiss) { Text("知道了") }
+            } else {
+                TextButton(
+                    onClick = {
+                        val c = candidate ?: return@TextButton
+                        if (viewModel == null) return@TextButton
+                        claiming = true
+                        error = null
+                        viewModel.claimUseCode(c) { ok ->
+                            if (ok) {
+                                viewModel.toastMessage = "使用码已更新"
+                                onDismiss()
+                            } else {
+                                error = "领取失败，请重试"
+                            }
+                            claiming = false
+                        }
+                    },
+                    enabled = candidate != null && !expired && !claiming && !swapping
+                ) { Text(if (claiming) "领取中…" else "确定领取") }
+            }
+        },
+        dismissButton = {
+            if (!blocked) {
+                TextButton(onClick = onDismiss, enabled = !claiming) { Text("取消") }
+            }
+        }
+    )
 }
 
 @Composable
@@ -539,6 +854,155 @@ private fun BackgroundCard(onOpen: () -> Unit) {
     }
 }
 
+/**
+ * 通知设置。
+ *
+ * 三个开关背后是同一套后台监控（`ShowerWatchService`），
+ * **关掉任何一个都只是「不发那条通知」，监控本身照常跑**——
+ * 自动关停不能因为用户不想被提醒就失效（那正是小组件卡在「使用中」的老毛病）。
+ */
+@Composable
+private fun NotifyCard() {
+    val context = LocalContext.current
+    var enabled by remember { mutableStateOf(PrefsHelper.notifyEnabled) }
+    var expanded by remember { mutableStateOf(false) }
+    var inUse by remember { mutableStateOf(PrefsHelper.notifyInUse) }
+    var finished by remember { mutableStateOf(PrefsHelper.notifyFinished) }
+    var autoClose by remember { mutableStateOf(PrefsHelper.notifyAutoClose) }
+    // 系统层面允不允许发通知。Android 13+ 是运行时权限，用户随时能在系统设置里撤销，
+    // 所以每次进这张卡片都重新读一遍，别信缓存
+    var allowed by remember { mutableStateOf(Notifier.canNotify(context)) }
+
+    val permLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { allowed = Notifier.canNotify(context) }
+
+    BaseCard {
+        Column(Modifier.padding(20.dp)) {
+            // ── 总开关 ──
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("通知", fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                        color = AppColors.TextPrimary)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        if (enabled) "用水期间和结束时收到系统提醒" else "已关闭全部通知",
+                        color = AppColors.TextSecondary, fontSize = 13.sp
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = { enabled = it; PrefsHelper.notifyEnabled = it },
+                    colors = SwitchDefaults.colors(checkedTrackColor = AppColors.Accent)
+                )
+            }
+
+            // 权限没开的话开关全是摆设，必须说清楚，否则用户会以为坏了
+            if (!allowed) {
+                Spacer(Modifier.height(12.dp))
+                Surface(shape = RoundedCornerShape(10.dp),
+                    color = AppColors.Warning.copy(alpha = 0.12f)) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text("通知权限未开启", color = AppColors.Warning,
+                            fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(4.dp))
+                        Text("下面的开关现在是无效的，开启后才能收到用水提醒。",
+                            color = AppColors.TextSecondary, fontSize = 12.sp)
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                            onClick = {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    permLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                } else {
+                                    openNotificationSettings(context)
+                                }
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent)
+                        ) { Text("去开启", fontSize = 13.sp) }
+                    }
+                }
+            }
+
+            // ── 展开入口 + 细分开关 ──
+            if (enabled) {
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { expanded = !expanded }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("详细设置", color = AppColors.Accent, fontSize = 13.sp)
+                    Icon(
+                        if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (expanded) "收起" else "展开",
+                        tint = AppColors.Accent,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                if (expanded) {
+                    NotifyRow("用水状态通知", "使用期间在通知栏显示已用时间", inUse) {
+                        inUse = it; PrefsHelper.notifyInUse = it
+                    }
+                    NotifyRow("使用结束通知", "停止后显示用时和消费金额", finished) {
+                        finished = it; PrefsHelper.notifyFinished = it
+                    }
+                    NotifyRow("自动关停提醒", "设备超时自己关闭时提醒", autoClose) {
+                        autoClose = it; PrefsHelper.notifyAutoClose = it
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NotifyRow(title: String, desc: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = AppColors.TextPrimary, fontSize = 14.sp)
+            Text(desc, color = AppColors.TextSecondary, fontSize = 11.sp)
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+            colors = SwitchDefaults.colors(checkedTrackColor = AppColors.Accent)
+        )
+    }
+}
+
+/** 系统设置里本应用的通知页（Android 8+）；更低版本只能进应用详情页 */
+private fun openNotificationSettings(context: android.content.Context) {
+    val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+    } else {
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+            .setData(android.net.Uri.fromParts("package", context.packageName, null))
+    }
+    runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+}
+
+/** 更新日志默认展开几个版本，其余折叠。点「展开全部」可看全部（最多 10 个） */
+private const val RECENT_RELEASE_COUNT = 3
+
 // ── 应用信息 / 软件更新 ──
 @Composable
 private fun UpdateCard() {
@@ -549,13 +1013,14 @@ private fun UpdateCard() {
     var checking by remember { mutableStateOf(false) }
     var checkedOnce by remember { mutableStateOf(UserPageCache.releasesFetched) }
     var expandedTag by remember { mutableStateOf<String?>(null) }
+    // 更新日志默认只列最近几个版本，其余折叠（见 ③ 处）
+    var showAllReleases by remember { mutableStateOf(false) }
 
     val currentVersion = ApkUpdater.currentVersion
     val latestRelease = releases.firstOrNull()
     val latestTag = latestRelease?.tagName
     // 只有确实比当前新才提示更新——避免 tag 命名差异导致误报"有新版本"
     val hasUpdate = latestTag != null && ApkUpdater.isNewer(latestTag, currentVersion)
-    val apkAsset = latestRelease?.apkAsset
     val downloadState = ApkUpdater.state
 
     // 打开卡片即自动检测一次（已拉取过则跳过）
@@ -602,13 +1067,27 @@ private fun UpdateCard() {
                 Text("更新日志", fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                     color = AppColors.TextPrimary)
                 Spacer(Modifier.height(2.dp))
-                releases.forEach { r ->
+                // 默认只列最近几个版本。全部铺开会把卡片拉得很长，
+                // 「检查更新」按钮被顶到屏幕外，想更新的人还得先划过一堆旧日志。
+                val shown = if (showAllReleases) releases else releases.take(RECENT_RELEASE_COUNT)
+                shown.forEach { r ->
                     ReleaseRow(
                         release = r,
                         isCurrent = r.tagName == currentVersion,
                         expanded = expandedTag == r.tagName,
                         onToggle = { expandedTag = if (expandedTag == r.tagName) null else r.tagName }
                     )
+                }
+                if (releases.size > RECENT_RELEASE_COUNT) {
+                    TextButton(
+                        onClick = { showAllReleases = !showAllReleases },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            if (showAllReleases) "收起" else "展开全部",
+                            color = AppColors.Accent, fontSize = 12.sp
+                        )
+                    }
                 }
             }
 
@@ -632,7 +1111,7 @@ private fun UpdateCard() {
                 Spacer(Modifier.height(12.dp))
                 DownloadSection(
                     context = context,
-                    asset = apkAsset,
+                    release = latestRelease,
                     state = downloadState
                 )
             }
@@ -648,15 +1127,27 @@ private fun UpdateCard() {
 @Composable
 private fun DownloadSection(
     context: android.content.Context,
-    asset: GithubAsset?,
+    release: GithubRelease?,
     state: ApkDownloadState
 ) {
     // 点「立即安装」后如果调起失败（包丢了 / 没有可用设置页），要在这里说清楚
     var installError by remember { mutableStateOf<String?>(null) }
 
+    val asset = release?.apkAsset
+    // 只读一次：EncryptedSharedPreferences 每次读都要过一遍 Keystore 解密，别放进重组路径
+    var useMirror by remember { mutableStateOf(PrefsHelper.useMirrorDownload) }
+    // 镜像地址拼不出来（tag 为空之类）就回落到 GitHub，别让用户点了个死链
+    val downloadUrl = if (useMirror) (release?.giteeApkUrl ?: asset?.downloadUrl) else asset?.downloadUrl
+
     val startDownload: () -> Unit = {
         installError = null
-        asset?.let { ApkUpdater.start(context, it.downloadUrl, it.name) }
+        if (downloadUrl != null && asset != null) {
+            ApkUpdater.start(context, downloadUrl, asset.name)
+        }
+    }
+    val toggleSource: (Boolean) -> Unit = {
+        useMirror = it
+        PrefsHelper.useMirrorDownload = it
     }
 
     when (state) {
@@ -725,9 +1216,11 @@ private fun DownloadSection(
                     color = AppColors.Warning, fontSize = 12.sp)
             }
             Spacer(Modifier.height(8.dp))
+            DownloadSourceRow(useMirror = useMirror, onToggle = toggleSource)
+            Spacer(Modifier.height(10.dp))
             Button(
                 onClick = startDownload,
-                enabled = asset != null,
+                enabled = downloadUrl != null,
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent)
@@ -735,9 +1228,11 @@ private fun DownloadSection(
         }
 
         ApkDownloadState.Idle -> {
+            DownloadSourceRow(useMirror = useMirror, onToggle = toggleSource)
+            Spacer(Modifier.height(10.dp))
             Button(
                 onClick = startDownload,
-                enabled = asset != null,
+                enabled = downloadUrl != null,
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent)
@@ -752,6 +1247,36 @@ private fun DownloadSection(
             Text(msg, modifier = Modifier.padding(10.dp),
                 color = AppColors.Warning, fontSize = 12.sp)
         }
+    }
+}
+
+/**
+ * 下载源开关。
+ *
+ * 默认走国内镜像而不是自动回落——Gitee 的仓库状态不像 GitHub 那么确定，
+ * 与其猜哪个能用，不如把选择权给用户，下载失败时切一下就行。
+ */
+@Composable
+private fun DownloadSourceRow(useMirror: Boolean, onToggle: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("国内镜像下载", color = AppColors.TextPrimary, fontSize = 13.sp,
+                fontWeight = FontWeight.Medium)
+            Text(
+                if (useMirror) "Gitee 直连，通常几秒下完" else "GitHub 源，国内可能要几分钟",
+                color = AppColors.TextSecondary, fontSize = 11.sp
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(
+            checked = useMirror,
+            onCheckedChange = onToggle,
+            colors = SwitchDefaults.colors(checkedTrackColor = AppColors.Accent)
+        )
     }
 }
 
@@ -937,25 +1462,300 @@ private fun openUrl(context: android.content.Context, url: String) {
 
 @Composable
 private fun InfoRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = InfoRowMinHeight),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         Text(label, color = AppColors.TextSecondary)
         Text(value, fontWeight = FontWeight.Medium, color = AppColors.TextPrimary)
     }
 }
 
+// EditableInfoRow（带「修改」按钮的信息行）已移除：唯一的用处是「学校」，
+// 而学校名现在由 /project/info/triple 自动填，不需要手改。
+// 以后再加可编辑行时注意——**别用 TextButton**，它有 48dp 最小高度，
+// 会把那一行顶得比别的行高一截，行距看着就散了。用 Text + clickable。
+
+
+/** 信息行的最小高度。让「值 + 修改」那行和纯文字行一样高 */
+private val InfoRowMinHeight = 26.dp
+
+/**
+ * 更换手机号。
+ *
+ * ⚠️ 验证码是发到**当前绑定**的手机号，不是新号——服务端要确认是本人操作。
+ * 所以这个流程要求用户手上能拿到旧号。
+ */
 @Composable
-private fun EditableInfoRow(label: String, value: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically) {
-        // 左侧：标签 + 修改按钮
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(label, color = AppColors.TextSecondary)
-            Spacer(Modifier.width(4.dp))
-            TextButton(onClick = onClick, contentPadding = PaddingValues(0.dp)) {
-                Text("修改", fontSize = 12.sp, color = AppColors.Accent)
+private fun ChangePhoneDialog(viewModel: MainViewModel?, onDismiss: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var newPhone by remember { mutableStateOf("") }
+    var code by remember { mutableStateOf("") }
+    var sending by remember { mutableStateOf(false) }
+    var submitting by remember { mutableStateOf(false) }
+    var countdown by remember { mutableStateOf(0) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val currentPhone = PrefsHelper.telephone
+
+    AlertDialog(
+        onDismissRequest = { if (!submitting) onDismiss() },
+        title = { Text("更换手机号", fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                // ⚠️ 验证码发到**新**手机号（typeId=5），不是当前绑定的那个——
+                // 抓包实测：`telephone=新号&typeId=5`，旧号只作为认证参数 `telPhone` 出现。
+                // 发到旧号用户根本收不到，会一直提示验证码错误。
+                Text(
+                    "当前手机号：${currentPhone}",
+                    color = AppColors.TextSecondary, fontSize = 12.sp
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = newPhone, onValueChange = { newPhone = it.trim() },
+                    label = { Text("新手机号") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = code, onValueChange = { code = it.trim() },
+                        label = { Text("验证码") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Button(
+                        onClick = {
+                            sending = true; error = null
+                            scope.launch {
+                                val r = AuthRepository.sendSmsCode(newPhone, typeId = 5)
+                                if (r.isSuccess) {
+                                    countdown = 60
+                                    while (countdown > 0) { delay(1000); countdown-- }
+                                } else {
+                                    error = r.exceptionOrNull()?.message ?: "验证码发送失败"
+                                }
+                                sending = false
+                            }
+                        },
+                        enabled = !sending && countdown == 0 && newPhone.length == 11,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.width(86.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp)
+                    ) {
+                        Text(if (countdown > 0) "${countdown}s" else "发送",
+                            fontSize = 13.sp, maxLines = 1)
+                    }
+                }
+                error?.let {
+                    Spacer(Modifier.height(10.dp))
+                    Text(it, color = AppColors.Danger, fontSize = 12.sp)
+                }
             }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    submitting = true; error = null
+                    scope.launch {
+                        try {
+                            val r = NetworkModule.apiService.updatePhoneSafe(
+                                newPhone, code, NetworkModule.authFields()
+                            )
+                            if (r.success) {
+                                // 认证参数里的 telephone 也得跟着换，否则后续请求还在用旧号
+                                PrefsHelper.telephone = newPhone
+                                NetworkModule.restoreFromPrefs()
+                                // 界面读的是 ViewModel 的 phone，不写它就还显示旧号，
+                                // 得等下次重新登录才更新
+                                viewModel?.phone = newPhone
+                                viewModel?.toastMessage = "手机号已更换"
+                                onDismiss()
+                            } else {
+                                error = r.displayMessage ?: "更换失败"
+                            }
+                        } catch (_: Exception) {
+                            error = "网络异常，请重试"
+                        }
+                        submitting = false
+                    }
+                },
+                enabled = !submitting && newPhone.length == 11 && code.isNotEmpty()
+            ) { Text(if (submitting) "提交中…" else "确定") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !submitting) { Text("取消") }
         }
-        // 右侧：值
-        Text(value, fontWeight = FontWeight.Medium, color = AppColors.TextPrimary)
-    }
+    )
 }
+
+/**
+ * 修改密码。两条路：
+ *
+ * - **知道当前密码**：`/user/password/update`，要 `oldPassword`。
+ * - **不知道 / 从没设过**：`/user/password/forget`，只用手机验证码，不要旧密码。
+ *   手机验证码登录注册的账号（我们 App 的默认注册方式）根本没有密码可填，
+ *   只能走这条——否则「修改密码」对他们就是个死按钮。
+ *
+ * 两个密码都用和登录同一套加密（MD5 取后 10 位大写），抓包实测官方就这么传。
+ */
+@Composable
+private fun ChangePasswordDialog(viewModel: MainViewModel?, onDismiss: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    // false = 知道当前密码，true = 走短信验证码
+    var smsMode by remember { mutableStateOf(false) }
+    var oldPwd by remember { mutableStateOf("") }
+    var newPwd by remember { mutableStateOf("") }
+    var confirmPwd by remember { mutableStateOf("") }
+    var code by remember { mutableStateOf("") }
+    var sending by remember { mutableStateOf(false) }
+    var countdown by remember { mutableStateOf(0) }
+    var submitting by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    // 预填当前账号绑定的手机号，但**允许改**——服务端认的是请求里的这个号，
+    // 换号之后 Prefs 万一没跟上，用户还能自己填对，不至于卡死在验证码发不出去
+    var phone by remember { mutableStateOf(PrefsHelper.telephone) }
+
+    AlertDialog(
+        onDismissRequest = { if (!submitting) onDismiss() },
+        title = { Text("修改密码", fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                if (smsMode) {
+                    OutlinedTextField(
+                        value = phone, onValueChange = { phone = it.trim() },
+                        label = { Text("手机号") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = code, onValueChange = { code = it.trim() },
+                            label = { Text("验证码") }, singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Button(
+                            onClick = {
+                                sending = true; error = null
+                                scope.launch {
+                                    // typeId = 2 才是「改密码」的验证码
+                                    val r = AuthRepository.sendSmsCode(phone, typeId = 2)
+                                    if (r.isSuccess) {
+                                        countdown = 60
+                                        while (countdown > 0) { delay(1000); countdown-- }
+                                    } else {
+                                        error = r.exceptionOrNull()?.message ?: "验证码发送失败"
+                                    }
+                                    sending = false
+                                }
+                            },
+                            enabled = !sending && countdown == 0 && phone.length == 11,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.width(86.dp),
+                            contentPadding = PaddingValues(horizontal = 4.dp)
+                        ) {
+                            Text(if (countdown > 0) "${countdown}s" else "发送",
+                                fontSize = 13.sp, maxLines = 1)
+                        }
+                    }
+                } else {
+                    OutlinedTextField(
+                        value = oldPwd, onValueChange = { oldPwd = it },
+                        label = { Text("当前密码") }, singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = newPwd, onValueChange = { newPwd = it },
+                    label = { Text("新密码") }, singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = confirmPwd, onValueChange = { confirmPwd = it },
+                    label = { Text("确认新密码") }, singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    if (smsMode) "直接修改密码" else "短信验证修改密码",
+                    fontSize = 12.sp, color = AppColors.Accent,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable(enabled = !submitting) {
+                            smsMode = !smsMode
+                            error = null
+                        }
+                        .padding(vertical = 2.dp, horizontal = 3.dp)
+                )
+
+                error?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(it, color = AppColors.Danger, fontSize = 12.sp)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    // 只在本地校验「两次输入一致」；密码规则交给服务端，免得自己定的规则
+                    // 和服务端不一致，把合法密码拦下来
+                    if (newPwd != confirmPwd) { error = "两次输入的新密码不一致"; return@TextButton }
+                    submitting = true; error = null
+                    scope.launch {
+                        try {
+                            val r = if (smsMode) {
+                                NetworkModule.apiService.forgetPasswordSafe(
+                                    MD5Utils.encryptPassword(newPwd), code,
+                                    NetworkModule.authFields()
+                                )
+                            } else {
+                                NetworkModule.apiService.updatePasswordSafe(
+                                    MD5Utils.encryptPassword(oldPwd),
+                                    MD5Utils.encryptPassword(newPwd),
+                                    NetworkModule.authFields()
+                                )
+                            }
+                            if (r.success) {
+                                viewModel?.toastMessage = "密码已修改"
+                                onDismiss()
+                            } else {
+                                error = r.displayMessage ?: "修改失败"
+                            }
+                        } catch (_: Exception) {
+                            error = "网络异常，请重试"
+                        }
+                        submitting = false
+                    }
+                },
+                enabled = !submitting && newPwd.isNotEmpty() && confirmPwd.isNotEmpty() &&
+                    (if (smsMode) code.isNotEmpty() else oldPwd.isNotEmpty())
+            ) { Text(if (submitting) "提交中…" else "确定") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !submitting) { Text("取消") }
+        }
+    )
+}
+

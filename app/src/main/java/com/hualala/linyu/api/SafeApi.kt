@@ -2,14 +2,18 @@ package com.hualala.linyu.api
 
 import com.google.gson.Gson
 import com.google.gson.JsonParser
+import com.hualala.linyu.model.AccountInfo
 import com.hualala.linyu.model.BaseResponse
 import com.hualala.linyu.model.BillDetail
 import com.hualala.linyu.model.BillItem
+import com.hualala.linyu.model.CampusUserInfo
 import com.hualala.linyu.model.CloseOrderResult
 import com.hualala.linyu.model.DownRateResult
 import com.hualala.linyu.model.DeviceInfo
+import com.hualala.linyu.model.GenerateUseCodeResult
 import com.hualala.linyu.model.LoginData
 import com.hualala.linyu.model.OrderStatus
+import com.hualala.linyu.model.ProjectInfo
 import com.hualala.linyu.model.UseCodeData
 import com.hualala.linyu.model.WalletData
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -145,10 +149,51 @@ suspend fun QzxyService.getUseCodeSafe(): BaseResponse<UseCodeData> =
 
 suspend fun QzxyService.generateUseCodeSafe(
     auth: Map<String, String>
-): BaseResponse<UseCodeData> = parse(generateUseCode(auth).awaitString(), UseCodeData::class.java)
+): BaseResponse<GenerateUseCodeResult> =
+    parse(generateUseCode(auth).awaitString(), GenerateUseCodeResult::class.java)
 
-suspend fun QzxyService.getVerificationCodeSafe(telephone: String, secret: String): BaseResponse<Unit> =
-    parse(getVerificationCode(telephone, secret).awaitString(), Unit::class.java)
+suspend fun QzxyService.setUseCodeSafe(
+    useCode: String,
+    auth: Map<String, String>
+): BaseResponse<Unit> = parse(setUseCode(useCode, auth).awaitString(), Unit::class.java)
+
+suspend fun QzxyService.getVerificationCodeSafe(
+    telephone: String,
+    secret: String,
+    typeId: Int = 3
+): BaseResponse<Unit> =
+    parse(getVerificationCode(telephone, secret, typeId).awaitString(), Unit::class.java)
 
 suspend fun QzxyService.registerAndLoginSafe(telephone: String, smsCode: String): BaseResponse<LoginData> =
     parse(registerAndLogin(telephone, smsCode).awaitString(), LoginData::class.java)
+
+// ── 账号信息 / 一卡通 ──
+
+suspend fun QzxyService.getAccountInfoSafe(): BaseResponse<AccountInfo> =
+    parse(getAccountInfo().awaitString(), AccountInfo::class.java)
+
+suspend fun QzxyService.forgetPasswordSafe(
+    password: String,
+    code: String,
+    auth: Map<String, String>
+): BaseResponse<Unit> = parse(forgetPassword(password, code, auth).awaitString(), Unit::class.java)
+
+suspend fun QzxyService.getProjectInfoSafe(): BaseResponse<ProjectInfo> =
+    parse(getProjectInfo().awaitString(), ProjectInfo::class.java)
+
+suspend fun QzxyService.getCampusUserInfoSafe(): BaseResponse<CampusUserInfo> =
+    parse(getCampusUserInfo().awaitString(), CampusUserInfo::class.java)
+
+suspend fun QzxyService.updatePhoneSafe(
+    newTelephone: String,
+    code: String,
+    auth: Map<String, String>
+): BaseResponse<Unit> =
+    parse(updatePhone(newTelephone, code, auth).awaitString(), Unit::class.java)
+
+suspend fun QzxyService.updatePasswordSafe(
+    oldPassword: String,
+    newPassword: String,
+    auth: Map<String, String>
+): BaseResponse<Unit> =
+    parse(updatePassword(oldPassword, newPassword, auth).awaitString(), Unit::class.java)

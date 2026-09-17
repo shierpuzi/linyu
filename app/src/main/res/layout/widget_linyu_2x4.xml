@@ -192,6 +192,21 @@
                             android:textColor="#60A5FA"
                             android:text="● 使用中"
                             android:visibility="gone" />
+
+                        <TextView
+                            android:id="@+id/widget_badge_occupied"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/widget_badge_occupied"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp"
+                            android:paddingTop="2dp"
+                            android:paddingBottom="2dp"
+                            android:textSize="9.5sp"
+                            android:textStyle="bold"
+                            android:textColor="#F2FBBF24"
+                            android:text="● 占用中"
+                            android:visibility="gone" />
                     </FrameLayout>
                 </LinearLayout>
 
@@ -633,12 +648,14 @@
                     android:paddingTop="5dp"
                     android:paddingBottom="5dp">
 
+                    <!-- 文案由 WidgetRenderer.bindBills 按有没有真实余额改写 -->
                     <TextView
+                        android:id="@+id/widget_balance_label"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:textSize="9.5sp"
                         android:textColor="#ADFFFFFF"
-                        android:text="一卡通余额（估算）" />
+                        android:text="一卡通余额" />
 
                     <LinearLayout
                         android:layout_width="match_parent"

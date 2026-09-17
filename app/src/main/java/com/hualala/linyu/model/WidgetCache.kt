@@ -31,5 +31,14 @@ data class CachedBill(
     val emoji: String? = null,
     val name: String? = null,
     val timeText: String? = null,
-    val moneyText: String? = null
+    val moneyText: String? = null,
+    /**
+     * 原始时间戳（毫秒）与原始金额，专门给「余额估算」用。
+     *
+     * 界面显示的那两个字段是**格式化过的字符串**（"-¥ 1.84"），拿去做减法要反过来解析文本，
+     * 既脆又容易出错；而且 Gson 不受 Kotlin 非空约束，老版本写的快照里没有这两个字段，
+     * 取出来必然是 null，所以必须是可空类型。
+     */
+    val rawTimeMs: Long? = null,
+    val rawMoney: Double? = null
 )

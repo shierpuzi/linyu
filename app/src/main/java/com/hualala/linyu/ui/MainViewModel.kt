@@ -8,15 +8,25 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hualala.linyu.api.NetworkModule
+import com.hualala.linyu.api.getAccountInfoSafe
 import com.hualala.linyu.api.getBillListSafe
+import com.hualala.linyu.api.getCampusUserInfoSafe
 import com.hualala.linyu.api.getDeviceInfoSafe
+import com.hualala.linyu.api.forgetPasswordSafe
+import com.hualala.linyu.api.generateUseCodeSafe
+import com.hualala.linyu.api.getProjectInfoSafe
 import com.hualala.linyu.api.getUseCodeSafe
+import com.hualala.linyu.api.setUseCodeSafe
 import com.hualala.linyu.api.getWalletSafe
 import com.hualala.linyu.api.queryUsingSafe
+import com.hualala.linyu.data.BalanceEstimator
 import com.hualala.linyu.data.CloseOutcome
 import com.hualala.linyu.data.OpenOutcome
 import com.hualala.linyu.data.ShowerController
+import com.hualala.linyu.data.ShowerEvents
+import com.hualala.linyu.service.ShowerWatchService
 import com.hualala.linyu.widget.LinYuWidget
+import com.hualala.linyu.model.AccountInfo
 import com.hualala.linyu.model.ActiveOrder
 import com.hualala.linyu.model.CachedBill
 import com.hualala.linyu.model.CachedDevice
@@ -26,8 +36,10 @@ import com.hualala.linyu.model.DeviceInfo
 import com.hualala.linyu.model.MqttOrderMsg
 import com.hualala.linyu.model.NearbyDevice
 import com.hualala.linyu.model.WalletData
+import com.hualala.linyu.utils.AppLogger
 import com.hualala.linyu.utils.BluetoothScanner
 import com.hualala.linyu.utils.MqttManager
+import com.hualala.linyu.utils.Notifier
 import com.hualala.linyu.utils.PrefsHelper
 import com.google.gson.Gson
 import kotlinx.coroutines.CoroutineScope
@@ -104,17 +116,86 @@ class MainViewModel : ViewModel() {
     private var sessionJob = SupervisorJob(viewModelScope.coroutineContext[Job])
     private fun sessionScope() = CoroutineScope(viewModelScope.coroutineContext + sessionJob)
 
+    init {
+        // 用水结束由 ShowerWatchService 检测（它会清理本地状态并发通知），
+        // 这里只负责界面收尾：同步内存状态 + 弹确认框。
+        // App 不在前台时这个事件没人收，也没关系——服务那边已经处理完了。
+        viewModelScope.launch {
+            ShowerEvents.finished.collect { onShowerFinishedFromService(it) }
+        }
+    }
+
     // ── 账单 ──
     var billList by mutableStateOf<List<BillItem>>(emptyList())
     var isLoadingBills by mutableStateOf(false)
+
+    /**
+     * 账单是否**至少成功拉取过一次**。
+     *
+     * 余额是「用户填的初始余额 − 账单里的消费」算出来的。账单到位之前 billList 是空的，
+     * 减数为 0，于是界面上会先亮出那个初始值、等账单到了再跳到真实值——
+     * 看着就像余额自己变了一下（用户复现的「10.60 跳变」就是这个）。
+     * 所以没加载完之前不显示估算结果，宁可先显示「—」。
+     */
+    var billsLoaded by mutableStateOf(false)
+        private set
     var useCodeData by mutableStateOf<UseCodeData?>(null)
+        private set
+
+    /**
+     * 使用码接口有没有**成功**拉过一次。
+     *
+     * 界面靠它区分两种「没有码」：还没拉到（显示「加载中」）和
+     * 拉到了但服务端说这人没有码（`useCode` 为 null，显示「尚未领取」）。
+     * 没有这个标志的话，没领过码的人会永远停在「加载中」。
+     */
+    var useCodeLoaded by mutableStateOf(false)
+        private set
+
+    /**
+     * 账号信息（姓名 / 学号 / 绑定状态）。null = 还没拉到。
+     *
+     * 存在的意义在于**能触发重组**：直接让界面读 `PrefsHelper.userName` 的话，
+     * 拉完数据界面不会自己刷新（Prefs 不是 Compose State）。
+     */
+    var accountInfo by mutableStateOf<AccountInfo?>(null)
+        private set
+
+    /**
+     * 一卡通**真实余额**。null = 拿不到（没签约免密支付、或者还没拉过），
+     * 这时界面回退到「初始余额 − 账单消费」的本地估算。
+     *
+     * 初值取 Prefs 里上次拉到的值：从桌面小组件点进账单页会**新建一个 ViewModel**，
+     * 等接口回来之前这段时间界面会退回估算、还会冒出「手动填写」按钮，
+     * 看着像数据丢了。先亮上次的值，拉到新的再覆盖。
+     */
+    var campusBalance by mutableStateOf(PrefsHelper.campusBalance.toDoubleOrNull())
+        private set
+
+    /**
+     * 当前账号的手机号——**界面唯一该读的地方**。
+     *
+     * 以前是 MainActivity 里一个 `rememberSaveable`，登录成功时写一次就再也不动了，
+     * 所以在「我的」页改完手机号，卡片上还显示旧的，得等下次重新登录才更新。
+     * 现在换成 ViewModel 里的状态：登录、改号、退出三处都写它，界面自动跟着刷。
+     */
+    var phone by mutableStateOf(PrefsHelper.telephone)
+
+    /**
+     * 学校名（`/project/info/triple` 的 `projectName`）。
+     *
+     * 同 [accountInfo]：写进 Prefs 不会触发重组，界面得读这个 State 才刷得出来。
+     * 初值取 Prefs，老用户不用等接口回来就有值显示。
+     */
+    var schoolName by mutableStateOf(PrefsHelper.schoolName)
+        private set
 
     /** 存一份 AppContext 供刷新桌面小组件用（ViewModel 不应该长期持有 Activity） */
     private var appContext: Context? = null
 
     fun initManagers(context: Context) {
         appContext = context.applicationContext
-        if (scanner == null) scanner = BluetoothScanner(context, { addDevice(it) }, { onScanTimeout() })
+        if (scanner == null) scanner = BluetoothScanner(context, { addDevice(it) }, { ok -> onScanTimeout(ok) })
         if (mqttManager == null) mqttManager = MqttManager(context, { handleMqttMessage(it) })
 
         lastDeviceName = PrefsHelper.lastDeviceName
@@ -140,12 +221,18 @@ class MainViewModel : ViewModel() {
         nearbyDevices.clear(); activeDeviceSnCodes.clear()
         isScanning = true; scanStartTime = System.currentTimeMillis(); scanner?.startScan()
     }
-    fun onScanTimeout() {
+    /**
+     * 扫描结束。
+     *
+     * @param ok 是否正常扫完。**只有正常扫完才更新小组件的快照**——
+     *           扫描失败（蓝牙被关、适配器异常）时结果为空是"没扫成"，不是"附近没有设备"，
+     *           拿它去覆盖会把上次扫到的好数据清空，小组件就白白变成「未发现热水器」了。
+     */
+    fun onScanTimeout(ok: Boolean) {
         val e = System.currentTimeMillis() - scanStartTime
         if (e < 600) sessionScope().launch { delay(600 - e); isScanning = false }
         else isScanning = false
-        // 扫描结束时把结果存一份给小组件的「附近设备」页
-        cacheNearbyForWidget()
+        if (ok) cacheNearbyForWidget()
     }
 
     // ── 扫码绑定 ──
@@ -295,6 +382,18 @@ class MainViewModel : ViewModel() {
                         startOrderPoll(snCode)
                     }
 
+                    /**
+                     * 设备被别人用着。
+                     *
+                     * App 内正常情况下走不到这里——设备详情弹窗早就用 `isOwner`
+                     * 把按钮置灰了。留着这个分支是为了：万一以后从别的入口绕进来
+                     * （比如扫码头、小组件深链），也不会把别人的订单当成自己的。
+                     */
+                    is OpenOutcome.InUseByOthers -> {
+                        showerError = outcome.message
+                        mqttManager?.disconnect()
+                    }
+
                     is OpenOutcome.Failed -> {
                         showerError = outcome.message
                         checkKick(outcome.kickHint)
@@ -332,7 +431,11 @@ class MainViewModel : ViewModel() {
                 emoji = b.consumeBillDTO.deviceEmoji,
                 name = b.consumeBillDTO.displayDesc,
                 timeText = b.consumeBillDTO.consumeDate.take(16),
-                moneyText = "-¥ " + b.consumeBillDTO.consumeMoney
+                moneyText = "-¥ " + b.consumeBillDTO.consumeMoney,
+                // 原始值一并存下来：小组件的余额估算要拿它们做减法，
+                // 靠上面那两个格式化字符串反解是解不出来的
+                rawTimeMs = BalanceEstimator.billTimeMs(b.consumeBillDTO.consumeDate),
+                rawMoney = b.consumeBillDTO.consumeMoney.toDoubleOrNull() ?: 0.0
             )
         }
         PrefsHelper.widgetBillJson = gson.toJson(list)
@@ -341,7 +444,10 @@ class MainViewModel : ViewModel() {
 
     /**
      * 把附近设备快照存给小组件。
-     * 只在扫到东西时才写，避免一次失败的扫描把上次的好数据清空。
+     *
+     * **空结果也要写**：小组件靠 `widgetNearbyTime` 区分「扫过但附近没有」和「压根没扫过」，
+     * 前者显示「未发现热水器」（和 App 首页一致），后者才提示回 App 扫一次。
+     * 之前空结果直接 return，两种情况在桌面上长得一模一样。
      */
     private fun cacheNearbyForWidget() {
         val list = nearbyDevices.take(2).map { d ->
@@ -355,7 +461,6 @@ class MainViewModel : ViewModel() {
                 mac = d.mac
             )
         }
-        if (list.isEmpty()) return
         PrefsHelper.widgetNearbyJson = gson.toJson(list)
         PrefsHelper.widgetNearbyTime = System.currentTimeMillis()
     }
@@ -424,38 +529,26 @@ class MainViewModel : ViewModel() {
         PrefsHelper.lastDeviceName = device.displayName; PrefsHelper.lastDeviceMac = device.macAddress
         PrefsHelper.lastDeviceSnCode = snCode; PrefsHelper.lastDeviceEmoji = device.typeEmoji
 
+        // 交给前台服务持续监控：超时自动关停、被外部关闭，都要能立刻发现。
+        // 这两件事以前挂在下头的 timerJob 上，退出洗澡页就被 cancel 了。
+        appContext?.let { ShowerWatchService.start(it, snCode) }
+
+        // ⚠️ 这个计时器现在只做一件事：每秒刷新界面上显示的「已用时长」。
+        //
+        // 它以前还兼职做「倒计时递减」和「每 15 秒轮询订单状态」，但那两件事挂在这里
+        // 有两个致命问题：`minimizeShower()` 会 cancel 它（退出洗澡页就没人管了），
+        // 从小组件开阀时更是压根不会启动。现在都搬进 ShowerWatchService 了。
+        //
+        // 倒计时也从「每秒减一」改成了直接读 Prefs——那里存的是截止**时间戳**，
+        // 按当前时间算出来，不会因为协程被延迟而慢慢走偏。
         timerJob?.cancel()
         timerJob = sessionScope().launch {
-            var tick = 0
             while (isShowering) {
-                delay(1000); tick++
+                delay(1000)
                 val st = PrefsHelper.getStartedAt(snCode)
-                if (st > 0) showerElapsedSec = ((System.currentTimeMillis() - st) / 1000).toInt()
-
-                // 自动关停倒计时递减
-                val remain = PrefsHelper.getAutoDisconRemain(snCode)
-                if (remain > 0) {
-                    val newRemain = remain - 1
-                    PrefsHelper.setAutoDisconRemain(snCode, newRemain)
-                    autoDisConSec = newRemain
-                    if (newRemain <= 0) {
-                        // 时间到，触发自动关停 → 弹确认框
-                        onAutoClose(snCode)
-                        return@launch
-                    }
-                }
-
-                // 每 15 秒检查一次订单状态：
-                // 设备被外部关闭或超时自动关停时，及时退出使用界面（原来 30 秒太慢）
-                if (tick % 15 == 0) {
-                    try {
-                        val q = NetworkModule.apiService.queryUsingSafe(snCode = snCode, auth = NetworkModule.authFields())
-                        // 不要求 success：只要不是「使用中」(307) 且没有订单号，即认为订单已结束
-                        if (q.errorCode != 307 && q.data?.orderNo == null) {
-                            onAutoClose(snCode)
-                            return@launch
-                        }
-                    } catch (_: Exception) {}
+                if (st > 0) {
+                    showerElapsedSec = ((System.currentTimeMillis() - st) / 1000).toInt()
+                    autoDisConSec = PrefsHelper.getAutoDisconRemain(snCode)
                 }
             }
         }
@@ -473,29 +566,58 @@ class MainViewModel : ViewModel() {
     }
 
     /**
-     * 设备自动关闭：停止计时，查询消费金额，弹出确认框。
-     * 用户点确认后才真正退出（finishShower）。
+     * 回到前台时对齐一次洗澡状态。
+     *
+     * [ShowerEvents] 是**没有 replay 的进程内事件**——正常情况下服务发、界面收，
+     * 但万一漏了（事件发出时收集器恰好没就绪、或者进程被重建），
+     * 用户就会看到洗澡界面挂在那里、计时还不走了（`startedAt` 已被清成 0）。
+     *
+     * 这里按本地活跃订单再核一次，兜住那条链路。**纯读 Prefs，不发网络请求**——
+     * 服务结束时会先清 `activeOrders`，所以本地状态就是准的。
      */
-    private fun onAutoClose(snCode: String) {
+    fun reconcileShowerOnResume() {
         if (!isShowering) return
-        // 停止计时（弹窗期间洗澡界面不再走秒）
+        val sn = showerSnCode ?: return
+        if (ShowerController.isRunning(sn)) {
+            // 还在用，只是把界面上的数字拉正（切后台期间计时器没跑）
+            val st = PrefsHelper.getStartedAt(sn)
+            if (st > 0) showerElapsedSec = ((System.currentTimeMillis() - st) / 1000).toInt()
+            autoDisConSec = PrefsHelper.getAutoDisconRemain(sn)
+            return
+        }
+        // 已经结束了，而界面还停在洗澡页——补一次收尾
+        AppLogger.i("回前台对齐：$sn 已结束，退出使用页")
+        finishShower(sn, null)
+    }
+
+    /**
+     * 用水结束（由 [ShowerWatchService] 检测到：设备超时自己关的，或在别处被关的）。
+     *
+     * 服务那边已经把活跃订单清掉、小组件刷新过、通知也发完了，
+     * 这里只剩界面收尾——所以金额是直接带过来的，**不再自己结算一遍**。
+     */
+    private fun onShowerFinishedFromService(e: ShowerEvents.Finished) {
+        // 先把 Prefs 里的活跃订单读回内存：小组件那边开了阀又关了，
+        // 这个 ViewModel 的内存副本一直是旧的
+        syncActiveOrdersFromPrefs()
+
+        if (!isShowering || showerSnCode != e.snCode) return
+
         timerJob?.cancel(); orderPollJob?.cancel()
 
-        autoCloseDeviceName = selectedDevice?.displayName ?: lastDeviceName.ifEmpty { "热水器" }
-        autoCloseElapsed = showerElapsedSec
-        autoCloseConsumed = 0.0
-        autoCloseLoading = true
-        showAutoCloseDialog = true
-
-        // 后台异步等账单结算，拿到金额后更新弹窗
-        sessionScope().launch {
-            val orderNo = currentOrderNo ?: activeOrders.find { it.snCode == snCode }?.orderNo ?: ""
-            val startTime = PrefsHelper.getStartedAt(snCode)
-            autoCloseConsumed = try {
-                ShowerController.settleAmount(orderNo, startTime) ?: 0.0
-            } catch (_: Exception) { 0.0 }
-            autoCloseLoading = false
+        if (!e.autoClosed) {
+            // 用户自己结束的（通知栏「结束用水」按钮 / 小组件停止）：
+            // 直接退出使用页就行，不用再弹一个确认框
+            finishShower(e.snCode, e.money.takeIf { it > 0 })
+            return
         }
+
+        // 设备自己超时关的：弹确认框把结果告诉用户
+        autoCloseDeviceName = e.deviceName
+        autoCloseElapsed = e.elapsedSec
+        autoCloseConsumed = e.money
+        autoCloseLoading = false
+        showAutoCloseDialog = true
     }
 
     /** 用户点确认：退出洗澡界面并清理 */
@@ -535,6 +657,9 @@ class MainViewModel : ViewModel() {
         }
 
         isStopping = true
+        // 立刻把通知切成「正在结束」。关阀确认要轮询最多 5 秒，
+        // 不切的话用户点完还得盯着「正在使用 · 秒数还在走」干等。
+        appContext?.let { Notifier.showStopping(it, lastDeviceName.ifEmpty { "热水器" }) }
         sessionScope().launch {
             try {
                 // 关阀 + 确认 + 清本地状态都在 ShowerController 里，小组件的「停止使用」走同一份逻辑
@@ -551,7 +676,7 @@ class MainViewModel : ViewModel() {
                 finishShower(snCode, null)
                 // 界面已退出（不阻塞），后台异步等账单结算后弹金额
                 sessionScope().launch {
-                    val amount = ShowerController.settleAmount(oNo, startTime)
+                    val amount = ShowerController.settleAmount(oNo, startTime, snCode)
                     toastMessage = when {
                         amount == null -> "热水器已关闭"
                         amount > 0 -> "已停止，本次消费 ¥%.2f".format(amount)
@@ -559,6 +684,20 @@ class MainViewModel : ViewModel() {
                     }
                     // 结算拿到了新的「上次消费」，让桌面小组件跟上
                     refreshWidgets()
+
+                    // 发系统通知，然后把后台监控停掉。
+                    // 不停的话它下一轮会查到订单已经没了，再发一条重复的结束通知。
+                    appContext?.let { ctx ->
+                        val elapsed = if (startTime > 0)
+                            ((System.currentTimeMillis() - startTime) / 1000).toInt() else 0
+                        Notifier.showFinished(
+                            ctx,
+                            lastDeviceName.ifEmpty { "热水器" },
+                            elapsed,
+                            amount ?: 0.0
+                        )
+                        ShowerWatchService.stop(ctx)
+                    }
                 }
             } catch (e: Exception) {
                 checkKickEx(e)
@@ -624,8 +763,15 @@ class MainViewModel : ViewModel() {
         activeOrders.clear()
         activeDeviceSnCodes.clear()
         billList = emptyList()
+        // 一起复位：下一轮登录要重新等账单到位，不能沿用上一次的「已加载」
+        billsLoaded = false
         useCodeData = null
         walletInfo = null
+        // 账号信息是跟人走的，换账号必须清掉，否则会显示上一任的姓名/学号/余额
+        accountInfo = null
+        campusBalance = null
+        phone = ""
+        useCodeLoaded = false
     }
 
     private fun saveOrders() { PrefsHelper.saveActiveOrders(activeOrders.toList()) }
@@ -748,6 +894,8 @@ class MainViewModel : ViewModel() {
         stopTimer()
         try { mqttManager?.disconnect() } catch (_: Exception) {}
         kickedOut = false
+        // 换账号了，手机号跟着换（新会话的认证参数已经写进 Prefs，这里同步到界面状态）
+        phone = PrefsHelper.telephone
     }
 
     fun refreshWallet() {
@@ -773,6 +921,114 @@ class MainViewModel : ViewModel() {
             try {
                 val resp = NetworkModule.apiService.getUseCodeSafe()
                 if (resp.success && resp.data != null) useCodeData = resp.data
+                // 无论成功与否都算「拉过了」——网络失败时停在「加载中」比显示
+                // 「尚未领取」更糟，用户会以为 App 卡住了，而重进页面就会重拉
+                useCodeLoaded = true
+            } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * 「换一个」：换出候选使用码，**不改变当前生效的码**。
+     *
+     * 服务端每次扣一次额度（每天 20 次），返回剩余次数。换出来要再
+     * [claimUseCode] 才生效，3 分钟内不领取就作废。
+     *
+     * @param onResult 成功时回调 `(新码, 剩余次数)`；失败回调 null
+     */
+    fun generateUseCode(onResult: (Pair<String, Int>?) -> Unit) {
+        sessionScope().launch {
+            val r = try {
+                val resp = NetworkModule.apiService.generateUseCodeSafe(NetworkModule.authFields())
+                val code = resp.data?.useCode
+                if (resp.success && !code.isNullOrEmpty()) {
+                    code to (resp.data?.remainTimes ?: 0)
+                } else null
+            } catch (_: Exception) {
+                null
+            }
+            onResult(r)
+        }
+    }
+
+    /** 「确定领取」：把换出来的候选码设为当前生效的使用码。成功返回 true */
+    fun claimUseCode(useCode: String, onResult: (Boolean) -> Unit) {
+        sessionScope().launch {
+            val ok = try {
+                NetworkModule.apiService
+                    .setUseCodeSafe(useCode, NetworkModule.authFields())
+                    .success
+            } catch (_: Exception) {
+                false
+            }
+            if (ok) loadUseCode()
+            onResult(ok)
+        }
+    }
+
+    /**
+     * 拉账号信息（姓名 / 学号 / 校园卡绑定状态）。
+     *
+     * 登录响应里其实也带这些字段，但我们的 Gson 模型只解析了用到的几个，
+     * 而且**姓名在学校没同步时会是空**——单独走这个接口补齐，拿到就写回 Prefs。
+     */
+    fun loadAccountInfo() {
+        if (!PrefsHelper.isLoggedIn) return
+        sessionScope().launch {
+            try {
+                val d = NetworkModule.apiService.getAccountInfoSafe().data ?: return@launch
+                accountInfo = d
+                d.name?.takeIf { it.isNotEmpty() }?.let { PrefsHelper.userName = it }
+                d.idCardNumber?.takeIf { it.isNotEmpty() }?.let { PrefsHelper.userStudentId = it }
+            } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * 拉学校名填进「学校」那一行。
+     *
+     * 服务端的 `projectName` 就是学校名，本来就有——以前这里是写死的默认值，
+     * 让用户自己填，纯属多余。**拉不到就保持原样**（默认值或用户手动填过的），
+     * 不覆盖成空串。
+     */
+    fun loadSchoolName() {
+        if (!PrefsHelper.isLoggedIn) return
+        sessionScope().launch {
+            try {
+                val n = NetworkModule.apiService.getProjectInfoSafe().data?.projectName
+                if (!n.isNullOrBlank() && n != PrefsHelper.schoolName) {
+                    PrefsHelper.schoolName = n
+                    schoolName = n
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * 拉一卡通真实余额。
+     *
+     * **拿不到就保持 null**，界面回退到本地估算——服务端只在学生签约过
+     * 校园卡免密支付时才给 `amount`。
+     */
+    fun loadCampusBalance() {
+        if (!PrefsHelper.isLoggedIn) return
+        sessionScope().launch {
+            try {
+                val d = NetworkModule.apiService.getCampusUserInfoSafe().data ?: return@launch
+                val amount = d.amount?.toDoubleOrNull()
+                if (amount != null) {
+                    campusBalance = amount
+                    PrefsHelper.campusBalance = d.amount.orEmpty()
+                    PrefsHelper.campusBalanceTime = System.currentTimeMillis()
+                    // 桌面小组件的余额是**渲染时**从 Prefs 读的，不会自己知道值变了。
+                    // 不推一次刷新，它会一直顶着上次渲染的估算值——
+                    // 用户看到的就是「App 里是真余额、桌面上还是估算」。
+                    appContext?.let { LinYuWidget.refreshAll(it) }
+                }
+                // 这个接口顺带也给学号，作为 /account/info 的兜底
+                d.studentNumber?.takeIf { it.isNotEmpty() }?.let {
+                    if (PrefsHelper.userStudentId.isEmpty()) PrefsHelper.userStudentId = it
+                }
             } catch (_: Exception) {}
         }
     }
@@ -785,6 +1041,9 @@ class MainViewModel : ViewModel() {
     fun pullRefresh() {
         refreshWallet()
         loadBills()
+        // 一卡通余额是外部账户的钱，会随时变（食堂刷卡、充值都会动），
+        // 下拉刷新时一起拉一次
+        loadCampusBalance()
     }
 
     // ── 设备发现 ──
@@ -840,11 +1099,23 @@ class MainViewModel : ViewModel() {
                     cal.add(java.util.Calendar.MONTH, -1)
                 }
                 billList = all.take(20)
-                // 顺手把最近一笔消费记下来，桌面小组件要显示它。
-                // 账单按月份倒序拉取，所以第一条就是最新的
-                all.firstOrNull()?.consumeBillDTO?.consumeMoney?.toDoubleOrNull()
-                    ?.let { PrefsHelper.recordConsume(it) }
-                cacheBillsForWidget(all.take(2))
+                billsLoaded = true
+                // 顺手把最近一笔消费记给桌面小组件。账单按月倒序拉取，第一条就是最新的。
+                // ⚠️ 只有确认它属于「上次使用设备」时才记——账单接口不带 snCode，只能拿设备名比对。
+                // 比不中就跳过：宁可这次不记录，也别把别的设备的消费记到当前设备头上。
+                val newest = all.firstOrNull()?.consumeBillDTO
+                val lastSn = PrefsHelper.lastDeviceSnCode
+                if (newest != null && lastSn.isNotEmpty() &&
+                    newest.displayDesc == PrefsHelper.lastDeviceName
+                ) {
+                    newest.consumeMoney.toDoubleOrNull()
+                        ?.let { PrefsHelper.recordConsume(lastSn, it) }
+                }
+                // ⚠️ 必须和上面 billList 用的条数一致。
+                // 小组件用这份缓存算「初始余额 − 消费」的估算值，
+                // 只给 2 笔的话减数偏小，桌面上的余额会比 App 里高出一截。
+                // 界面上只渲染 2 行，多存的不影响显示。
+                cacheBillsForWidget(all.take(20))
                 refreshWidgets()
             } catch (e: Exception) { 
                 checkKickEx(e)

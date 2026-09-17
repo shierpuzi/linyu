@@ -14,13 +14,25 @@ android {
         applicationId = "com.hualala.linyu"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "2.2.1"
+        versionCode = 10
+        versionName = "3.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // 只打 arm64 的 native 库。
+        // ML Kit 的 libbarhopper_v3.so 每个 ABI 各存一份，而且在 APK 里是不压缩存储的，
+        // x86/x86_64 两份合计 11.5MB，只有模拟器用得到，真机上永远不会加载。
+        // ⚠️ 代价：纯 32 位的老机型装不上（minSdk 26 起这类机器已经很少）。
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
+
+        // 界面只有中文。不限定的话 androidx / material 自带的几十种语言翻译
+        // 全都会进 resources.arsc
+        resourceConfigurations += listOf("zh", "en")
     }
 
     signingConfigs {
@@ -71,7 +83,10 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material)
-    implementation(libs.androidx.material.icons.extended)
+    // material-icons-extended 已移除：全项目只用到它里面 2 个图标（扫码、账单），
+    // 而 R8 并没有把它裁掉——release 包里实测仍残留 10660 个图标类。
+    // 那两个图标已换成项目自己的 vector drawable（ic_qr_code_scanner / ic_receipt_long）。
+    // material-icons-core 仍由 material3 传递进来，Icons.Default.* 照常可用。
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
 

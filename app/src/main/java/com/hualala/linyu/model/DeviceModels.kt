@@ -82,6 +82,33 @@ data class DeviceInfo(
                 .trim()
             return formatted.ifEmpty { name }
         }
+
+        /** 设备名里表示「这是什么设备」的词，选寝室时要剥掉 */
+        private val DEVICE_TYPE_WORDS = listOf(
+            "热水器", "热水表", "洗手台", "卫生间", "洗漱台", "浴室", "淋浴间", "淋浴",
+            "饮水机", "直饮水", "开水机", "开水器", "水龙头", "水房"
+        )
+
+        /**
+         * 从设备名里抽出「房间」那一截，用于「绑定寝室」的选择列表。
+         *
+         * 同一间房会有热水器、洗手台、卫生间好几台设备，名字各不相同但房间是同一个——
+         * 直接截最后一段会得到「320洗手台」「320卫生间」这种，看着像三个不同寝室。
+         * 这里把设备类型的词剥掉，剩下的纯数字补个「房」，两个都收敛成「320房」，
+         * 调用方 `distinct()` 一下就只剩一条。
+         *
+         * 抽不出东西（名字里只有类型词）时返回 null，由调用方过滤掉。
+         */
+        fun roomLabel(name: String): String? {
+            val formatted = formatDeviceName(name)
+            var last = formatted.split(' ', '　', '-', '_')
+                .lastOrNull { it.isNotBlank() } ?: return null
+            DEVICE_TYPE_WORDS.forEach { last = last.replace(it, "") }
+            last = last.trim(' ', '　', '-', '_')
+            if (last.isEmpty()) return null
+            // 剥完只剩数字，说明这就是房间号——补个「房」字，和「320房」这类的写法对齐
+            return if (last.all { it.isDigit() }) "${last}房" else last
+        }
     }
 }
 

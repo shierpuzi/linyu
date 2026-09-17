@@ -44,8 +44,11 @@ fun ShowerScreen(
     val themeMode = LocalThemeMode.current.value
     val isDark = themeMode == ThemeMode.DARK
 
+    // 使用页是否套用了自定义背景
+    val customBg = BackgroundState.config(BackgroundManager.SCOPE_SHOWER).enabled
+
     // 背景应用到「使用页」时不再画自身渐变，让底层背景图透出来
-    val bgModifier = if (BackgroundState.config(BackgroundManager.SCOPE_SHOWER).enabled) Modifier
+    val bgModifier = if (customBg) Modifier
     else Modifier.background(
         if (isDark) Brush.verticalGradient(listOf(Color(0xFF1A237E), Color(0xFF283593), Color(0xFF3949AB)))
         else Brush.verticalGradient(listOf(Color(0xFFE3F2FD), Color(0xFFBBDEFB), Color(0xFF90CAF9)))
@@ -57,9 +60,14 @@ fun ShowerScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text(emoji, fontSize = 72.sp)
+            // 套了自定义背景就不画 emoji：背景图本身就是画面主体，
+            // 再叠一个 72sp 的表情符号会直接盖在图上，很突兀。
+            // 只针对自定义背景；默认渐变背景保留 emoji（洗手台 / 卫生间都一样）
+            if (!customBg) {
+                Text(emoji, fontSize = 72.sp)
 
-            Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(8.dp))
+            }
 
             Text(statusText, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = AppColors.Accent)
 

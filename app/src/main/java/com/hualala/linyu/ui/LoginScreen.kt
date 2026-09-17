@@ -173,6 +173,15 @@ fun LoginScreen(
                                 color = Color(0xFF1A73E8), fontSize = 13.sp)
                         }
                     }
+                    // 当前模式的一句说明。放这儿是因为用户最容易卡住的两个点都在这：
+                    // 没注册的人不知道能不能直接用（能，会自动注册），
+                    // 没设过密码的人不知道密码该填什么（填不了，用验证码）
+                    Text(
+                        if (viewModel.isSmsMode) "未注册的手机号将自动创建账号"
+                        else "未设置密码？请使用手机号验证码登录",
+                        fontSize = 12.sp, color = Color.Gray,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
 
                     OutlinedTextField(
                         value = viewModel.phone,
@@ -184,10 +193,7 @@ fun LoginScreen(
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                         shape = RoundedCornerShape(14.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFF1A73E8),
-                            focusedLabelColor = Color(0xFF1A73E8)
-                        )
+                        colors = loginFieldColors()
                     )
                     Spacer(Modifier.height(14.dp))
 
@@ -202,10 +208,7 @@ fun LoginScreen(
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 shape = RoundedCornerShape(14.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = Color(0xFF1A73E8),
-                                    focusedLabelColor = Color(0xFF1A73E8)
-                                )
+                                colors = loginFieldColors()
                             )
                             Spacer(Modifier.width(12.dp))
                             // 固定宽度：文案在「发送」↔「60s」之间变化时按钮宽度不变，
@@ -231,15 +234,13 @@ fun LoginScreen(
                             onValueChange = { viewModel.password = it },
                             label = { Text("密码") },
                             leadingIcon = { Icon(Icons.Default.Lock, null, tint = Color(0xFF1A73E8)) },
+                            trailingIcon = { if (viewModel.password.isNotEmpty()) TextButton(onClick = { viewModel.password = "" }) { Text("✕", color = Color.Gray) } },
                             modifier = Modifier.fillMaxWidth().loginAutofill(passwordAutofill, autofill),
                             singleLine = true,
                             visualTransformation = PasswordVisualTransformation(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             shape = RoundedCornerShape(14.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF1A73E8),
-                                focusedLabelColor = Color(0xFF1A73E8)
-                            )
+                            colors = loginFieldColors()
                         )
                     }
                     Spacer(Modifier.height(24.dp))
@@ -278,3 +279,22 @@ fun LoginScreen(
         }
     }
 }
+
+/**
+ * 登录页输入框配色。
+ *
+ * ⚠️ 必须写死，**不能用主题色**：登录页那张卡片是固定白底
+ * （`Color.White`，不跟深浅模式走），而 `OutlinedTextField` 默认取
+ * `MaterialTheme.colorScheme.onSurface`——深色模式下它是浅色的，
+ * 浅色字压在白卡片上，输进去的内容看着就是灰蒙蒙一片。
+ */
+@Composable
+private fun loginFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = Color(0xFF1A73E8),
+    unfocusedBorderColor = Color(0xFFBFC7D5),
+    focusedLabelColor = Color(0xFF1A73E8),
+    unfocusedLabelColor = Color(0xFF6B7280),
+    focusedTextColor = Color(0xFF1A1A1A),
+    unfocusedTextColor = Color(0xFF1A1A1A),
+    cursorColor = Color(0xFF1A73E8)
+)

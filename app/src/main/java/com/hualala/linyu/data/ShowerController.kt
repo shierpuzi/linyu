@@ -6,6 +6,7 @@ import com.hualala.linyu.api.closeOrderSafe
 import com.hualala.linyu.api.downRateResultSafe
 import com.hualala.linyu.api.downRateSafe
 import com.hualala.linyu.api.getBillListSafe
+import com.hualala.linyu.api.getDeviceInfoSafe
 import com.hualala.linyu.api.queryUsingSafe
 import com.hualala.linyu.model.ActiveOrder
 import com.hualala.linyu.model.DeviceInfo
@@ -30,6 +31,19 @@ sealed interface OpenOutcome {
     /** 明确失败 */
     data class Failed(val message: String) : OpenOutcome {
         override val kickHint: String? get() = message
+    }
+
+    /**
+     * 设备上有进行中的订单，但**不是你的**。
+     *
+     * 服务端的 `queryUsing` 会回一个 `isOwner` 字段。App 内的设备详情弹窗靠它
+     * 把按钮置灰、显示「他人使用中」；小组件没有界面，必须在这一层就拦住。
+     *
+     * 拦不住的后果不只是显示错：会把**别人的订单**当成自己的记进 activeOrders，
+     * 卡片显示「使用中」并开始计时，用户点停止时还会拿别人的 orderNo 去调关阀。
+     */
+    data class InUseByOthers(val message: String) : OpenOutcome {
+        override val kickHint: String? = null
     }
 
     /**
@@ -129,6 +143,10 @@ object ShowerController {
             snCode = snCode, auth = NetworkModule.authFields()
         )
         if (existing.errorCode == 307 || (existing.success && existing.data?.orderNo != null)) {
+            // ⚠️ 有订单 ≠ 是你的订单。先看 isOwner，别把别人的当成自己的恢复。
+            if (existing.data?.isOwner == false) {
+                return OpenOutcome.InUseByOthers("该设备正在被他人使用")
+            }
             val orderNo = existing.data?.orderNo ?: ""
             ensureActiveOrder(snCode, orderNo, device)
             rememberDevice(device)
@@ -253,6 +271,20 @@ object ShowerController {
         }
     }
 
+    /**
+     * 把设备标记为「已结束」：清掉本地活跃订单与计时。
+     *
+     * 专供**没有走 [closeValve] 的结束路径**使用——设备超时自己关了、
+     * 或者在别处被关掉了。
+     *
+     * 以前缺这个入口：自动关停时代码只退出界面，`activeOrders` 里那条一直留着，
+     * 于是 `isRunning()` 永远为 true，**小组件会一直卡在「使用中」**。
+     */
+    fun markFinished(snCode: String) {
+        if (snCode.isEmpty()) return
+        clearDeviceState(snCode)
+    }
+
     /** 服务端是否报告该设备有进行中的订单 */
     private suspend fun hasActiveOrder(snCode: String): Boolean = try {
         val p = NetworkModule.apiService.queryUsingSafe(
@@ -261,6 +293,30 @@ object ShowerController {
         p.errorCode == 307 || (p.success && p.data?.orderNo != null)
     } catch (_: Exception) {
         false
+    }
+
+    /**
+     * 把 [mac] 对应的设备设为「当前设备」（小组件附近设备页的「选用」）。
+     *
+     * 只做接口查询 + 落盘，不碰任何界面状态——这样桌面小组件就能在**不打开 App** 的前提下
+     * 换一台设备来控制。写进去的就是 [rememberDevice] 那一套，和 App 内用过一次设备之后
+     * 留下来的状态完全一致，所以小组件随后读到的名字、副标题、预扣金额都是对的。
+     *
+     * @return 是否成功解析到设备
+     */
+    suspend fun pickDevice(mac: String): Boolean {
+        if (mac.isBlank()) return false
+        return try {
+            val resp = NetworkModule.apiService.getDeviceInfoSafe(mac)
+            if (resp.success && resp.data != null) {
+                rememberDevice(resp.data)
+                true
+            } else {
+                false
+            }
+        } catch (_: Exception) {
+            false
+        }
     }
 
     /** 查询设备上进行中订单的订单号，没有则返回空串 */
@@ -281,8 +337,11 @@ object ShowerController {
      * 只统计 [startTimeMs]（开阀时间戳）之后产生的账单，避免读到上一次的消费；
      * 优先匹配订单号（`billRequestType = 2` 时 orderId 与 orderNo 对应）。
      * 超时仍无消费时返回 0.0，整个查询失败返回 null。
+     *
+     * @param snCode 设备序列号。查到金额后会**按设备**记一笔「上次消费」给桌面小组件——
+     *               必须带上，否则换设备后小组件会拿上一台的金额冒充当前这台。
      */
-    suspend fun settleAmount(orderNo: String, startTimeMs: Long): Double? {
+    suspend fun settleAmount(orderNo: String, startTimeMs: Long, snCode: String): Double? {
         val parsers = listOf(
             java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()),
             java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault()),
@@ -302,7 +361,7 @@ object ShowerController {
                     if (matched != null) {
                         val m = matched.consumeBillDTO.consumeMoney.toDoubleOrNull()
                         if (m != null && m > 0) {
-                            PrefsHelper.recordConsume(m)   // 供桌面小组件显示「上次消费」
+                            PrefsHelper.recordConsume(snCode, m)   // 供桌面小组件显示「上次消费」
                             return m
                         }
                         // 金额仍为 0 → 可能结算中，继续轮询
@@ -311,7 +370,12 @@ object ShowerController {
 
                 // 开阀之后的账单取最新一笔
                 val recent = bills.filter { bill ->
-                    if (startTimeMs <= 0) return@filter true
+                    // ⚠️ 没有开阀时间就**没法判断哪笔是本次的**，一笔都不能算。
+                    // 这里原来写的是 `return@filter true`（全通过），后果是：
+                    // 没用水（startedAt 被清成 0）时会把所有历史账单都当成本次的，
+                    // 于是返回最新那笔——也就是**上一次的消费金额**，
+                    // 弹出一条「用时 0 秒 · 消费 ¥上次的金额」的假通知。
+                    if (startTimeMs <= 0) return@filter false
                     val t = parsers.asSequence()
                         .map { p -> try { p.parse(bill.consumeBillDTO.consumeDate)?.time ?: 0L } catch (_: Exception) { 0L } }
                         .maxOrNull() ?: 0L
@@ -321,7 +385,7 @@ object ShowerController {
                     val latest = recent.maxByOrNull { it.consumeBillDTO.consumeDate }
                     val m = latest?.consumeBillDTO?.consumeMoney?.toDoubleOrNull()
                     if (m != null && m > 0) {
-                        PrefsHelper.recordConsume(m)   // 供桌面小组件显示「上次消费」
+                        PrefsHelper.recordConsume(snCode, m)   // 供桌面小组件显示「上次消费」
                         return m
                     }
                 }

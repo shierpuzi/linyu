@@ -34,6 +34,21 @@
     <!-- 应用内下载更新包后调起系统安装器（Android 8.0+ 还需用户在设置里单独开启） -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!--
+      用水监控服务。用途是「用水期间盯着订单状态，超时或被关掉时及时清理界面状态并提醒」，
+      不属于 Android 预置的任何一类前台服务，所以用 specialUse。
+      Android 14+ 要求声明具体用途（见下面 service 里的 property）。
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"
+        tools:targetApi="34" />
+    <!--
+      Android 13+ 的运行时通知权限。用户在「我的 → 通知」里能看到状态，
+      拒绝了也不影响 App 主体功能，只是收不到提醒。
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:networkSecurityConfig="@xml/network_security_config"
         android:allowBackup="true"
@@ -88,6 +103,23 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_info_2x4" />
         </receiver>
+
+        <!--
+          用水监控。跟界面完全解耦：App 退到后台、甚至被划掉，它照样能发现
+          「设备已经不是使用中」并清理状态——否则小组件会一直卡在「使用中」。
+
+          specialUse 需要写清楚用途，Android 14+ 上架会被审核这一条
+          （本项目不在应用商店分发，但清单里仍然如实填写）。
+        -->
+        <service
+            android:name=".service.ShowerWatchService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="用水期间监控订单状态，以便设备超时自动关停或被外部关闭时及时清理界面状态并提醒用户" />
+        </service>
 
         <!-- 日志导出用 FileProvider -->
         <provider

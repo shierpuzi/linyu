@@ -40,6 +40,27 @@ object PrefsHelper {
     var projectId: String get() = prefs.getString("projectId", "") ?: ""; set(v) = prefs.edit().putString("projectId", v).apply()
     var telephone: String get() = prefs.getString("telephone", "") ?: ""; set(v) = prefs.edit().putString("telephone", v).apply()
     var userName: String get() = prefs.getString("userName", "") ?: ""; set(v) = prefs.edit().putString("userName", v).apply()
+
+    /**
+     * 学号（`/account/info` 的 idCardNumber）。
+     *
+     * 登录响应里其实也有（`userAccount.idCardNumber`），但我们的模型以前没解析，
+     * 所以老用户的 Prefs 里是空的——拉一次 /account/info 就会补上。
+     */
+    var userStudentId: String get() = prefs.getString("userStudentId", "") ?: ""
+        set(v) = prefs.edit().putString("userStudentId", v).apply()
+
+    /**
+     * 一卡通**真实余额**（`/settlement/campus/userInfo` 的 amount）。
+     *
+     * 空串 = 拿不到，两种情况：学生没签约免密支付、或者压根还没拉过。
+     * 这时界面回退到「初始余额 − 账单消费」的本地估算。
+     */
+    var campusBalance: String get() = prefs.getString("campusBalance", "") ?: ""
+        set(v) = prefs.edit().putString("campusBalance", v).apply()
+
+    var campusBalanceTime: Long get() = prefs.getLong("campusBalanceTime", 0L)
+        set(v) = prefs.edit().putLong("campusBalanceTime", v).apply()
     var schoolName: String get() = prefs.getString("schoolName", "金华职业技术大学") ?: "金华职业技术大学"; set(v) = prefs.edit().putString("schoolName", v).apply()
     val isLoggedIn: Boolean get() = loginCode.isNotEmpty()
     fun saveAuth(lc: String, uid: String, aid: String, pid: String, phone: String, name: String?) {
@@ -60,11 +81,17 @@ object PrefsHelper {
                 .remove("lastConsumeMoney").remove("lastConsumeTime")
                 .remove("lastDeviceTypeName").remove("lastDeviceWithholdMoney").remove("widgetNearbyJson").remove("widgetBillJson")
                 .remove("widgetNearbyTime").remove("widgetBillTime")
+                // 占用状态是跟设备走的，换账号后不适用
+                .remove("occupiedSnCode")
+                // 学号和余额是账号数据，换账号必须清掉，否则会显示上一任的
+                .remove("userStudentId").remove("campusBalance").remove("campusBalanceTime")
             // startedAt_/autoDiscon_ 的 key 是「前缀 + snCode」，不是固定名，
             // 原来写成 remove("startedAt_") 是删不掉的——换个账号登录后，
             // 上一任的计时器还在，界面会显示莫名其妙的已用时长。这里按前缀扫掉。
             prefs.all.keys
-                .filter { it.startsWith("startedAt_") || it.startsWith("autoDiscon_") }
+                .filter {
+                    it.startsWith("startedAt_") || it.startsWith("autoDiscon_") || it.startsWith("consume_")
+                }
                 .forEach { editor.remove(it) }
             editor.apply()
         } catch (_: Exception) {
@@ -117,6 +144,55 @@ object PrefsHelper {
         get() = prefs.getString("themeMode", "LIGHT") ?: "LIGHT"
         set(value) = prefs.edit().putString("themeMode", value).apply()
 
+    /**
+     * 下载更新包时是否走国内镜像（Gitee）。
+     *
+     * 默认开。大陆实测 GitHub 的 Release 附件约 100 KB/s，Gitee 约 2 MB/s，差近 20 倍。
+     * 但 Gitee 那边的仓库不如 GitHub 稳（审核、限流都可能让地址失效），
+     * 所以留个开关，镜像下不动时用户能切回 GitHub。
+     */
+    var useMirrorDownload: Boolean get() = prefs.getBoolean("useMirrorDownload", true)
+        set(v) = prefs.edit().putBoolean("useMirrorDownload", v).apply()
+
+    // ── 通知开关（「我的」页面的通知卡片）──
+    // 三个独立开关。关掉「使用中通知」只是不挂那条常驻通知，
+    // 后台监控照常跑——自动关停和结束通知不受影响。
+
+    /**
+     * 通知总开关。
+     *
+     * 关掉后**一条通知都不发**，包括前台服务那条必须挂的——
+     * 服务会先挂上再立刻摘掉（Android 不允许前台服务没有通知）。
+     * 代价是服务降级成普通后台服务，更容易被系统回收。
+     */
+    var notifyEnabled: Boolean get() = prefs.getBoolean("notifyEnabled", true)
+        set(v) = prefs.edit().putBoolean("notifyEnabled", v).apply()
+
+    /** 用水期间在通知栏常驻一条，显示已用时间 */
+    var notifyInUse: Boolean get() = prefs.getBoolean("notifyInUse", true)
+        set(v) = prefs.edit().putBoolean("notifyInUse", v).apply()
+
+    /** 用水结束时通知（手动停止） */
+    var notifyFinished: Boolean get() = prefs.getBoolean("notifyFinished", true)
+        set(v) = prefs.edit().putBoolean("notifyFinished", v).apply()
+
+    /** 设备超时自动关停时通知 */
+    var notifyAutoClose: Boolean get() = prefs.getBoolean("notifyAutoClose", true)
+        set(v) = prefs.edit().putBoolean("notifyAutoClose", v).apply()
+
+    /**
+     * 已知「被他人占用」的设备 snCode；空串表示当前没有。
+     *
+     * 小组件上点开始、发现设备正被别人用着时写入，徽章随之变成「占用中」。
+     * 用户下次点那个按钮会重新查一次：空出来就正常开阀并清掉这个标记，
+     * 还被占着就继续保持。
+     *
+     * ⚠️ 小组件渲染是纯本地同步的，发不了网络请求，所以它**没法自己知道
+     * 设备什么时候空出来**——只能靠「用户下次点」这个时机来刷新。
+     */
+    var occupiedSnCode: String get() = prefs.getString("occupiedSnCode", "") ?: ""
+        set(v) = prefs.edit().putString("occupiedSnCode", v).apply()
+
     var manualBalance: String get() = prefs.getString("manualBalance", "") ?: ""; set(v) = prefs.edit().putString("manualBalance", v).apply()
     var manualBalanceTime: Long get() = prefs.getLong("manualBalanceTime", 0L); set(v) = prefs.edit().putLong("manualBalanceTime", v).apply()
 
@@ -159,17 +235,26 @@ object PrefsHelper {
     // 持久化下来给桌面小组件显示用：小组件不能为了一个数字去轮询账单接口，
     // 所以由 App（结算成功、或拉到账单列表时）写入，小组件只读。
 
-    /** 上次消费金额，0 表示还没有记录 */
-    var lastConsumeMoney: Float get() = prefs.getFloat("lastConsumeMoney", 0f); set(v) = prefs.edit().putFloat("lastConsumeMoney", v).apply()
-
     /** 上次消费时间戳（毫秒），0 表示还没有记录 */
     var lastConsumeTime: Long get() = prefs.getLong("lastConsumeTime", 0L); set(v) = prefs.edit().putLong("lastConsumeTime", v).apply()
 
+    /**
+     * 某台设备的「上次消费」金额，0 表示还没有记录。
+     *
+     * 原先只有一个全局值，结果在小组件上用「选用」换到另一台设备之后，
+     * 卡片会顶着新设备的名字显示上一台的消费金额。改成按 snCode 分开存，
+     * key 是「前缀 + snCode」，和 startedAt_ / autoDiscon_ 同一个套路。
+     */
+    fun lastConsumeFor(snCode: String): Float =
+        if (snCode.isEmpty()) 0f else prefs.getFloat("consume_$snCode", 0f)
+
     /** 记一笔消费。金额为 0 时不动已有记录，避免「本次无消费」把历史值抹掉 */
-    fun recordConsume(amount: Double, atMs: Long = System.currentTimeMillis()) {
-        if (amount <= 0) return
-        lastConsumeMoney = amount.toFloat()
-        lastConsumeTime = atMs
+    fun recordConsume(snCode: String, amount: Double, atMs: Long = System.currentTimeMillis()) {
+        if (amount <= 0 || snCode.isEmpty()) return
+        prefs.edit()
+            .putFloat("consume_$snCode", amount.toFloat())
+            .putLong("lastConsumeTime", atMs)
+            .apply()
     }
 
     // ── Per-device timer ──

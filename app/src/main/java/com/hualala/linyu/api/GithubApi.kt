@@ -8,6 +8,15 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
+/**
+ * Gitee 上的镜像仓库。
+ *
+ * **检查更新仍走 GitHub API**（`api.github.com` 实测能通，0.6 秒），
+ * 只有**下载安装包**这一步走这里——GitHub 的 Release 附件在大陆走
+ * `objects.githubusercontent.com`，实测只有约 100 KB/s，Gitee 约 2 MB/s。
+ */
+private const val GITEE_REPO = "yehu-imei/linyu"
+
 /** 发行版里的一个附件（这里主要用 APK） */
 data class GithubAsset(
     val name: String,
@@ -23,10 +32,28 @@ data class GithubRelease(
     val body: String,
     val publishedAt: String,
     val htmlUrl: String,
-    val assets: List<GithubAsset> = emptyList()
+    val assets: List<GithubAsset> = emptyList(),
+    /** 预发布版本。列表里要滤掉，否则发个测试版会提示所有用户更新 */
+    val prerelease: Boolean = false
 ) {
     /** 发行版里的 APK 附件，取第一个 */
     val apkAsset: GithubAsset? get() = assets.firstOrNull { it.name.endsWith(".apk", true) }
+
+    /**
+     * Gitee 镜像的下载直链。
+     *
+     * 不用额外发请求——两边的 tag 和附件名是一致的，直接拼就行：
+     *   https://gitee.com/yehu-imei/linyu/releases/download/v2.2.2/linyu-v2.2.2.apk
+     *
+     * ⚠️ 前提是发版时 Gitee 那边用了**同名 tag、同名附件**。少一个就拼不出来，
+     * 调用方要能回落到 [apkAsset] 的 GitHub 地址。
+     */
+    val giteeApkUrl: String?
+        get() {
+            val a = apkAsset ?: return null
+            if (tagName.isEmpty()) return null
+            return "https://gitee.com/$GITEE_REPO/releases/download/$tagName/${a.name}"
+        }
 }
 
 /** GitHub 仓库信息 */
@@ -88,11 +115,18 @@ object GithubApi {
         }
     }
 
-    /** 全部 Release（最新在前，最多 10 条）；失败返回空列表 */
+    /**
+     * 全部 Release（最新在前，最多 10 条）；失败返回空列表。
+     *
+     * **滤掉预发布**：调用方拿 `firstOrNull()` 当"最新版"来比对，
+     * 不过滤的话，只要发过一个标记为 pre-release 的测试版，所有人都会被提示更新到它。
+     */
     suspend fun fetchReleases(): List<GithubRelease> {
         val json = getJson("/repos/$REPO/releases?per_page=10") ?: return emptyList()
         return try {
-            JsonParser.parseString(json).asJsonArray.map { el -> parseRelease(el.asJsonObject) }
+            JsonParser.parseString(json).asJsonArray
+                .map { el -> parseRelease(el.asJsonObject) }
+                .filterNot { it.prerelease }
         } catch (e: Exception) {
             AppLogger.e("解析 GitHub releases 失败", e)
             emptyList()
@@ -105,6 +139,7 @@ object GithubApi {
         body = o.get("body")?.asString ?: "",
         publishedAt = o.get("published_at")?.asString ?: "",
         htmlUrl = o.get("html_url")?.asString ?: "",
+        prerelease = o.get("prerelease")?.asBoolean ?: false,
         assets = o.getAsJsonArray("assets")?.mapNotNull { el ->
             val a = el.asJsonObject
             val url = a.get("browser_download_url")?.asString

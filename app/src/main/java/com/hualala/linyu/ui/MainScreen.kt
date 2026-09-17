@@ -24,7 +24,6 @@ import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
@@ -43,7 +42,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
+import androidx.compose.ui.res.painterResource
 import com.hualala.linyu.QrScanActivity
+import com.hualala.linyu.R
+import com.hualala.linyu.data.BalanceEstimator
 import com.hualala.linyu.model.NearbyDevice
 import com.hualala.linyu.ui.theme.AppColors
 import com.hualala.linyu.utils.BackgroundManager
@@ -85,12 +87,24 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
             } else {
                 viewModel.toastMessage = "未识别到有效二维码"
             }
+        } else {
+            // 扫码页自己弹的说明（没相机权限、相机起不来）挂在 error extra 上。
+            // 以前这里只看 RESULT_OK，这些消息全被丢掉了——用户看到的就是
+            // 点了扫码、黑屏一闪、回到主页，什么提示都没有。
+            result.data?.getStringExtra(QrScanActivity.EXTRA_ERROR)
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { viewModel.toastMessage = it }
         }
     }
 
     LaunchedEffect(Unit) {
         viewModel.refreshWallet()
         viewModel.loadBills()
+        // 余额和学校名是账号级的，跟哪个页面无关。以前只在「我的」页面拉，
+        // 结果先进主页/钱包页的时候 `campusBalance` 还是 null——界面就当拿不到
+        // 真实余额，继续显示「手动填写」和「并非真实余额」。三个入口都拉一次。
+        viewModel.loadCampusBalance()
+        viewModel.loadSchoolName()
         viewModel.initManagers(context)
         // 已授权就静默开始扫描（老用户无感知）；没授权不再自动弹窗，
         // 改由界面上的「开启扫描」按钮触发，避免登录完突然被要定位权限
@@ -124,20 +138,19 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
         }
     }
 
-    // 余额估算：含日期解析，开销较大。放在 LazyColumn 之外并用 remember 缓存，
-    // 避免滚动时 item 反复组合/销毁导致重新解析日期而掉帧。
-    val displayBalance = remember(viewModel.billList, PrefsHelper.manualBalance, PrefsHelper.manualBalanceTime) {
-        val balanceTime = PrefsHelper.manualBalanceTime
-        val newBills = viewModel.billList.filter {
-            val timeStr = it.consumeBillDTO.consumeDate.replace(" ", "T")
-            try {
-                java.time.LocalDateTime.parse(timeStr)
-                    .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli() > balanceTime
-            } catch (_: Exception) { false }
-        }
-        val totalNewSpent = newBills.sumOf { (it.consumeBillDTO.consumeMoney.toDoubleOrNull() ?: 0.0) }
-        val initialBalance = PrefsHelper.manualBalance.toDoubleOrNull() ?: 0.0
-        if (PrefsHelper.manualBalance.isEmpty()) 0.0 else initialBalance - totalNewSpent
+    // 余额：接口拿得到就用真实的，拿不到才回退估算。含日期解析，开销较大，
+    // 所以放在 LazyColumn 之外并用 remember 缓存，避免滚动时 item 反复组合/销毁
+    // 导致重新解析日期而掉帧。
+    // 账单没到位时返回 null：那时候减数为 0，算出来的就是用户填的初始余额，
+    // 直接显示出来会先亮一个错数字再跳变。宁可先显示「—」——
+    // 但真实余额不用等账单，它是现成的数字。
+    val displayBalance = remember(
+        viewModel.billList, viewModel.billsLoaded, viewModel.campusBalance,
+        PrefsHelper.manualBalance, PrefsHelper.manualBalanceTime
+    ) {
+        if (viewModel.campusBalance != null || viewModel.billsLoaded)
+            BalanceEstimator.estimate(viewModel.billList)
+        else null
     }
 
     AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
@@ -179,7 +192,7 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
                                         IconButton(onClick = {
                                             scanLauncher.launch(Intent(context, QrScanActivity::class.java))
                                         }, modifier = Modifier.size(40.dp)) {
-                                            Icon(Icons.Outlined.QrCodeScanner, null,
+                                            Icon(painterResource(R.drawable.ic_qr_code_scanner), null,
                                                 tint = AppColors.TextPrimary, modifier = Modifier.size(20.dp))
                                         }
                                     }
@@ -220,7 +233,8 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
                                 Text("附近设备", fontWeight = FontWeight.Bold, fontSize = 18.sp,
                                     color = AppColors.TextPrimary)
                                 // 余额在 LazyColumn 外已算好并缓存
-                                Text("余额 ¥%.2f".format(displayBalance), color = AppColors.TextSecondary, fontSize = 14.sp)
+                                Text(displayBalance?.let { "余额 ¥%.2f".format(it) } ?: "余额 ¥ —",
+                                    color = AppColors.TextSecondary, fontSize = 14.sp)
                             }
                         }
 

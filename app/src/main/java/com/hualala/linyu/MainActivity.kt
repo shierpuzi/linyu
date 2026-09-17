@@ -51,16 +51,14 @@ class MainActivity : ComponentActivity() {
     companion object {
         /** 从小组件跳进来时要打开哪个底部 tab（0 首页 / 1 账单 / 2 我的） */
         const val EXTRA_TAB = "linyu_tab"
-        /** 从小组件「选用」跳进来时要直接弹出的设备 MAC */
-        const val EXTRA_BIND_MAC = "linyu_bind_mac"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 小组件可以带参数跳进来：账单卡片 → 账单页；附近设备「选用」→ 直接弹那台设备
+        // 小组件可以带参数跳进来：账单卡片 → 账单页。
+        // （附近设备的「选用」已经改成在桌面后台完成，不再往这里跳了）
         val launchTab = intent?.getIntExtra(EXTRA_TAB, 0) ?: 0
-        val launchBindMac = intent?.getStringExtra(EXTRA_BIND_MAC)
         // 启用 edge-to-edge：让内容延伸到状态栏/导航栏下方，
         // 这样自定义背景才能铺满到状态栏（各页面用 statusBarsPadding 自保内容位置）
         androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -90,7 +88,6 @@ class MainActivity : ComponentActivity() {
             // 状态声明在动画容器之外：切换动画会切换容器内的渲染分支，
             // 状态若声明在容器内会被重建（表现为切主题后跳回首页）
             var isLoggedIn by rememberSaveable { mutableStateOf(hasToken) }
-            var userPhone by rememberSaveable { mutableStateOf(PrefsHelper.telephone) }
             var currentTab by rememberSaveable { mutableStateOf(launchTab) }
             var showKickedDialog by remember { mutableStateOf(false) }
             var showLogoutConfirm by remember { mutableStateOf(false) }
@@ -108,14 +105,6 @@ class MainActivity : ComponentActivity() {
                 }
             ) {
 
-                // 小组件「选用」带过来的设备：登录状态下直接弹出它的详情
-                LaunchedEffect(isLoggedIn, launchBindMac) {
-                    if (isLoggedIn && !launchBindMac.isNullOrEmpty()) {
-                        mainViewModel.fetchDeviceInfo(launchBindMac)
-                        currentTab = 0
-                    }
-                }
-
                 LaunchedEffect(mainViewModel.kickedOut, isLoggedIn) {
                     if (mainViewModel.kickedOut && !showKickedDialog && isLoggedIn) {
                         showKickedDialog = true
@@ -128,8 +117,12 @@ class MainActivity : ComponentActivity() {
                 DisposableEffect(lifecycleOwner, isLoggedIn) {
                     val observer = LifecycleEventObserver { _, event ->
                         when (event) {
-                            Lifecycle.Event.ON_RESUME ->
+                            Lifecycle.Event.ON_RESUME -> {
                                 if (isLoggedIn) mainViewModel.startKickWatch()
+                                // 对齐一次洗澡状态：期间可能已经在后台被关掉了
+                                // （服务检测到 / 通知栏按钮），而界面还停在洗澡页
+                                mainViewModel.reconcileShowerOnResume()
+                            }
                             Lifecycle.Event.ON_PAUSE -> mainViewModel.stopKickWatch()
                             else -> {}
                         }
@@ -165,7 +158,8 @@ class MainActivity : ComponentActivity() {
                             // 开一次全新会话：清掉上一轮被挤号留下的标志与在途请求，
                             // 否则登录进去会立刻又被弹出去，得反复登第二次
                             mainViewModel.beginSession()
-                            userPhone = phone; isLoggedIn = true; currentTab = 0
+                            mainViewModel.phone = phone
+                            isLoggedIn = true; currentTab = 0
                         })
                     } else {
                         Box(modifier = Modifier.fillMaxSize()) {
@@ -190,9 +184,9 @@ class MainActivity : ComponentActivity() {
                                 label = "PageSpringTransition"
                             ) { tab ->
                                 when (tab) {
-                                    0 -> MainScreen(phone = userPhone, viewModel = mainViewModel)
+                                    0 -> MainScreen(phone = mainViewModel.phone, viewModel = mainViewModel)
                                     1 -> WalletScreen(viewModel = mainViewModel)
-                                    2 -> UserScreen(phone = userPhone, viewModel = mainViewModel,
+                                    2 -> UserScreen(phone = mainViewModel.phone, viewModel = mainViewModel,
                                         onLogout = { showLogoutConfirm = true })
                                 }
                             }
@@ -229,7 +223,8 @@ class MainActivity : ComponentActivity() {
                                     // 保持 true 直到下次 beginSession()，期间任何残留请求再报"登录失效"
                                     // 也会被 kickOut() 的重复触发保护挡住，不会重复弹窗
                                     PrefsHelper.clear()
-                                    isLoggedIn = false; userPhone = ""
+                                    mainViewModel.phone = ""
+                                    isLoggedIn = false
                                 }, modifier = Modifier.fillMaxWidth()) { Text("确定") }
                             }
                         )
@@ -245,7 +240,9 @@ class MainActivity : ComponentActivity() {
                                 TextButton(onClick = {
                                     showLogoutConfirm = false
                                     mainViewModel.logout()
-                                    PrefsHelper.clear(); isLoggedIn = false; userPhone = ""
+                                    PrefsHelper.clear()
+                                    mainViewModel.phone = ""
+                                    isLoggedIn = false
                                 }) { Text("退出", color = MaterialTheme.colorScheme.error) }
                             },
                             dismissButton = { TextButton(onClick = { showLogoutConfirm = false }) { Text("取消") } }

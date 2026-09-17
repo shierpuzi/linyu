@@ -10,6 +10,7 @@ import android.widget.RemoteViews
 import com.google.gson.Gson
 import com.hualala.linyu.MainActivity
 import com.hualala.linyu.R
+import com.hualala.linyu.data.BalanceEstimator
 import com.hualala.linyu.data.ShowerController
 import com.hualala.linyu.model.CachedBill
 import com.hualala.linyu.model.CachedDevice
@@ -18,7 +19,7 @@ import com.hualala.linyu.utils.ScanPermission
 
 /** 小组件尺寸 */
 enum class WidgetSize(val label: String) {
-    /** 2x2，可被拉宽，宽高比决定走竖向还是横向布局 */
+    /** 2x2，可自由拉伸；只有一套卡片布局，内容随尺寸自适应 */
     SMALL("2x2"),
 
     /** 2x4，带左侧图标导航与三个页面 */
@@ -33,7 +34,16 @@ sealed interface WidgetState {
     data class Idle(
         val deviceName: String,
         val deviceDesc: String,
-        val emoji: String
+        val emoji: String,
+        /** 当前控制设备的序列号。「上次消费」是按设备分开存的，要靠它取对应的一条 */
+        val snCode: String,
+        /**
+         * 设备上有人正在用，但**不是机主**。
+         *
+         * 只由「用户点了开始、服务端回了 isOwner=false」这一个时机写入，
+         * 下次点按钮重查时清掉——小组件发不了网络请求，没法自己知道对方什么时候用完。
+         */
+        val occupied: Boolean = false
     ) : WidgetState
 
     data class Running(
@@ -68,6 +78,14 @@ object WidgetRenderer {
     const val TAB_HOME = 0
     const val TAB_BILL = 1
 
+    /**
+     * 2x4 侧边栏的页序号：0 = 主页，1 = 附近设备，2 = 账单。
+     *
+     * ⚠️ 和上面 [TAB_HOME]/[TAB_BILL] 不是一套东西——那两个是**打开 App** 时要落到的页面，
+     * 这三个是小组件自己内部的翻页。数值刚好对得上纯属巧合，别混用。
+     */
+    const val TAB_NEARBY = 1
+
     fun readState(): WidgetState {
         if (!PrefsHelper.isLoggedIn) return WidgetState.LoggedOut
 
@@ -87,7 +105,12 @@ object WidgetRenderer {
                 startedAtMs = ShowerController.startedAt(snCode)
             )
         } else {
-            WidgetState.Idle(name, desc, emoji)
+            WidgetState.Idle(
+                name, desc, emoji, snCode,
+                // 记住的占用设备就是当前这台，才显示「占用中」
+                occupied = PrefsHelper.occupiedSnCode.isNotEmpty() &&
+                    PrefsHelper.occupiedSnCode == snCode
+            )
         }
     }
 
@@ -107,27 +130,34 @@ object WidgetRenderer {
         // 只有一套固定样式，不分深浅：
         // 小组件压在用户的壁纸上，深浅切换要么看不出变化、要么和壁纸撞色，
         // 不如固定成一个自带背景的高对比卡片——任何壁纸下都一样清楚。
-        val wide = size == WidgetSize.SMALL && isWide(context, appWidgetId)
-        val views = RemoteViews(context.packageName, layoutRes(size, wide))
+        val views = RemoteViews(context.packageName, layoutRes(size))
 
         // 整张卡片 → 打开 App 首页
         views.setOnClickPendingIntent(R.id.widget_root, openAppIntent(context, appWidgetId, TAB_HOME))
 
-        val useSphere = size == WidgetSize.SMALL && wide
-        fun bindAct(running: Boolean, disabled: DisabledReason?, action: String) {
-            val onClick = actionIntent(context, appWidgetId, disabled, action)
-            if (useSphere) bindSphereAction(views, running, onClick)
-            else bindPillAction(views, running, onClick)
+        /** [explicit] 用来顶掉按 action 拼出来的点击行为（「没有设备」时按钮要换成翻页） */
+        fun bindAct(
+            running: Boolean,
+            disabled: DisabledReason?,
+            action: String,
+            explicit: PendingIntent? = null
+        ) {
+            bindPillAction(
+                views, running,
+                explicit ?: actionIntent(context, appWidgetId, disabled, action)
+            )
         }
 
-        // 竖向 2x2 空间窄，只显示完整设备名的最后一个词（「某小区 3号楼南 320房」→「320房」）；
-        // 拉宽成横向、以及 2x4，位置够就显示完整名
+        // 2x2 空间窄，只显示完整设备名的最后一个词（「某小区 3号楼南 320房」→「320房」）；
+        // 2x4 位置够就显示完整名。
+        // 2x2 被拉宽也不再换布局了——以前按宽高比切成"按钮在右侧"的横向版，
+        // 结果稍微拉一下就跳过去、圆球和固定宽度的卡片都不跟着缩放，很难看。
         val rawName = when (state) {
             is WidgetState.Idle -> state.deviceName
             is WidgetState.Running -> state.deviceName
             else -> ""
         }
-        val shownName = if (size == WidgetSize.SMALL && !wide) shortName(rawName) else rawName
+        val shownName = if (size == WidgetSize.SMALL) shortName(rawName) else rawName
 
         when (state) {
             WidgetState.LoggedOut -> {
@@ -137,17 +167,29 @@ object WidgetRenderer {
             }
 
             WidgetState.NoDevice -> {
-                bindHeader(views, "还没有用过设备", "点此打开淋浴", "🚿", running = false, showDot = false)
+                // 没选过设备时，按钮不该去开阀（没设备可开），而是直接把用户送到能选设备的地方：
+                // 2x4 有自己的「附近设备」页，就地翻过去；2x2 没有页面，只能开 App。
+                // 以前这里 action 是空串，按钮等于摆设——点了什么都不会发生。
+                val wide = size == WidgetSize.WIDE
+                bindHeader(
+                    views, "还没有用过设备",
+                    if (wide) "点按钮选附近设备" else "点此打开淋浴",
+                    "🚿", running = false, showDot = false
+                )
                 bindPanels(context, views, appWidgetId, idleText = "—", runningText = null, busyText = disabled?.text)
-                bindAct(running = false, disabled = disabled, action = "")
+                bindAct(
+                    running = false, disabled = disabled, action = "",
+                    explicit = if (wide) tabIntent(context, appWidgetId, TAB_NEARBY)
+                    else openAppIntent(context, appWidgetId, TAB_HOME)
+                )
             }
 
             is WidgetState.Idle -> {
                 bindHeader(views, shownName, state.deviceDesc, state.emoji,
-                    running = false, showDot = true)
+                    running = false, showDot = true, occupied = state.occupied)
                 bindPanels(
                     context, views, appWidgetId,
-                    idleText = lastConsumeText(),
+                    idleText = lastConsumeText(state.snCode),
                     runningText = null,
                     busyText = disabled?.text
                 )
@@ -184,21 +226,40 @@ object WidgetRenderer {
         desc: String,
         emoji: String,
         running: Boolean,
-        showDot: Boolean
+        showDot: Boolean,
+        occupied: Boolean = false
     ) {
         views.setTextViewText(R.id.widget_device, name)
         views.setTextViewText(R.id.widget_device_desc, desc)
 
         if (showDot) {
             views.setTextViewText(R.id.widget_status_dot, "●")
-            views.setTextColor(R.id.widget_status_dot, if (running) COLOR_USING else COLOR_IDLE)
+            views.setTextColor(
+                R.id.widget_status_dot,
+                when {
+                    running -> COLOR_USING
+                    occupied -> COLOR_WARN
+                    else -> COLOR_IDLE
+                }
+            )
         } else {
             views.setTextViewText(R.id.widget_status_dot, "")
         }
 
-        // 徽章底色不同，靠两个控件切 visibility（运行时改不了背景）
-        views.setViewVisibility(R.id.widget_badge_idle, if (running) View.GONE else View.VISIBLE)
-        views.setViewVisibility(R.id.widget_badge_using, if (running) View.VISIBLE else View.GONE)
+        // 三种徽章颜色不同，靠三个控件切 visibility（运行时改不了背景）。
+        // 占用中优先于空闲：设备上确实有订单，只是不是你的。
+        views.setViewVisibility(
+            R.id.widget_badge_idle,
+            if (!running && !occupied) View.VISIBLE else View.GONE
+        )
+        views.setViewVisibility(
+            R.id.widget_badge_using,
+            if (running) View.VISIBLE else View.GONE
+        )
+        views.setViewVisibility(
+            R.id.widget_badge_occupied,
+            if (!running && occupied) View.VISIBLE else View.GONE
+        )
     }
 
     /**
@@ -287,26 +348,6 @@ object WidgetRenderer {
         views.setOnClickPendingIntent(visibleId, onClick)
     }
 
-    /**
-     * 水滴圆球按钮（横向 2x2）。同样只有图标。
-     *
-     * ⚠️ 它和胶囊按钮**刻意用不同的 id**。之前两者共用 id，靠"布局不同、id 相同"来省分支，
-     * 结果给 ImageView 调了 setTextViewText —— RemoteViews 反射找不到 setText 会抛
-     * ActionException，桌面上只显示「载入窗口小部件时出现问题」，App 侧既不报错也不崩溃。
-     */
-    private fun bindSphereAction(
-        views: RemoteViews,
-        running: Boolean,
-        onClick: PendingIntent?
-    ) {
-        val visibleId = if (running) R.id.widget_sphere_stop else R.id.widget_sphere_start
-        val hiddenId = if (running) R.id.widget_sphere_start else R.id.widget_sphere_stop
-
-        views.setViewVisibility(hiddenId, View.GONE)
-        views.setViewVisibility(visibleId, View.VISIBLE)
-        views.setOnClickPendingIntent(visibleId, onClick)
-    }
-
     // ── 2x4 侧边栏与三个页面 ──
 
     private fun bindTabs(views: RemoteViews, context: Context, appWidgetId: Int, tab: Int) {
@@ -361,11 +402,17 @@ object WidgetRenderer {
         val list = readCache(PrefsHelper.widgetNearbyJson, Array<CachedDevice>::class.java)
         val showList = blocker == null && list.isNotEmpty()
 
-        views.setTextViewText(R.id.widget_near_synced, "（${syncedAgoText()}）")
+        views.setTextViewText(R.id.widget_near_synced, syncedAgoText())
         views.setViewVisibility(R.id.widget_near_list, if (showList) View.VISIBLE else View.GONE)
         views.setViewVisibility(R.id.widget_near_empty, if (showList) View.GONE else View.VISIBLE)
         if (!showList) {
-            views.setTextViewText(R.id.widget_near_empty, blocker ?: "未扫描到附近设备")
+            // 没权限 / 没开蓝牙优先报这两条，它们的成因是确定的。
+            // 剩下的情况要区分「扫了但没有」和「压根没扫过」：
+            // 前者和 App 首页一样说「未发现热水器」，后者才提示回 App 扫一次
+            views.setTextViewText(
+                R.id.widget_near_empty,
+                blocker ?: if (PrefsHelper.widgetNearbyTime > 0L) "未发现热水器" else "未扫描到附近设备"
+            )
             return
         }
 
@@ -394,12 +441,12 @@ object WidgetRenderer {
                 views.setTextColor(rowIds[i][3], signalColor(d.rssi))
                 views.setTextViewText(rowIds[i][4], "${d.rssi} dBm")
                 views.setTextColor(rowIds[i][4], signalColor(d.rssi))
-                // 「选用」→ 打开 App 并直接弹出这台设备的详情。
-                // 小组件自己绑不了设备：绑定要拿完整设备信息，得回 App 请求。
+                // 「选用」→ 在后台把这台设备切成小组件的当前设备，全程不打开 App。
+                // 小组件拿到的只有 MAC，所以要让 ShowerController 去查一次完整设备信息。
                 val mac = d.mac ?: ""
                 views.setOnClickPendingIntent(
                     pickIds[i],
-                    if (mac.isNotEmpty()) openBindIntent(context, appWidgetId, mac) else null
+                    if (mac.isNotEmpty()) pickIntent(context, appWidgetId, i, mac) else null
                 )
             }
         }
@@ -425,13 +472,23 @@ object WidgetRenderer {
 
     /** 账单页：读 App 上次拉取的账单快照 */
     private fun bindBills(views: RemoteViews) {
-        val balance = PrefsHelper.manualBalance.toDoubleOrNull()
+        val list = readCache(PrefsHelper.widgetBillJson, Array<CachedBill>::class.java)
+
+        // 余额优先用真实值，拿不到才回退**估算**（初始余额 − 之后产生的消费），
+        // 和 App 内共用 BalanceEstimator 这一份算法。
+        // 这里以前直接显示 PrefsHelper.manualBalance，也就是用户当初填的那个初始值——
+        // 而它是不会变的，所以消费完 App 里余额掉下去了、桌面上纹丝不动。
+        val balance = BalanceEstimator.estimateFromEntries(
+            list.map { (it.rawTimeMs ?: 0L) to (it.rawMoney ?: 0.0) }
+        )
+        views.setTextViewText(R.id.widget_balance, BalanceEstimator.format(balance))
+        // ⚠️ 这个标签以前是**写死在布局 XML 里**的「一卡通余额（估算）」，
+        // 拿到真实余额之后文案也不会变，看着就像一直没生效。
         views.setTextViewText(
-            R.id.widget_balance,
-            if (balance != null && balance > 0) "¥ %.2f".format(balance) else "¥ —"
+            R.id.widget_balance_label,
+            if (BalanceEstimator.hasRealBalance()) "一卡通余额" else "一卡通余额（估算）"
         )
 
-        val list = readCache(PrefsHelper.widgetBillJson, Array<CachedBill>::class.java)
         val rowIds = arrayOf(
             intArrayOf(R.id.widget_bill0_emoji, R.id.widget_bill0_name,
                 R.id.widget_bill0_time, R.id.widget_bill0_price),
@@ -461,18 +518,20 @@ object WidgetRenderer {
     }
 
     /**
-     * 「上次扫描」距今多久。
+     * 「上次扫描」距今多久，跟在「附近设备」后面。
      * 小组件扫不了蓝牙，页面上看到的永远是快照——不标出来会被当成实时数据。
+     * 还没扫过时返回空串，不留一个空的括号。
      */
     private fun syncedAgoText(): String {
         val t = PrefsHelper.widgetNearbyTime
-        if (t <= 0L) return "尚未扫描"
+        if (t <= 0L) return ""
         val mins = (System.currentTimeMillis() - t) / 60_000L
-        return when {
+        val ago = when {
             mins < 1 -> "刚刚"
             mins < 60 -> "$mins 分钟前"
             else -> "${mins / 60} 小时前"
         }
+        return "（$ago）"
     }
 
     /** 信号强度配色，与 App 首页的强/中/弱一致 */
@@ -482,8 +541,8 @@ object WidgetRenderer {
         else -> COLOR_DANGER           // 弱
     }
 
-    private fun lastConsumeText(): String {
-        val money = PrefsHelper.lastConsumeMoney
+    private fun lastConsumeText(snCode: String): String {
+        val money = PrefsHelper.lastConsumeFor(snCode)
         return if (money > 0f) "¥ %.2f".format(money) else "¥ —"
     }
 
@@ -539,7 +598,19 @@ object WidgetRenderer {
         STARTING("正在开启…"),
         STOPPING("正在关闭…"),
         REFRESHING("正在刷新…"),
-        UNKNOWN("状态未知，点此刷新")
+        SWITCHING("正在切换设备…"),
+        UNKNOWN("状态未知，点此刷新"),
+
+        /** 「选用」失败：查不到设备或网络不通。短时间展示一下就自动消失 */
+        PICK_FAILED("切换失败，请稍后再试"),
+
+        /**
+         * 想开的设备正被别人用着。
+         *
+         * 文案刻意短——小组件的忙碌面板只有一行，2x2 上大约只放得下 5 个字。
+         * 「可以再点」这个意思靠徽章变成「占用中」+ 按钮仍然可点来传达。
+         */
+        IN_USE_BY_OTHERS("他人使用中")
     }
 
     private fun actionIntent(
@@ -553,20 +624,13 @@ object WidgetRenderer {
         else -> null
     }
 
-    private fun isWide(context: Context, appWidgetId: Int): Boolean = try {
-        val o = AppWidgetManager.getInstance(context).getAppWidgetOptions(appWidgetId)
-        val w = o.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH)
-        val h = o.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT)
-        w > 0 && h > 0 && w > h
-    } catch (_: Exception) {
-        false
-    }
-
-    private fun layoutRes(size: WidgetSize, wide: Boolean): Int = when {
-        size == WidgetSize.WIDE -> R.layout.widget_linyu_2x4
-        wide -> R.layout.widget_linyu_2x2_wide
-        else -> R.layout.widget_linyu_2x2
-    }
+    /**
+     * 只有两套布局，按尺寸选，**不再看宽高比**。
+     * 竖向那套的中间区域用 `layout_weight=1` 撑满，被拉宽拉高都自己适配。
+     */
+    private fun layoutRes(size: WidgetSize): Int =
+        if (size == WidgetSize.WIDE) R.layout.widget_linyu_2x4
+        else R.layout.widget_linyu_2x2
 
     // ── PendingIntent ──
     // requestCode 必须每个 widget、每个动作都不同，否则会互相覆盖
@@ -582,15 +646,26 @@ object WidgetRenderer {
         )
     }
 
-    /** 打开 App 并直接弹出这台设备的详情（小组件侧绑不了设备，只能把 mac 带回去） */
-    private fun openBindIntent(context: Context, appWidgetId: Int, mac: String): PendingIntent {
-        val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(MainActivity.EXTRA_TAB, TAB_HOME)
-            putExtra(MainActivity.EXTRA_BIND_MAC, mac)
+    /**
+     * 「选用」：广播回 Provider，在后台把这台设备切成小组件的当前设备。
+     *
+     * ⚠️ requestCode 里**必须带上行号 [index]**，这是之前一个真 bug 的根因：
+     * 两行设备原本共用 `3000 + appWidgetId`，而 `FLAG_UPDATE_CURRENT` 会让后写入的那个
+     * 覆盖掉先写入的——结果两行都指向最后一次绑定时的 MAC，表现就是「点 309 打开 307」。
+     */
+    private fun pickIntent(
+        context: Context,
+        appWidgetId: Int,
+        index: Int,
+        mac: String
+    ): PendingIntent {
+        val intent = Intent(context, providerClass(context, appWidgetId)).apply {
+            action = LinYuWidgetProvider.ACTION_PICK_DEVICE
+            putExtra(LinYuWidgetProvider.EXTRA_APPWIDGET_ID, appWidgetId)
+            putExtra(LinYuWidgetProvider.EXTRA_PICK_MAC, mac)
         }
-        return PendingIntent.getActivity(
-            context, 3000 + appWidgetId, intent,
+        return PendingIntent.getBroadcast(
+            context, 6000 + index * 100 + appWidgetId, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }

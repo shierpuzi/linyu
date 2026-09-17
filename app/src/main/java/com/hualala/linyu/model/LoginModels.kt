@@ -32,6 +32,46 @@ data class WalletData(
     val money: String
 )
 
+/**
+ * 账号信息（`GET /account/info`）。
+ *
+ * 拿**姓名和学号**最干净的接口——比 `/account/card/getBindCardInfo`
+ * 少四十多个用不上的字段。
+ *
+ * ⚠️ 字段一律可空：学校没填的项（年级 / 班级 / 院系）服务端返回 null，
+ * 而 Gson 反序列化绕过 Kotlin 非空约定，声明成非空会在取用时 NPE。
+ */
+data class AccountInfo(
+    /** 姓名。学校没同步时可能是 null —— 这就是「姓名显示未设置」的根因 */
+    val name: String? = null,
+    /** 学号 */
+    val idCardNumber: String? = null,
+    val telephone: String? = null,
+    val genderName: String? = null,
+    /** 校园卡绑定状态：-1 = 未绑定 */
+    val cardStatus: Int? = null,
+    val cardStatusName: String? = null,
+    val gradeName: String? = null,
+    val className: String? = null
+)
+
+/**
+ * 一卡通信息（`GET /settlement/campus/userInfo`）。
+ *
+ * 趣智校园把易校园的接口**代理了**，所以拿余额不需要去破易校园那套
+ * HMAC-SHA256 原生签名——用趣智校园自己的 loginCode 就行。
+ *
+ * ⚠️ 前提是学生**签约过校园卡免密支付**：没签约时服务端不给 amount。
+ */
+data class CampusUserInfo(
+    val studentNumber: String? = null,
+    val studentName: String? = null,
+    /** 一卡通余额，字符串形式（如 "16.76"） */
+    val amount: String? = null,
+    /** 1 = 已签约免密支付 */
+    val signStatus: Int? = null
+)
+
 data class OrderStatus(
     val orderNo: String? = null,
     val state: Int? = null,
@@ -77,12 +117,41 @@ data class BillDTO(
     }
 }
 
+/**
+ * `GET /account/useCode/new` 的返回。
+ *
+ * ⚠️ 字段一律可空——**没领过使用码时服务端真的返回 `"useCode": null`**（实测），
+ * Gson 又会绕过 Kotlin 的非空约定把 null 塞进来，写成 `String = ""` 只是自欺欺人。
+ */
 data class UseCodeData(
-    val useCode: String = "",
-    val useCodeStatus: Int = 0,
-    val useCodeRandom: String = "",
-    val resetAvailability: Int = 0,
+    val useCode: String? = null,
+    val useCodeStatus: Int? = null,
+    /** 手机号后三位，跟 `useCode` 的末三位相同 */
+    val useCodeRandom: String? = null,
+    val useCodeStartTime: String? = null,
+    /**
+     * 今天还能不能「重新领取」使用码：`1` = 能，`0` = 不能。
+     * 值为 0 时 [resetAvailabilityWarMark] 会给出原因（实测是「1天只能领取一次使用码」）。
+     */
+    val resetAvailability: Int? = null,
     val resetAvailabilityWarMark: String? = null
+)
+
+/** `GET /project/info/triple`——只取学校名，其余字段用不着 */
+data class ProjectInfo(
+    val projectId: Int? = null,
+    val projectName: String? = null
+)
+
+/**
+ * `POST /account/useCode/new/generate` 的返回：**换**出来的候选码，不是生效的码。
+ *
+ * 换出来的码要再调 `set` 才真正生效，3 分钟内不领取就作废。
+ */
+data class GenerateUseCodeResult(
+    val useCode: String? = null,
+    /** 本次「换一个」还剩几次。每天 20 次，从 20 开始往下扣 */
+    val remainTimes: Int? = null
 )
 
 data class BillDetail(

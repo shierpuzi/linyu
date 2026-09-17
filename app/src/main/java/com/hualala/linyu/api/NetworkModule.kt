@@ -62,6 +62,11 @@ object NetworkModule {
                 .addQueryParameter("accountId", accountId)
                 .addQueryParameter("projectId", projectId)
                 .addQueryParameter("telephone", telephone)
+                // ⚠️ `telPhone` 必须也带上。绝大多数 GET 接口只认 `telephone`，
+                // 但 `/settlement/campus/userInfo`（一卡通余额）要的是 `telPhone`，
+                // 少了它服务端直接返回 `手机号不能为空`——而且是 HTTP 200，
+                // 只看状态码完全看不出来，只能靠读 errorMessage。
+                .addQueryParameter("telPhone", telephone)
                 .addQueryParameter("phoneSystem", "android")
                 .addQueryParameter("version", "6.5.24")
 

@@ -12,10 +12,16 @@ import android.os.Handler
 import android.os.Looper
 import com.hualala.linyu.model.NearbyDevice
 
+/**
+ * @param onScanTimeout 扫描结束回调，参数是**是否正常扫完**。
+ *        正常扫完但一台都没扫到也是 true——那是个有效结果（"附近没有设备"）；
+ *        只有当扫描本身失败（如蓝牙被关掉）时才传 false，
+ *        调用方据此决定要不要更新小组件的「附近设备」快照。
+ */
 class BluetoothScanner(
     context: Context,
     private val onDeviceFound: (NearbyDevice) -> Unit,
-    private val onScanTimeout: (() -> Unit)? = null
+    private val onScanTimeout: ((ok: Boolean) -> Unit)? = null
 ) {
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val adapter: BluetoothAdapter? = bluetoothManager.adapter
@@ -41,12 +47,13 @@ class BluetoothScanner(
 
         override fun onScanFailed(errorCode: Int) {
             isScanning = false
-            onScanTimeout?.invoke()
+            onScanTimeout?.invoke(false)
         }
     }
 
+    /** 默认扫描时长。热水器广播间隔很短，5 秒足够扫全，再久只是让用户干等 */
     @SuppressLint("MissingPermission")
-    fun startScan(timeoutMillis: Long = 10000) {
+    fun startScan(timeoutMillis: Long = 5_000) {
         if (isScanning || scanner == null) return
 
         val settings = ScanSettings.Builder()
@@ -59,7 +66,7 @@ class BluetoothScanner(
 
         handler.postDelayed({
             stopScan()
-            onScanTimeout?.invoke()
+            onScanTimeout?.invoke(true)
         }, timeoutMillis)
     }
 
