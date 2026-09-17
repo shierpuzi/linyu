@@ -156,12 +156,14 @@ object Notifier {
         if (!PrefsHelper.notifyEnabled || !canNotify(context)) return
         ensureChannels(context)
 
+        // 标题只写状态、正文才带设备名：设备名很长（「某小区 3号楼南 3层 320房」），
+        // 放在标题里会把通知栏那一行占满，一眼看不出是"发生了什么"。
         val n = NotificationCompat.Builder(context, CHANNEL_EVENTS)
             .setSmallIcon(R.drawable.ic_notify_shower)
-            .setContentTitle("${shortName(deviceName)} 正在被他人使用")
-            .setContentText("等对方用完再试，或换一台设备")
+            .setContentTitle("设备占用中")
+            .setContentText("${shortName(deviceName)}正在被他人使用")
             .setStyle(NotificationCompat.BigTextStyle()
-                .bigText("${shortName(deviceName)} 正在被他人使用。等对方用完再试，或者在小组件上「选用」换一台设备。"))
+                .bigText("${shortName(deviceName)}正在被他人使用。等对方用完再试，或者在小组件上「选用」换一台设备。"))
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(openApp(context, tab = 0))
