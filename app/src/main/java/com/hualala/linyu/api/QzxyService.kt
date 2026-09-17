@@ -1,7 +1,9 @@
 package com.hualala.linyu.api
 
+import okhttp3.RequestBody
 import okhttp3.ResponseBody
 import retrofit2.Call
+import retrofit2.http.Body
 import retrofit2.http.Field
 import retrofit2.http.FieldMap
 import retrofit2.http.FormUrlEncoded
@@ -164,6 +166,31 @@ interface QzxyService {
         @Field("code") code: String,
         @FieldMap auth: Map<String, String>
     ): Call<ResponseBody>
+
+    // ── 残留账单的手动代扣（v3.0.2）──
+
+    /**
+     * 未支付账单列表。
+     *
+     * 就是俗称的「残留账单」——12 点后结束用水、或者一卡通余额不足的时候，
+     * 服务端结算没扣成，账单留在待扣状态。返回的是**扁平结构**（不套 consumeBillDTO）。
+     */
+    @FormUrlEncoded
+    @POST("/order/weixinScorePay/unPay/queryBill")
+    fun queryUnpaidBills(@FieldMap auth: Map<String, String>): Call<ResponseBody>
+
+    /**
+     * 手动请求代扣。
+     *
+     * ⚠️ 这个接口和本项目其他 POST **两处都不一样**，照抄别的写法会失败：
+     *
+     * 1. **body 是 JSON**，其他全是 form-urlencoded。所以这里用 [RequestBody] 而不是 `@FieldMap`
+     * 2. **账单用 `consumeDate` 定位**，不是 `orderNo`
+     *
+     * ⚠️ 这是**动钱**的接口，调用方必须自己做防重（见 `MainViewModel.requestDeduct`）。
+     */
+    @POST("/order/thirdTrade/single/json/pay")
+    fun requestDeduct(@Body body: RequestBody): Call<ResponseBody>
 
     /** 修改密码。两个密码都是 MD5 取后 10 位大写，和登录用的是同一套 */
     @FormUrlEncoded

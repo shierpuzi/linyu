@@ -47,6 +47,11 @@ fun WalletScreen(viewModel: MainViewModel) {
         viewModel.loadCampusBalance()
     }
     var detailBill by remember { mutableStateOf<BillDTO?>(null) }
+    // 待确认的代扣：(consumeDate, 金额)。这是动钱的操作，不弹确认框直接扣太莽了
+    var pendingDeduct by remember { mutableStateOf<Pair<String, String>?>(null) }
+
+    // 进页面和下拉刷新时都拉一次未支付列表——残留账单是服务端状态，只有它说了算
+    LaunchedEffect(Unit) { viewModel.loadUnpaidBills() }
     var showEditDialog by remember { mutableStateOf(false) }
     var editValue by remember { mutableStateOf("") }
 
@@ -143,7 +148,14 @@ fun WalletScreen(viewModel: MainViewModel) {
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     viewModel.billList.forEach { bill ->
-                        BillCard(bill) { detailBill = bill.consumeBillDTO }
+                        val dto = bill.consumeBillDTO
+                        BillCard(
+                            bill = bill,
+                            unpaid = dto.consumeDate in viewModel.unpaidConsumeDates,
+                            deducting = viewModel.deductingConsumeDate == dto.consumeDate,
+                            onDeduct = { pendingDeduct = dto.consumeDate to dto.consumeMoney },
+                            onClick = { detailBill = dto }
+                        )
                     }
                 }
             }
@@ -198,6 +210,42 @@ fun WalletScreen(viewModel: MainViewModel) {
         )
     }
 
+    // 请求代扣确认弹窗。
+    // ⚠️ 这是**从一卡通里真扣钱**，必须先让用户看清楚金额再动手 ——
+    // 按钮在列表里很小一颗，误触的代价是真金白银。
+    pendingDeduct?.let { (date, money) ->
+        AlertDialog(
+            onDismissRequest = { pendingDeduct = null },
+            title = { Text("请求代扣", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text("将从校园卡中扣除这笔费用：", color = AppColors.TextSecondary, fontSize = 13.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Text("¥ $money", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = AppColors.Danger)
+                    Spacer(Modifier.height(6.dp))
+                    Text(date, color = AppColors.TextSecondary, fontSize = 12.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Text("余额不足时可能扣款失败。扣成功后这条记录就不再显示「请求代扣」。",
+                        color = AppColors.TextSecondary, fontSize = 11.sp)
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pendingDeduct = null
+                        viewModel.requestDeduct(date) { ok, msg ->
+                            viewModel.toastMessage = if (ok) "代扣成功" else (msg ?: "代扣失败")
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.Warning)
+                ) { Text("确认扣款") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeduct = null }) { Text("取消") }
+            }
+        )
+    }
+
     // 账单详情弹窗
     if (detailBill != null) {
         val dto = detailBill!!
@@ -221,7 +269,13 @@ fun WalletScreen(viewModel: MainViewModel) {
 }
 
 @Composable
-private fun BillCard(bill: BillItem, onClick: () -> Unit) {
+private fun BillCard(
+    bill: BillItem,
+    unpaid: Boolean,
+    deducting: Boolean,
+    onDeduct: () -> Unit,
+    onClick: () -> Unit
+) {
     val dto = bill.consumeBillDTO
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = AppColors.Card),
@@ -240,7 +294,29 @@ private fun BillCard(bill: BillItem, onClick: () -> Unit) {
                 Spacer(Modifier.height(2.dp))
                 Text(dto.consumeDate.take(16), fontSize = 12.sp, color = AppColors.TextSecondary)
             }
-            Text("-¥ ${dto.consumeMoney}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AppColors.Danger)
+            Column(horizontalAlignment = Alignment.End) {
+                Text("-¥ ${dto.consumeMoney}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AppColors.Danger)
+                // 只有服务端说这条**没扣成功**时才出现按钮。判断依据是
+                // /order/weixinScorePay/unPay/queryBill 的返回，不去猜账单里的字段含义。
+                if (unpaid) {
+                    Spacer(Modifier.height(6.dp))
+                    Button(
+                        onClick = onDeduct,
+                        enabled = !deducting,
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        modifier = Modifier.height(30.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AppColors.Warning,
+                            disabledContainerColor = AppColors.TextSecondary.copy(alpha = 0.4f)
+                        )
+                    ) {
+                        // 扣款中把文案也换掉：只靠变灰不够，用户会以为卡住了
+                        Text(if (deducting) "扣款中…" else "请求代扣",
+                            fontSize = 12.sp, color = Color.White)
+                    }
+                }
+            }
         }
     }
 }

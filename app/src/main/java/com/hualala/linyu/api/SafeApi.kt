@@ -14,9 +14,12 @@ import com.hualala.linyu.model.GenerateUseCodeResult
 import com.hualala.linyu.model.LoginData
 import com.hualala.linyu.model.OrderStatus
 import com.hualala.linyu.model.ProjectInfo
+import com.hualala.linyu.model.UnpaidBill
 import com.hualala.linyu.model.UseCodeData
 import com.hualala.linyu.model.WalletData
 import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.ResponseBody
 import retrofit2.Call
 import retrofit2.Callback
@@ -184,6 +187,49 @@ suspend fun QzxyService.forgetPasswordSafe(
 
 suspend fun QzxyService.getProjectInfoSafe(): BaseResponse<ProjectInfo> =
     parse(getProjectInfo().awaitString(), ProjectInfo::class.java)
+
+// ── 残留账单的手动代扣 ──
+
+suspend fun QzxyService.queryUnpaidBillsSafe(auth: Map<String, String>): BaseResponse<List<UnpaidBill>> =
+    parseList(queryUnpaidBills(auth).awaitString(), UnpaidBill::class.java)
+
+/**
+ * 手动请求代扣。
+ *
+ * body 是 **JSON**（本项目唯一一个），字段固定就那几个，直接拼更省事——
+ * 但**值必须转义**，所以走 Gson 而不是字符串模板。
+ *
+ * ⚠️ `phoneSystem` 传 `WeChat` 是**照抄抓包**的。这个接口是官方 App 里那个 H5
+ * 页面调的，和 Android 原生请求（`phoneSystem=android`）不是一条路。
+ * 服务端万一校验这个字段，传 android 就会被拒；照抄成功过的那份最稳。
+ */
+suspend fun QzxyService.requestDeductSafe(
+    consumeDate: String,
+    auth: Map<String, String>,
+    deductType: Int = DEDUCT_TYPE
+): BaseResponse<Unit> {
+    val body = Gson().toJson(
+        mapOf(
+            "deductType" to deductType,
+            "consumeDate" to consumeDate,
+            "projectId" to (auth["projectId"] ?: ""),
+            "accountId" to (auth["accountId"] ?: ""),
+            "loginCode" to (auth["loginCode"] ?: ""),
+            "userId" to (auth["userId"] ?: ""),
+            "phoneSystem" to "WeChat"
+        )
+    )
+    return parse(requestDeduct(body.toRequestBody(JSON_MEDIA_TYPE)).awaitString(), Unit::class.java)
+}
+
+/**
+ * 代扣类型。**只有一个样本，不保证是常量**——万一服务端按扣款渠道变，
+ * 会返回错误码而不是扣错钱，改这一处即可。
+ * 抓包实测 `{"deductType":7,...}` → `{"success":true}`。
+ */
+const val DEDUCT_TYPE = 7
+
+private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
 suspend fun QzxyService.getCampusUserInfoSafe(): BaseResponse<CampusUserInfo> =
     parse(getCampusUserInfo().awaitString(), CampusUserInfo::class.java)

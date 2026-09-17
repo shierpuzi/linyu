@@ -144,6 +144,22 @@ data class ProjectInfo(
 )
 
 /**
+ * `/order/weixinScorePay/unPay/queryBill` 返回的未支付账单。
+ *
+ * ⚠️ 它是**扁平结构**，不像 `/order/query/account/bill/list` 那样套一层
+ * `consumeBillDTO`——两个接口看着像，模型不通用，别想着复用 [BillItem]。
+ *
+ * `consumeDate` 是代扣接口唯一定位一张账单的字段，所以它是最重要的一个。
+ */
+data class UnpaidBill(
+    val orderId: String? = null,
+    val orderNo: String? = null,
+    val consumeDate: String? = null,
+    val consumeMoney: String? = null,
+    val description: String? = null
+)
+
+/**
  * `POST /account/useCode/new/generate` 的返回：**换**出来的候选码，不是生效的码。
  *
  * 换出来的码要再调 `set` 才真正生效，3 分钟内不领取就作废。

@@ -17,6 +17,8 @@ import com.hualala.linyu.api.forgetPasswordSafe
 import com.hualala.linyu.api.generateUseCodeSafe
 import com.hualala.linyu.api.getProjectInfoSafe
 import com.hualala.linyu.api.getUseCodeSafe
+import com.hualala.linyu.api.queryUnpaidBillsSafe
+import com.hualala.linyu.api.requestDeductSafe
 import com.hualala.linyu.api.setUseCodeSafe
 import com.hualala.linyu.api.getWalletSafe
 import com.hualala.linyu.api.queryUsingSafe
@@ -1047,6 +1049,72 @@ class MainViewModel : ViewModel() {
     }
 
     /**
+     * **未支付账单**的 `consumeDate` 集合——就是俗称的「残留账单」。
+     *
+     * 12 点后结束用水、或者一卡通余额不足时，服务端结算没扣成，账单会留在待扣状态。
+     * 界面据这个集合决定哪些账单显示「请求代扣」按钮。
+     *
+     * 用 `consumeDate` 做 key，因为**代扣接口就是用它定位账单的**（不是 orderNo）。
+     */
+    var unpaidConsumeDates by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    /** 正在代扣的那条账单的 consumeDate；非空期间按钮禁用，防止连点重复扣款 */
+    var deductingConsumeDate by mutableStateOf<String?>(null)
+        private set
+
+    /** 拉未支付账单列表。失败保持原样，不清空——清空会让按钮凭空消失 */
+    fun loadUnpaidBills() {
+        if (!PrefsHelper.isLoggedIn) return
+        sessionScope().launch {
+            try {
+                val resp = NetworkModule.apiService.queryUnpaidBillsSafe(NetworkModule.authFields())
+                if (resp.success) {
+                    unpaidConsumeDates = (resp.data ?: emptyList())
+                        .mapNotNull { it.consumeDate?.takeIf { d -> d.isNotBlank() } }
+                        .toSet()
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * 手动请求代扣。
+     *
+     * ⚠️ **这是动钱的接口**，防重是这里的第一要务：
+     * - [deductingConsumeDate] 非空时直接拒绝新请求（连点、重复点都会被挡掉）
+     * - 成功后立刻刷新未支付列表，把这条从里面摘出去
+     *
+     * @param onResult `(成功?, 失败原因)`
+     */
+    fun requestDeduct(consumeDate: String, onResult: (Boolean, String?) -> Unit) {
+        if (consumeDate.isBlank()) return
+        if (deductingConsumeDate != null) return   // 已经有一条在扣，忽略
+
+        deductingConsumeDate = consumeDate
+        sessionScope().launch {
+            // 写成 try/catch 表达式：Kotlin 不允许「val 在 try 里赋值、又在 catch 里赋值」
+            val (ok, msg) = try {
+                val resp = NetworkModule.apiService
+                    .requestDeductSafe(consumeDate, NetworkModule.authFields())
+                if (resp.success) true to null
+                else false to (resp.displayMessage ?: "代扣失败")
+            } catch (_: Exception) {
+                false to "网络异常，请稍后重试"
+            }
+            deductingConsumeDate = null
+            if (ok) {
+                // 扣成功了就把这条从未支付集合里摘掉，不等网络往返——
+                // 万一刷新失败，按钮还挂在那儿，用户会以为没扣成功又点一次
+                unpaidConsumeDates = unpaidConsumeDates - consumeDate
+                loadUnpaidBills()
+                loadBills()
+            }
+            onResult(ok, msg)
+        }
+    }
+
+    /**
      * 拉学校名填进「学校」那一行。
      *
      * 服务端的 `projectName` 就是学校名，本来就有——以前这里是写死的默认值，
@@ -1106,6 +1174,8 @@ class MainViewModel : ViewModel() {
         // 一卡通余额是外部账户的钱，会随时变（食堂刷卡、充值都会动），
         // 下拉刷新时一起拉一次
         loadCampusBalance()
+        // 残留账单同理——在别处（比如官方 App）补扣掉了，这边也得跟着消失
+        loadUnpaidBills()
     }
 
     // ── 设备发现 ──

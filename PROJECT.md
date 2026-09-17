@@ -132,7 +132,7 @@ app/src/main/
 │   │   ├── AppBackgroundLayer.kt          # 自定义背景渲染层（透明度/模糊/亮度）
 │   │   ├── CustomBackgroundScreen.kt      # 背景装扮设置页（主页 / 使用页切换）
 │   │   ├── LogViewerDialog.kt             # 内置日志查看器
-│   │   ├── TailEllipsisText.kt            # 尾部优先省略的单行文本（设备名 / MAC）
+│   │   ├── TailEllipsisText.kt            # 单行文本，放不下先缩字号、再省**开头**（保留结尾，设备名辨识度在房号）
 │   │   ├── DeviceDetailDialog.kt          # 设备详情弹窗（SN、MAC、预扣金额、状态）
 │   │   ├── LinYuToast.kt                  # 自定义 Toast 组件（应用图标 + 深色背景）
 │   │   └── theme/
