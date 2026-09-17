@@ -469,6 +469,76 @@ useCodeStatus=1&loginCode=xxx&userId=xxx&...
 
 ---
 
+### 4.8 短信验证码登录
+
+v2.1.0 起可用，**任何手机号都能用，不需要抓包**。关键在于 `secret` 参数并不是随机值，
+而是完全由手机号推导出来的（见下方）。
+
+#### 发送验证码
+
+```
+GET /user/verification/code/get?telephone={手机号}&typeId=3&platform=1&secret={secret}
+```
+
+| 参数 | 值 | 说明 |
+|---|---|---|
+| `telephone` | 11 位手机号 | |
+| `typeId` | `3` | 固定值 |
+| `platform` | `1` | 固定值 |
+| `secret` | 见下方算法 | 官方 App 发验证码时带的签名 |
+
+#### secret 算法（本项目的核心发现）
+
+抓包时 `secret` 看起来像是每台设备各不相同的随机值，**实际上它只跟手机号有关**：
+
+```
+secret = MD5( 手机号前3位 + 手机号后4位 + "klcx" )      // 32 位小写十六进制
+```
+
+以 `18582613960` 为例：
+
+```
+MD5("185" + "3960" + "klcx")
+ = MD5("1853960klcx")
+ = e3d2220b920cca13499ea76328e24a4e
+```
+
+因为算法里不含任何设备侧密钥，**任何人、任何手机号都能在本地算出自己的 secret**，
+所以短信登录可以通用实现。本项目实现见 `utils/SignUtils.kt`。
+
+> 这也说明 `secret` 不是身份凭据——真正的身份校验发生在下一步提交验证码的时候。
+
+#### 提交验证码登录
+
+```
+POST /user/registerAndLogin
+Content-Type: application/x-www-form-urlencoded
+
+telephone={手机号}&smsCode={验证码}&type=5&phoneSystem=android&version=6.5.24
+```
+
+| 参数 | 值 | 说明 |
+|---|---|---|
+| `smsCode` | 6 位数字 | 收到的短信验证码 |
+| `type` | `5` | 固定值 |
+| `phoneSystem` | `android` | |
+| `version` | `6.5.24` | 与密码登录保持一致 |
+
+> ⚠️ 这个接口**不需要** `loginCode` / `userId` 等认证参数——它本身就是用来换取这些的。
+
+**响应**：与密码登录完全一致（`loginCode` / `userId` / `userAccount` 等），
+拿到后按同样的方式保存即可，详见 [2. 认证机制](#2-认证机制)。
+
+#### 与密码登录的差别
+
+| | 密码登录 | 短信登录 |
+|---|---|---|
+| 接口 | `POST /user/login` | `POST /user/registerAndLogin` |
+| 需要 secret | 否 | 是（按手机号本地计算） |
+| 返回字段 | 完全一致 | 完全一致 |
+
+---
+
 ### 4.9 账号信息与一卡通
 
 v3.0.0 新增。**一卡通余额不再需要破签名**——趣智校园把易校园的接口代理了。
@@ -623,76 +693,6 @@ password=0AB7065F1C&code=198871&loginCode=xxx&...
 ```
 
 **不需要 `oldPassword`。** 新密码同样是 MD5 取后 10 位大写。
-
----
-
-### 4.8 短信验证码登录
-
-v2.1.0 起可用，**任何手机号都能用，不需要抓包**。关键在于 `secret` 参数并不是随机值，
-而是完全由手机号推导出来的（见下方）。
-
-#### 发送验证码
-
-```
-GET /user/verification/code/get?telephone={手机号}&typeId=3&platform=1&secret={secret}
-```
-
-| 参数 | 值 | 说明 |
-|---|---|---|
-| `telephone` | 11 位手机号 | |
-| `typeId` | `3` | 固定值 |
-| `platform` | `1` | 固定值 |
-| `secret` | 见下方算法 | 官方 App 发验证码时带的签名 |
-
-#### secret 算法（本项目的核心发现）
-
-抓包时 `secret` 看起来像是每台设备各不相同的随机值，**实际上它只跟手机号有关**：
-
-```
-secret = MD5( 手机号前3位 + 手机号后4位 + "klcx" )      // 32 位小写十六进制
-```
-
-以 `18582613960` 为例：
-
-```
-MD5("185" + "3960" + "klcx")
- = MD5("1853960klcx")
- = e3d2220b920cca13499ea76328e24a4e
-```
-
-因为算法里不含任何设备侧密钥，**任何人、任何手机号都能在本地算出自己的 secret**，
-所以短信登录可以通用实现。本项目实现见 `utils/SignUtils.kt`。
-
-> 这也说明 `secret` 不是身份凭据——真正的身份校验发生在下一步提交验证码的时候。
-
-#### 提交验证码登录
-
-```
-POST /user/registerAndLogin
-Content-Type: application/x-www-form-urlencoded
-
-telephone={手机号}&smsCode={验证码}&type=5&phoneSystem=android&version=6.5.24
-```
-
-| 参数 | 值 | 说明 |
-|---|---|---|
-| `smsCode` | 6 位数字 | 收到的短信验证码 |
-| `type` | `5` | 固定值 |
-| `phoneSystem` | `android` | |
-| `version` | `6.5.24` | 与密码登录保持一致 |
-
-> ⚠️ 这个接口**不需要** `loginCode` / `userId` 等认证参数——它本身就是用来换取这些的。
-
-**响应**：与密码登录完全一致（`loginCode` / `userId` / `userAccount` 等），
-拿到后按同样的方式保存即可，详见 [2. 认证机制](#2-认证机制)。
-
-#### 与密码登录的差别
-
-| | 密码登录 | 短信登录 |
-|---|---|---|
-| 接口 | `POST /user/login` | `POST /user/registerAndLogin` |
-| 需要 secret | 否 | 是（按手机号本地计算） |
-| 返回字段 | 完全一致 | 完全一致 |
 
 ---
 
