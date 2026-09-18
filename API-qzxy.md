@@ -142,13 +142,15 @@ fun authFields(): Map<String, String> = mapOf(
     "accountId" to accountId,
     "projectId" to projectId,
     "telephone" to telephone,
-    "telPhone" to telephone,      // 注意：POST 请求中 telephone 和 telPhone 都需要
+    "telPhone" to telephone,      // ⚠️ 两个都要传，值相同
     "phoneSystem" to "android",
     "version" to "6.5.24"
 )
 ```
 
-> ⚠️ 注意：POST 请求中 `telephone` 和 `telPhone` 两个字段都需要传，值相同。这是趣智校园 API 的历史遗留设计。
+> ⚠️ `telephone` 和 `telPhone` **两个都必须传**，值相同——这是趣智校园 API 的历史遗留设计。
+> **GET 请求也一样**，而且更隐蔽：少传 `telPhone` 时 `/settlement/campus/userInfo`
+> 会返回 `errorCode=1 手机号不能为空`，**HTTP 依然是 200**。详见 [9.8](#98-get-请求也要补-telphone)。
 
 ### 挤号检测
 
@@ -792,6 +794,10 @@ scanner.startScan(null, settings, object : ScanCallback() {
 
 ### 洗澡流程
 
+> ⚠️ **v3.0.0 起，订单状态的轮询和超时关停由前台服务（`ShowerWatchService`）负责**，
+> 不再是界面里的定时器。这是关键区别：以前退出使用页或被划掉，倒计时就停摆，
+> 超时了也没人管。现在监控跟界面彻底解耦。
+
 ```
 用户打开 App
     │
@@ -803,7 +809,8 @@ scanner.startScan(null, settings, object : ScanCallback() {
     │       │
     │       ├── 查询 queryUsing → 检查是否已有进行中订单
     │       │       │
-    │       │       ├── 有订单 → 直接进入洗澡中界面（恢复订单）
+    │       │       ├── 有订单 + isOwner=true  → 直接进入洗澡中界面（恢复订单，不会重新开阀）
+    │       │       ├── 有订单 + isOwner=false → 拒绝，提示「他人使用中」
     │       │       │
     │       │       └── 无订单 → 调用 downRate 开始洗澡
     │       │               │
@@ -811,18 +818,28 @@ scanner.startScan(null, settings, object : ScanCallback() {
     │       │               ├── 进入洗澡中界面
     │       │               └── 轮询 queryUsing 获取 orderNo（最多 10 次，间隔 800ms）
     │       │
+    │       ├── 启动前台服务 ShowerWatchService
+    │       │       │
+    │       │       ├── 挂常驻通知（带「结束用水」按钮）
+    │       │       ├── 每 15 秒查询一次订单还在不在
+    │       │       │     剩 ≤14 秒时改成精确等到超时那一刻
+    │       │       ├── 查到订单没了 → 关阀 + 结算 + 发结束通知
+    │       │       └── ⚠️ 网络失败时**什么都不做**，下一轮再说，
+    │       │             绝不因为一次抖动就误判成「已结束」
+    │       │
     │       └── 洗澡中界面
     │               │
-    │               ├── 显示计时器（每秒更新）
+    │               ├── 显示计时器（每秒刷新，起点是持久化的开阀时间戳）
     │               ├── 显示预扣金额
-    │               ├── MQTT 推送更新消费金额
-    │               ├── 每 30 秒轮询 queryUsing 检查订单状态
-    │               │
-    │               └── 用户点击"结束使用"
-    │                       │
-    │                       ├── 调用 closeOrder 停止洗澡
-    │                       ├── 断开 MQTT
-    │                       └── 返回主页
+    │               └── MQTT 推送更新消费金额
+    │
+    ├── 用户点「结束使用」（界面 / 通知栏 / 桌面小组件，三个入口）
+    │       │
+    │       ├── 界面入口 → 通知服务
+    │       ├── 通知 / 小组件入口 → 直接走服务
+    │       │
+    │       └── 服务统一执行：挂「正在结束…」→ closeOrder 轮询确认关阀
+    │              → 查账单结算金额 → 发「使用结束」通知 → 撤通知、停服务
     │
     └── 使用码启动的设备（物理键盘操作）
             │
@@ -831,22 +848,31 @@ scanner.startScan(null, settings, object : ScanCallback() {
 
 ### 登录流程
 
+**两种方式，返回的字段完全一致**，拿到之后处理方式也一样：
+
 ```
-用户输入手机号 + 密码
+方式 A：手机号 + 密码（用户自己设过密码）
     │
     ├── 密码 MD5 加密（取后 10 位大写）
-    │
     ├── POST /user/login
-    │       │
-    │       ├── 成功 → 保存 loginCode、userId、accountId、projectId
-    │       │           → 进入主页
-    │       │
-    │       └── 失败 → 显示错误信息
+    └── 成功 → 保存 loginCode / userId / accountId / projectId → 进主页
+
+方式 B：手机号 + 短信验证码（v2.1.0 起，**App 默认用这个**）
     │
-    └── 自动登录（已有 loginCode）
-            │
-            └── 从 SharedPreferences 恢复认证信息 → 进入主页
+    ├── secret = MD5(手机号前3位 + 后4位 + "klcx")   ← 本地算，任何人可用
+    ├── GET /user/verification/code/get?typeId=3&telephone=xxx&secret=xxx
+    ├── POST /user/registerAndLogin   ← 没注册过的手机号**会自动注册**
+    └── 成功 → 同上
+
+自动登录：
+    └── 从 EncryptedSharedPreferences 恢复认证信息 → 进主页
 ```
+
+> 密码登录有个先天限制：**用验证码注册的账号根本没有密码**，所以 App 默认走验证码。
+> 忘了密码也有出路，见 [4.10](#410-手机号与密码) 的重置密码分支。
+>
+> ⚠️ 两种方式都必须处理**挤号**：同一账号不能在多设备同时在线，被挤下去时
+> 服务端返回含「登录 / token / 失效 / 过期」字样的错误，或 HTTP 401/403。
 
 短信验证码登录（替代上面「输密码 + MD5 + /user/login」这三步）：
 

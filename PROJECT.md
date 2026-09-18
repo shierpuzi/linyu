@@ -12,7 +12,7 @@
 | 技术栈 | Kotlin + Jetpack Compose + Material 3 |
 | 最低 Android 版本 | Android 8.0 (API 26) |
 | 目标 Android 版本 | Android 16 (API 36) |
-| APK 体积 | 12.5 MB（含 ML Kit 条码识别 native 库） |
+| APK 体积 | 12.6 MB（含 ML Kit 条码识别 native 库） |
 | 支持的 ABI | 仅 `arm64-v8a` |
 | 后端 API | 趣智校园 `v3-api.china-qzxy.cn` |
 | 适用范围 | 使用趣智校园系统的学校（学校名称自动获取） |
@@ -216,6 +216,7 @@ app/src/main/
 │  LoginScreen / MainScreen / ShowerScreen│
 │  WalletScreen / UserScreen              │
 │  FloatingPillNavBar / AppBackgroundLayer│
+│  （+ QrScanActivity，扫码页，非 Compose）│
 ├─────────────────────────────────────────┤
 │  主题层                                 │
 │  Theme (AppColors 组合局部)             │
@@ -224,17 +225,31 @@ app/src/main/
 │  ViewModel 层                           │
 │  LoginViewModel / MainViewModel         │
 ├─────────────────────────────────────────┤
+│  服务层（脱离界面）                     │
+│  ShowerWatchService 前台服务：超时关停  │
+│                      + 订单轮询         │
+│  ShowerEvents 服务 → 界面的进程内事件   │
+├─────────────────────────────────────────┤
 │  数据层                                 │
 │  AuthRepository / NetworkModule         │
 │  QzxyService / SafeApi / GithubApi      │
+│  ShowerController 开阀/关阀/结算（App   │
+│                    与小组件共用一份）   │
+│  BalanceEstimator 余额口径（三处共用）  │
 │  PrefsHelper / MqttManager              │
 │  BluetoothScanner / BackgroundManager   │
-│  AppLogger                              │
+│  Notifier 系统通知 / AppLogger          │
 ├─────────────────────────────────────────┤
 │  模型层                                 │
 │  BaseResponse / LoginData / DeviceInfo  │
-│  ActiveOrder / MqttOrderMsg             │
+│  BillItem / UseCodeData / UnpaidBill    │
+│  AccountInfo / CampusUserInfo / Project │
+│  ActiveOrder / MqttOrderMsg / 缓存快照  │
 └─────────────────────────────────────────┘
+
+> 架构图只列主要的。UI 层还有 `QrScanActivity`（唯一非 Compose 的页面——扫码）、
+> `DeviceGlyph`（设备图标，emoji 与图标的渲染层映射）、`DeductConfirmDialog`（代扣确认，
+> 两处入口共用一份文案）、`TailEllipsisText`、`LogViewerDialog` 等。
 ```
 
 ### 主题与背景实现要点
@@ -253,14 +268,29 @@ app/src/main/
 - 全程只用 RemoteViews 一等公民 API（`setTextViewText` / `setViewVisibility` / `setChronometer` /
   `setOnClickPendingIntent`），**不用** `setInt(id, "setXxx", ...)` 反射写法——
   框架对反射方法有 `@RemotableViewMethod` 白名单，不通过会让整个小组件渲染失败
-- 「开 / 关」两个圆形按钮做成两个 TextView 切换 visibility，规避上述反射限制
-- 2x2 **只有一套布局**，被拉宽拉高都靠 `layout_weight` 自适应。
-  v2.2.1 曾按宽高比切成「按钮在右侧」的横向版，但横向版里卡片固定 96dp、圆球固定 58dp，
-  都不跟尺寸缩放，拉大只会多出空白；判据 `minWidth > minHeight` 又过于灵敏，
-  稍微一拉就跳过去，v2.2.2 已整体移除
+- 动画类的东西一律没有（RemoteViews 跑不了）。**但 `ProgressBar` 的不确定态是系统进程画的**，
+  所以「正在开启…」的转圈是挂一个 `ProgressBar`，不是自己画动画
+- **三种尺寸**（v3.0.1 加 1x1）：
+  - `1x1` 整块就是一个开关，三种状态叠在同一位置切 visibility
+  - `2x2` **只有一套布局**，被拉宽拉高都靠 `layout_weight` 自适应。
+    v2.2.1 曾按宽高比切成「按钮在右侧」的横向版，但横向版里卡片固定 96dp、圆球固定 58dp，
+    都不跟尺寸缩放，拉大只会多出空白；判据 `minWidth > minHeight` 又过于灵敏，
+    稍微一拉就跳过去，v2.2.2 已整体移除
+  - `2x4` 带侧边导航，三个页面
+- **1x1 的两处特殊处理**：
+  - 「空闲」那块是三种情况共用的（真·空闲 / 未登录 / 没选过设备），只有顶部那行小字不同
+  - 布局根节点加了内边距对齐应用图标的视觉大小。`minWidth/minHeight` 不是「组件多大」
+    而是「至少需要多大」，桌面据此给格子后会把组件**拉伸填满**，不加内边距玻璃块会顶到格子边缘
+- `DisabledReason.isNotice` 区分「过程」和「结果」：**过程**才转圈、才禁点击；
+  失败/占用这类**结果**照常可点（用户多半想重试）
 - ⚠️ **PendingIntent 的目标组件必须是 Manifest 里注册过的 receiver**。
   基类 `LinYuWidgetProvider` 没有注册，把广播发给它会**被系统静默丢弃**（无异常、无日志），
-  表现就是「点按钮毫无反应」。渲染时需反查该 widget id 属于 `LinYuWidget2x2` 还是 `LinYuWidget2x4`
+  表现就是「点按钮毫无反应」。渲染时需反查该 widget id 属于哪个尺寸的 receiver——
+  **每加一个尺寸都要在 `forEachWidget` 的登记表里加一项**，否则那个尺寸收不到重绘
+- 设备类型**在小组件里仍是 emoji**（账单行 / 附近设备行的圆头像）。App 界面用的是图标，
+  两边的取舍见 `design/device-icons/README.md`
+- 通知：横幅类走 `linyu_alert` 渠道（`IMPORTANCE_HIGH`）。⚠️ 渠道 importance 创建后改不了，
+  所以「关掉横幅」是另建一条 DEFAULT 渠道二选一，不是改原来那条
 - 开阀 / 关阀逻辑与 App 共用 `data/ShowerController.kt`；小组件侧只额外限制确认轮询预算（6 秒），
   超时返回「状态未知」并提供手动刷新，而不是谎报成功或失败
 - 状态推送：App 内进入 / 退出洗澡、自动关停时调用 `LinYuWidget.refreshAll(context)`
@@ -380,15 +410,17 @@ buildTypes {
 | 挤号检测有最多 25 秒延迟 | 靠心跳轮询实现（v2.2.0 前是完全发现不了） |
 | 饮水机未实机验证 | 识别与 UI 已实现，但作者所在学校无直饮水机，实际控制流程未验证 |
 | 小组件无实时消费 | 小组件不连 MQTT，使用中只显示预扣金额；停止后也不做账单结算 |
-| Android 11 及以下仍需定位权限 | 系统对蓝牙发现的硬性规定，无法绕过 |
+| Android 12 以下仍需定位权限 | 系统对蓝牙发现的硬性规定，无法绕过 |
 | 自动填充依赖厂商 ROM | 不同厂商密码管理器行为差异较大，未在多机型验证 |
 | 实时扣费 | MQTT 仅在订单结束时推送消费金额，洗澡中无实时扣费（官方 App 也是如此） |
 | 结算延迟 | 账单生成有延迟，消费金额最长需等待约 20 秒 |
-| 一卡通余额 | 无法获取真实余额（易校园 API 有 HMAC-SHA256 签名保护），仅支持手动估算 |
+| 一卡通余额需已签约 | 走 `/settlement/campus/userInfo` 能直接拿到真实余额（趣智校园代理了易校园，**不用破签名**）。**没签约免密支付**时服务端不给 `amount`，只能回退本地估算 |
 | MQTT 明文 | 趣智校园 MQTT 服务器不支持 TLS，通信内容未加密 |
 | 密码安全 | 趣智校园使用 MD5 取后 10 位作为密码，安全性较低（官方协议限制） |
-| 学校适配 | 不同学校的趣智校园服务器可能不同，需修改 projectId、BLE 过滤名、MQTT 地址 |
-| 深色模式 | 登录页面和洗澡页面的深色模式适配为硬编码颜色切换，非完全动态 |
+| 学校适配 | 多数学校装发行版即可（projectId 自动下发）。部署方式特殊的才要改 **BLE 过滤名 / MQTT 地址**，见下方「不同学校的适配」 |
+| 深色模式 | 登录页和洗澡页为硬编码颜色切换，非完全跟随系统；扫码页固定深色（相机画面上深浅模式没有意义）|
+| 1x1 图标对齐 | 占用仍是**一格**（和应用图标一样），只是靠内边距让视觉大小接近。各家桌面的格子尺寸和图标内边距都不同，做不到像素级一致，6dp 是折中值 |
+| 小组件仍是 emoji | 账单行 / 附近设备行的设备头像用的是 emoji，和 App 内的图标不一致（那两个列表里可能有饮水机，换了会图标与 emoji 混排）|
 | 多语言 | 仅支持中文 |
 
 ### 历史问题的修复记录
@@ -405,6 +437,20 @@ buildTypes {
 | 使用页「已预扣」卡片不透明色块 | ✅ v2.1.0：补 `Color.Transparent`（Surface 默认不透明） |
 | 主题切换跳回首页 / 闪烁 | ✅ v2.1.0：状态移出过渡容器 + 遮罩先绘一帧 |
 | 版本号硬编码 | ✅ v2.1.0：改读 `BuildConfig.VERSION_NAME` |
+| 小组件账单页余额偏高 | ✅ v2.2.3：只减了 2 笔账单，App 用 20 笔，减数偏小导致虚高 |
+| 预发布被当成正式版 | ✅ v2.2.3：`fetchReleases()` 没过滤 `prerelease` |
+| 「上次消费」不跟设备走 | ✅ v2.2.3：金额按 `snCode` 分开存 |
+| 余额只能手动估算 | ✅ v3.0.0：接 `/settlement/campus/userInfo` 拿真实余额 |
+| 退出使用页后超时关停失效 | ✅ v3.0.0：倒计时和订单轮询搬进前台服务 |
+| 通知栏点「结束用水」后使用页不退出 | ✅ v3.0.0：`doFinish` 漏发结束事件 |
+| 消费金额显示成上一次账单的金额 | ✅ v3.0.0：`settleAmount` 的时间过滤条件写反了 |
+| 小组件开阀后没有「使用中」通知 | ✅ v3.0.0：`runCatching` 把服务启动失败吞了 |
+| 换手机号验证码发到旧号 | ✅ v3.0.0：实测是发到**新**号（`typeId=5`），代码写反了 |
+| 姓名拿不到 | ✅ v3.0.1：`/account/info` 依赖学校同步学籍，改为三个接口互为兜底 |
+| 首次加载无余额时闪错数字 | ✅ v3.0.1：账单没到位不显示估算值 |
+| 开阀失败什么都不显示 | ✅ v3.0.2：`showerError` 以前**只写不读**，现在弹窗 + 小组件 + 横幅三处联动 |
+| 代扣可能重复扣款 | ✅ v3.0.2：超时/取消被当成「失败」会诱导重试；列表刷新无乱序守卫；批量没去重 |
+| 重新领取使用码显示八个短横线 | ✅ v3.0.2：自动换码的条件写成「只在没码时才换」 |
 
 ---
 
