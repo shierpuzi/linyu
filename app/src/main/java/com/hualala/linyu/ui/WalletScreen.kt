@@ -147,11 +147,14 @@ fun WalletScreen(viewModel: MainViewModel) {
                 Text("暂无账单数据", color = AppColors.TextSecondary, modifier = Modifier.padding(top = 8.dp))
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // ⚠️ 在循环外取一次。unpaidConsumeDates 是计算属性，
+                    // 写在 forEach 里的话每渲染一行就重建一次整个 Set
+                    val unpaidDates = viewModel.unpaidConsumeDates
                     viewModel.billList.forEach { bill ->
                         val dto = bill.consumeBillDTO
                         BillCard(
                             bill = bill,
-                            unpaid = dto.consumeDate in viewModel.unpaidConsumeDates,
+                            unpaid = dto.consumeDate in unpaidDates,
                             deducting = viewModel.deductingConsumeDate == dto.consumeDate,
                             onDeduct = { pendingDeduct = dto.consumeDate to dto.consumeMoney },
                             onClick = { detailBill = dto }
@@ -214,35 +217,22 @@ fun WalletScreen(viewModel: MainViewModel) {
     // ⚠️ 这是**从一卡通里真扣钱**，必须先让用户看清楚金额再动手 ——
     // 按钮在列表里很小一颗，误触的代价是真金白银。
     pendingDeduct?.let { (date, money) ->
-        AlertDialog(
-            onDismissRequest = { pendingDeduct = null },
-            title = { Text("请求代扣", fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    Text("将从校园卡中扣除这笔费用：", color = AppColors.TextSecondary, fontSize = 13.sp)
-                    Spacer(Modifier.height(8.dp))
-                    Text("¥ $money", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = AppColors.Danger)
-                    Spacer(Modifier.height(6.dp))
-                    Text(date, color = AppColors.TextSecondary, fontSize = 12.sp)
-                    Spacer(Modifier.height(12.dp))
-                    Text("余额不足时可能扣款失败。扣成功后这条记录就不再显示「请求代扣」。",
-                        color = AppColors.TextSecondary, fontSize = 11.sp)
+        DeductConfirmDialog(
+            amount = money.toDoubleOrNull(),
+            detail = date,
+            onConfirm = {
+                pendingDeduct = null
+                viewModel.requestDeduct(date) { r ->
+                    viewModel.toastMessage = when (r) {
+                        is MainViewModel.DeductResult.Ok -> "代扣成功"
+                        is MainViewModel.DeductResult.Failed -> r.reason ?: "代扣失败"
+                        // 结果未知**不能说失败**：请求可能已经发出去了，
+                        // 说失败就是在鼓励用户再点一次 → 扣两次
+                        is MainViewModel.DeductResult.Unknown -> "结果未知，请下拉刷新确认后再操作"
+                    }
                 }
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        pendingDeduct = null
-                        viewModel.requestDeduct(date) { ok, msg ->
-                            viewModel.toastMessage = if (ok) "代扣成功" else (msg ?: "代扣失败")
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = AppColors.Warning)
-                ) { Text("确认扣款") }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDeduct = null }) { Text("取消") }
-            }
+            onDismiss = { pendingDeduct = null }
         )
     }
 

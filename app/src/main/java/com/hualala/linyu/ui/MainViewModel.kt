@@ -38,6 +38,7 @@ import com.hualala.linyu.model.BillItem
 import com.hualala.linyu.model.DeviceInfo
 import com.hualala.linyu.model.MqttOrderMsg
 import com.hualala.linyu.model.NearbyDevice
+import com.hualala.linyu.model.UnpaidBill
 import com.hualala.linyu.model.WalletData
 import com.hualala.linyu.utils.AppLogger
 import com.hualala.linyu.utils.BluetoothScanner
@@ -45,6 +46,7 @@ import com.hualala.linyu.utils.MqttManager
 import com.hualala.linyu.utils.Notifier
 import com.hualala.linyu.utils.PrefsHelper
 import com.google.gson.Gson
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -52,6 +54,28 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+
+/**
+ * 开阀失败的原因分类。
+ *
+ * ⚠️ 界面**只对 [SERVER_REJECTED] 引导去补扣**。把网络异常、设备被占用、结果未知
+ * 也归到「有欠费」里，用户就会因为一次 WiFi 掉线被引导去真扣钱。
+ */
+enum class ShowerErrorKind {
+    /** 服务端明确拒绝（欠费、账户异常…）——**只有这一类**和未扣账单有关 */
+    SERVER_REJECTED,
+    /** 设备正被别人用着 */
+    IN_USE_BY_OTHERS,
+    /** 开阀结果未知（预算耗尽没确认上） */
+    UNKNOWN_RESULT,
+    /** 网络异常 */
+    NETWORK,
+    /** 设备信息不完整 */
+    BAD_DEVICE,
+}
+
+/** 开阀失败：[message] 给用户看，[kind] 决定界面要不要引导去补扣 */
+data class ShowerError(val message: String, val kind: ShowerErrorKind)
 
 class MainViewModel : ViewModel() {
 
@@ -68,7 +92,7 @@ class MainViewModel : ViewModel() {
     var showerPreDeduct by mutableStateOf(0.0)
     var showerElapsedSec by mutableStateOf(0)
     var autoDisConSec by mutableStateOf(0)   // 自动关停剩余秒数，0 = 未知
-    var showerError by mutableStateOf<String?>(null)
+    var showerError by mutableStateOf<ShowerError?>(null)
     var toastMessage by mutableStateOf<String?>(null)
 
     // ── 自动关停确认弹窗 ──
@@ -359,7 +383,7 @@ class MainViewModel : ViewModel() {
     fun startShower(phone: String) {
         val device = selectedDevice ?: return
         val snCode = device.snCode
-        if (snCode.isNullOrBlank()) { showerError = "设备信息不完整"; return }
+        if (snCode.isNullOrBlank()) { showerError = ShowerError("设备信息不完整", ShowerErrorKind.BAD_DEVICE); return }
 
         isStartingShower = true
         sessionScope().launch {
@@ -393,25 +417,30 @@ class MainViewModel : ViewModel() {
                      * （比如扫码头、小组件深链），也不会把别人的订单当成自己的。
                      */
                     is OpenOutcome.InUseByOthers -> {
-                        showerError = outcome.message
+                        showerError = ShowerError(outcome.message, ShowerErrorKind.IN_USE_BY_OTHERS)
                         mqttManager?.disconnect()
                     }
 
                     is OpenOutcome.Failed -> {
-                        showerError = outcome.message
+                        showerError = ShowerError(outcome.message, ShowerErrorKind.SERVER_REJECTED)
                         checkKick(outcome.kickHint)
                         mqttManager?.disconnect()
                     }
 
                     OpenOutcome.Unknown -> {
                         // App 内调用给了充足预算，理论上不会走到这；保守起见按未确认处理
-                        showerError = "开阀未确认成功，请确认热水器是否已开启"
+                        showerError = ShowerError(
+                            "开阀未确认成功，请确认热水器是否已开启",
+                            ShowerErrorKind.UNKNOWN_RESULT
+                        )
                         mqttManager?.disconnect()
                     }
                 }
             } catch (e: Exception) {
                 checkKickEx(e)
-                if (!isShowering) showerError = e.message ?: "网络错误"
+                if (!isShowering) {
+                    showerError = ShowerError(e.message ?: "网络错误", ShowerErrorKind.NETWORK)
+                }
             } finally { isStartingShower = false }
         }
     }
@@ -796,6 +825,13 @@ class MainViewModel : ViewModel() {
         campusBalance = null
         phone = ""
         useCodeLoaded = false
+        // 未支付账单和代扣锁是**跟账号走的**：不清的话，换账号后开阀失败弹窗会列出
+        // 上一任的账单和金额，还能用新账号的凭证去扣它；锁更麻烦——
+        // 万一扣款协程在启动前就被取消（logout/挤号都会 cancel sessionJob），
+        // 清锁那行永远跑不到，之后所有代扣都会静默失效，只能杀进程
+        unpaidBills = emptyList()
+        deductingConsumeDate = null
+        unpaidSeq++
     }
 
     private fun saveOrders() { PrefsHelper.saveActiveOrders(activeOrders.toList()) }
@@ -876,6 +912,10 @@ class MainViewModel : ViewModel() {
         kickedOut = true
         stopTimer()
         PrefsHelper.clear()
+        // 和 logout() 同理：账号已经失效，上一任的未支付账单和代扣锁都不能留
+        unpaidBills = emptyList()
+        deductingConsumeDate = null
+        unpaidSeq++
         // 掐断旧会话的所有在途请求，避免它们的失败响应回来干扰用户接下来的重新登录。
         // 放在最后：调用者本身就跑在 sessionJob 上，取消会连自己一起取消，
         // 而取消是协作式的——只要后面不再有挂起点，这几行仍会执行完。
@@ -1049,70 +1089,239 @@ class MainViewModel : ViewModel() {
     }
 
     /**
-     * **未支付账单**的 `consumeDate` 集合——就是俗称的「残留账单」。
+     * **未支付账单**——就是俗称的「残留账单」。
      *
      * 12 点后结束用水、或者一卡通余额不足时，服务端结算没扣成，账单会留在待扣状态。
-     * 界面据这个集合决定哪些账单显示「请求代扣」按钮。
+     * 界面靠它决定哪些账单显示「请求代扣」按钮；开阀失败时也用它来提示
+     * 「你可能是因为有未扣账单才开不了」。
      *
-     * 用 `consumeDate` 做 key，因为**代扣接口就是用它定位账单的**（不是 orderNo）。
+     * 存整个对象而不是只存日期，因为弹窗要显示**欠了多少钱**。
      */
-    var unpaidConsumeDates by mutableStateOf<Set<String>>(emptySet())
+    var unpaidBills by mutableStateOf<List<UnpaidBill>>(emptyList())
         private set
+
+    /**
+     * **真正能被补扣的账单**：`consumeDate` 非空的那些。
+     *
+     * 代扣接口就是靠 `consumeDate` 定位账单的，日期为空的一笔根本发不出去。
+     * 界面显示的笔数 / 金额、以及 [deductAllUnpaid] 实际扣的，**都必须用这一份**——
+     * 否则会出现「弹窗说共 3 笔、实际只扣 2 笔」，全为空时还会报一次假成功。
+     */
+    val deductibleBills: List<UnpaidBill>
+        get() = unpaidBills.filter { !it.consumeDate.isNullOrBlank() }
+
+    /** 未支付账单的 `consumeDate` 集合。按账单列表匹配按钮显隐时用它 */
+    val unpaidConsumeDates: Set<String>
+        get() = deductibleBills.mapNotNull { it.consumeDate }.toSet()
 
     /** 正在代扣的那条账单的 consumeDate；非空期间按钮禁用，防止连点重复扣款 */
     var deductingConsumeDate by mutableStateOf<String?>(null)
         private set
 
-    /** 拉未支付账单列表。失败保持原样，不清空——清空会让按钮凭空消失 */
+    /**
+     * 未支付列表请求的单调序号。
+     *
+     * ⚠️ 不能省。刷新入口有四个（钱包页进入、下拉刷新、主页下拉、代扣成功后），
+     * `AnimatedContent` 切页时新旧页面还会并存几百毫秒——**多个请求同时在途是常态**。
+     * 没有序号的话，先发后到的旧响应会把刚扣掉的那笔「复活」，
+     * 用户以为没扣成功再点一次，就是**扣两次**。
+     */
+    private var unpaidSeq = 0
+
+    /** 拉一次未支付列表；失败返回 null（调用方保持原样，不清空） */
+    private suspend fun fetchUnpaid(): List<UnpaidBill>? = try {
+        val resp = NetworkModule.apiService.queryUnpaidBillsSafe(NetworkModule.authFields())
+        if (resp.success) resp.data ?: emptyList() else null
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
+    }
+
+    /** 拉未支付账单列表。**失败保持原样，不清空**——清空会让按钮凭空消失 */
     fun loadUnpaidBills() {
         if (!PrefsHelper.isLoggedIn) return
+        val seq = ++unpaidSeq
+        sessionScope().launch {
+            // 只接受最新一次请求的结果，见 [unpaidSeq]
+            val list = fetchUnpaid() ?: return@launch
+            if (seq == unpaidSeq) unpaidBills = list
+        }
+    }
+
+    // ── 代扣 ──
+
+    /**
+     * 单笔代扣的结果。**「失败」和「结果未知」必须分开**。
+     *
+     * 分不清的代价很实在：请求已经发到服务端、只是没拿到答复的时候，
+     * 如果报「失败」，界面就会把按钮放回去让用户重试——而服务端可能已经扣过了，
+     * 那一下就是**扣两次**。见 [deductOnce]。
+     */
+    sealed interface DeductResult {
+        data class Ok(val consumeDate: String) : DeductResult
+
+        /** 服务端**明确**说没成（余额不足、账户异常…）。可以放心重试 */
+        data class Failed(val consumeDate: String, val reason: String?) : DeductResult
+
+        /**
+         * 请求发出去了，但没拿到答复（超时、连接断开、会话被取消…）。
+         *
+         * **绝对不能当成失败**，也不该让用户重试，只能重新查一次服务端状态来判断。
+         */
+        data class Unknown(val consumeDate: String) : DeductResult
+    }
+
+    /** 批量补扣的汇总 */
+    data class DeductSummary(
+        val ok: Int,
+        val failed: Int,
+        /** 结果未知的笔数——这些既不能说成功也不能说失败 */
+        val unknown: Int,
+        /**
+         * 第一笔失败时服务端给的原文（「余额不足」之类）。
+         *
+         * 批量路径以前只累加计数、把原因丢了，用户只能看到「请到钱包页重试」。
+         */
+        val firstFailReason: String? = null
+    )
+
+    /**
+     * 扣一笔。**这是唯一碰代扣接口的地方**，单笔和批量都走它，
+     * 免得两处流程各写一遍、改一处漏一处（而这是动钱的路径）。
+     *
+     * ⚠️ `CancellationException` 必须**先于** `Exception` 捕获并重抛：
+     * 它是 `Exception` 的子类，混进下面的 catch 里就会被当成「扣款失败」，
+     * 而请求其实已经发出去了。详见 [DeductResult.Unknown]。
+     */
+    private suspend fun deductOnce(consumeDate: String): DeductResult = try {
+        val resp = NetworkModule.apiService
+            .requestDeductSafe(consumeDate, NetworkModule.authFields())
+        if (resp.success) DeductResult.Ok(consumeDate)
+        else DeductResult.Failed(consumeDate, resp.displayMessage)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        // 超时 / 断连：请求**可能已经到达服务端**，不能当作失败
+        DeductResult.Unknown(consumeDate)
+    }
+
+    /**
+     * 「结果未知」的收尾：重查一次服务端，以它为准。
+     *
+     * 账单还在列表里 → 说明没扣成（服务端会拒绝重复扣）；不在了 → 说明扣成了。
+     * 这是唯一能确定答案的办法，**不能靠猜**。
+     */
+    private suspend fun reconcileUnpaid(): List<UnpaidBill>? {
+        val list = fetchUnpaid() ?: return null
+        // 让更早发出的刷新全部作废——这份是**刚刚**拿到的，比它们都新。
+        // 不推序号的话，一个还在路上的旧响应回来后会把这里的结论覆盖掉
+        unpaidSeq++
+        unpaidBills = list
+        return list
+    }
+
+    /**
+     * 手动请求代扣（单笔）。
+     *
+     * ⚠️ **这是动钱的接口**，防重是第一要务：
+     * - [deductingConsumeDate] 非空时**回调告知被挡住**，不静默 return
+     *   （静默的话调用方已经把弹窗关了，用户点完什么都不发生）
+     * - 成功后立刻把这条从列表里摘掉，不等网络往返
+     * - 结果未知时不摘、也不报失败，重查服务端定夺
+     */
+    fun requestDeduct(consumeDate: String, onResult: (DeductResult) -> Unit) {
+        if (consumeDate.isBlank()) return
+        if (deductingConsumeDate != null) {
+            // ⑧ 不能静默返回——调用方已经关了弹窗，用户会以为在扣
+            onResult(DeductResult.Failed(consumeDate, BUSY_MESSAGE))
+            return
+        }
+
+        deductingConsumeDate = consumeDate
         sessionScope().launch {
             try {
-                val resp = NetworkModule.apiService.queryUnpaidBillsSafe(NetworkModule.authFields())
-                if (resp.success) {
-                    unpaidConsumeDates = (resp.data ?: emptyList())
-                        .mapNotNull { it.consumeDate?.takeIf { d -> d.isNotBlank() } }
-                        .toSet()
+                val r = deductOnce(consumeDate)
+                when (r) {
+                    is DeductResult.Ok -> {
+                        unpaidBills = unpaidBills.filterNot { it.consumeDate == consumeDate }
+                        loadUnpaidBills()
+                        loadBills()
+                    }
+                    is DeductResult.Unknown -> reconcileUnpaid() ?: loadUnpaidBills()
+                    is DeductResult.Failed -> Unit
                 }
-            } catch (_: Exception) {}
+                onResult(r)
+            } catch (_: CancellationException) {
+                // 会话级取消（挤号 / 退出登录 / 重新登录）。这里**不能报失败**——
+                // 请求可能已经发出去了。清掉锁就够了，界面马上就会被替换掉
+            } finally {
+                deductingConsumeDate = null
+            }
         }
     }
 
     /**
-     * 手动请求代扣。
+     * 补扣**全部**未支付账单，一笔一笔来。
      *
-     * ⚠️ **这是动钱的接口**，防重是这里的第一要务：
-     * - [deductingConsumeDate] 非空时直接拒绝新请求（连点、重复点都会被挡掉）
-     * - 成功后立刻刷新未支付列表，把这条从里面摘出去
+     * 开阀被未扣账单卡住时用这个：只补一笔往往还是开不了阀，
+     * 而让用户回「钱包」页一笔一笔点太绕。
      *
-     * @param onResult `(成功?, 失败原因)`
+     * @param onResult 传 null 表示**一笔都没发出去**（没有可补的账单，或者被另一个代扣挡住了）
      */
-    fun requestDeduct(consumeDate: String, onResult: (Boolean, String?) -> Unit) {
-        if (consumeDate.isBlank()) return
-        if (deductingConsumeDate != null) return   // 已经有一条在扣，忽略
+    fun deductAllUnpaid(onResult: (DeductSummary?) -> Unit) {
+        if (deductingConsumeDate != null) {
+            onResult(null)          // ⑧ 被挡住了也要回调，不能静默
+            return
+        }
+        // 用和界面显示完全一致的来源，并且去重——review 发现过这里没去重，
+        // 而 unpaidConsumeDates 去了（.toSet()），同一份数据两个口径
+        val dates = unpaidConsumeDates.toList()
+        if (dates.isEmpty()) {
+            onResult(null)
+            return
+        }
 
-        deductingConsumeDate = consumeDate
+        deductingConsumeDate = dates.first()   // 同步置锁，和 requestDeduct 一致
         sessionScope().launch {
-            // 写成 try/catch 表达式：Kotlin 不允许「val 在 try 里赋值、又在 catch 里赋值」
-            val (ok, msg) = try {
-                val resp = NetworkModule.apiService
-                    .requestDeductSafe(consumeDate, NetworkModule.authFields())
-                if (resp.success) true to null
-                else false to (resp.displayMessage ?: "代扣失败")
-            } catch (_: Exception) {
-                false to "网络异常，请稍后重试"
-            }
-            deductingConsumeDate = null
-            if (ok) {
-                // 扣成功了就把这条从未支付集合里摘掉，不等网络往返——
-                // 万一刷新失败，按钮还挂在那儿，用户会以为没扣成功又点一次
-                unpaidConsumeDates = unpaidConsumeDates - consumeDate
-                loadUnpaidBills()
+            var ok = 0
+            var failed = 0
+            var unknown = 0
+            var failReason: String? = null
+            try {
+                for (d in dates) {
+                    deductingConsumeDate = d
+                    when (val r = deductOnce(d)) {
+                        is DeductResult.Ok -> {
+                            ok++
+                            unpaidBills = unpaidBills.filterNot { it.consumeDate == d }
+                        }
+                        is DeductResult.Failed -> {
+                            failed++
+                            if (failReason == null) failReason = r.reason
+                        }
+                        is DeductResult.Unknown -> unknown++
+                    }
+                }
+                // 有未知的才需要重查；全部明确成功时直接刷新即可
+                if (unknown > 0) reconcileUnpaid() ?: loadUnpaidBills() else loadUnpaidBills()
                 loadBills()
+                onResult(DeductSummary(ok, failed, unknown, failReason))
+            } catch (_: CancellationException) {
+                // 会话被取消，剩下的都没发出去。不回调——界面马上要被替换掉
+            } finally {
+                deductingConsumeDate = null
             }
-            onResult(ok, msg)
         }
     }
+
+    companion object {
+        /** 被另一个代扣挡住时给用户的说法 */
+        const val BUSY_MESSAGE = "正在处理另一笔代扣，请稍候"
+    }
+
+    /** 关掉开阀失败弹窗 */
+    fun clearShowerError() { showerError = null }
 
     /**
      * 拉学校名填进「学校」那一行。

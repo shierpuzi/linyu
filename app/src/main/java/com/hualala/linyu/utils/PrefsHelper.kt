@@ -181,6 +181,15 @@ object PrefsHelper {
         set(v) = prefs.edit().putBoolean("notifyAutoClose", v).apply()
 
     /**
+     * 「横幅提醒」——开阀失败、设备被占用、超时自动关停要从屏幕顶上弹出来。
+     *
+     * 靠**两条渠道二选一**实现（HIGH / DEFAULT），而不是改渠道优先级：
+     * 系统禁止 App 修改已存在渠道的 importance，改不动。见 `Notifier.alertChannel`。
+     */
+    var notifyAlert: Boolean get() = prefs.getBoolean("notifyAlert", true)
+        set(v) = prefs.edit().putBoolean("notifyAlert", v).apply()
+
+    /**
      * 已知「被他人占用」的设备 snCode；空串表示当前没有。
      *
      * 小组件上点开始、发现设备正被别人用着时写入，徽章随之变成「占用中」。

@@ -36,7 +36,11 @@ fun DeviceDetailDialog(
         onDismissRequest = onDismiss,
         title = {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                Text("$emoji $type", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    DeviceGlyph(emoji, emojiSize = 22.sp, iconSize = 24.dp)
+                    Spacer(Modifier.width(6.dp))
+                    Text(type, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                }
                 Text(location, fontSize = 15.sp, color = Color.Gray, fontWeight = FontWeight.Medium)
             }
         },

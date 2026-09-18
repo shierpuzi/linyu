@@ -699,8 +699,15 @@ private fun UseCodeRedeemDialog(
     val blocked = useCode?.resetAvailability == 0
     val blockReason = useCode?.resetAvailabilityWarMark ?: "1天只能领取一次使用码"
 
-    // 手上没有码时弹窗里空空如也，先自动换一个出来
-    LaunchedEffect(Unit) { if (!blocked && currentCode.isNullOrEmpty()) swap() }
+    // 打开弹窗就**先换一个出来**。
+    //
+    // ⚠️ 这里以前的条件是「只在手上没有码时才自动换」，结果有码的用户点「重新领取」，
+    // 弹窗里是八个短横线、点「确定领取」也不亮，看着就像坏了。
+    // 用户点这个按钮的意图本来就明摆着——「给我看一个新码」，那就直接给。
+    //
+    // 代价是打开弹窗就消耗一次当日额度（每天 20 次），官方也是这个行为：
+    // 点开领取页它就先给你生成一个候选码。
+    LaunchedEffect(Unit) { if (!blocked) swap() }
 
     AlertDialog(
         onDismissRequest = { if (!claiming) onDismiss() },
@@ -735,13 +742,33 @@ private fun UseCodeRedeemDialog(
                     Column {
                         Text("领取后替换为", color = AppColors.TextSecondary, fontSize = 12.sp)
                         Spacer(Modifier.height(2.dp))
-                        Text(
-                            candidate ?: "— — — — — — — —",
-                            fontSize = 24.sp, fontWeight = FontWeight.Black,
-                            letterSpacing = 3.sp,
-                            color = if (candidate == null || expired) AppColors.TextSecondary
-                            else AppColors.Accent
-                        )
+                        val shown = candidate
+                        if (shown.isNullOrEmpty()) {
+                            Text(
+                                "— — — — — — — —",
+                                fontSize = 24.sp, fontWeight = FontWeight.Black,
+                                letterSpacing = 3.sp, color = AppColors.TextSecondary
+                            )
+                        } else {
+                            // 后三位是**手机号后三位，固定的**；每次「换一个」换的
+                            // 只有前五位。所以高亮后三位、前五位用正文色——
+                            // 整串一个颜色的话，换了几次看着都一个样，根本分不出变化。
+                            // 卡片上是这么做的，弹窗这里以前漏了。
+                            Text(
+                                buildAnnotatedString {
+                                    withStyle(SpanStyle(
+                                        color = if (expired) AppColors.TextSecondary
+                                                else AppColors.TextPrimary
+                                    )) { append(shown.dropLast(3)) }
+                                    withStyle(SpanStyle(
+                                        color = if (expired) AppColors.TextSecondary
+                                                else AppColors.Accent
+                                    )) { append(shown.takeLast(3)) }
+                                },
+                                fontSize = 24.sp, fontWeight = FontWeight.Black,
+                                letterSpacing = 3.sp
+                            )
+                        }
                     }
                     TextButton(onClick = swap, enabled = !swapping && !claiming) {
                         Icon(Icons.Default.Refresh, null, tint = AppColors.Accent,
@@ -869,6 +896,7 @@ private fun NotifyCard() {
     var inUse by remember { mutableStateOf(PrefsHelper.notifyInUse) }
     var finished by remember { mutableStateOf(PrefsHelper.notifyFinished) }
     var autoClose by remember { mutableStateOf(PrefsHelper.notifyAutoClose) }
+    var alert by remember { mutableStateOf(PrefsHelper.notifyAlert) }
     // 系统层面允不允许发通知。Android 13+ 是运行时权限，用户随时能在系统设置里撤销，
     // 所以每次进这张卡片都重新读一遍，别信缓存
     var allowed by remember { mutableStateOf(Notifier.canNotify(context)) }
@@ -970,6 +998,12 @@ private fun NotifyCard() {
                     }
                     NotifyRow("自动关停提醒", "设备超时自己关闭时提醒", autoClose) {
                         autoClose = it; PrefsHelper.notifyAutoClose = it
+                    }
+                    // 横幅是这几条里最「吵」的一档，单独给开关。
+                    // 靠切渠道实现（见 Notifier.alertChannel），不是改渠道优先级——
+                    // 系统不允许 App 改已存在渠道的 importance
+                    NotifyRow("横幅提醒", "开阀失败、设备被占用时从屏幕顶部弹出", alert) {
+                        alert = it; PrefsHelper.notifyAlert = it
                     }
                 }
             }

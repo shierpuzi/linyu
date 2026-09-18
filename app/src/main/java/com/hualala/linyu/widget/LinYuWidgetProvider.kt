@@ -233,8 +233,26 @@ open class LinYuWidgetProvider : AppWidgetProvider() {
                     )
                 }
 
-                is OpenOutcome.Failed ->
+                /**
+                 * 开阀失败（服务端拒绝、余额不足、有未扣账单之类）。
+                 *
+                 * ⚠️ 以前这里**只写一行日志**，桌面上什么反应都没有——「正在开启…」
+                 * 转完圈直接弹回原样，用户根本不知道失败了。
+                 *
+                 * 现在分两处说：
+                 * - 卡片上闪 3 秒「开阀失败」（**不放服务端原话**——那句话能长到
+                 *   「账户异常，请检查账户信息」，卡片那条面板一行根本放不下）
+                 * - 完整原因交给**横幅通知**，用户从屏幕顶上能看全
+                 */
+                is OpenOutcome.Failed -> {
                     AppLogger.w("Widget 开阀失败: ${outcome.message}")
+                    WidgetBridge.markNotice(WidgetRenderer.DisabledReason.FAILED)
+                    Notifier.showOpenFailed(
+                        context,
+                        PrefsHelper.lastDeviceName.ifEmpty { "热水器" },
+                        outcome.message
+                    )
+                }
                 // 预算耗尽：不谎报成功也不谎报失败，改成"点击刷新"由用户手动对齐
                 OpenOutcome.Unknown -> {
                     AppLogger.w("Widget 开阀结果未知（预算耗尽）")
@@ -350,7 +368,7 @@ internal object WidgetBridge {
     private var busy: WidgetRenderer.DisabledReason? = null
     private var unknown = false
 
-    /** 需要短暂停留在桌面上的提示（目前只有「选用」失败），由 [takeNotice] 取走 */
+    /** 需要短暂停留在桌面上的提示（「选用」失败、开阀失败），由 [takeNotice] 取走 */
     private var notice: WidgetRenderer.DisabledReason? = null
 
     fun markBusy(reason: WidgetRenderer.DisabledReason) {

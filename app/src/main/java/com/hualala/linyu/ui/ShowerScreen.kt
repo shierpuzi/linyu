@@ -64,7 +64,8 @@ fun ShowerScreen(
             // 再叠一个 72sp 的表情符号会直接盖在图上，很突兀。
             // 只针对自定义背景；默认渐变背景保留 emoji（洗手台 / 卫生间都一样）
             if (!customBg) {
-                Text(emoji, fontSize = 72.sp)
+                // 尺寸保持 72 —— 原来 emoji 是 72sp，图标给 72dp 视觉体量才对得上
+                DeviceGlyph(emoji, emojiSize = 72.sp, iconSize = 72.dp)
 
                 Spacer(Modifier.height(8.dp))
             }

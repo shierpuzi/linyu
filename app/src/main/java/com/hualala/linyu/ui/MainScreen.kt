@@ -105,6 +105,10 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
         // 真实余额，继续显示「手动填写」和「并非真实余额」。三个入口都拉一次。
         viewModel.loadCampusBalance()
         viewModel.loadSchoolName()
+        // 未支付账单也要在这里拉一次：开阀失败弹窗的「立即补扣」靠它。
+        // 只在钱包页拉的话，冷启动直接开阀失败时列表是空的，
+        // 弹窗会退化成只有「知道了」——正好把这个功能的主要场景漏掉
+        viewModel.loadUnpaidBills()
         viewModel.initManagers(context)
         // 已授权就静默开始扫描（老用户无感知）；没授权不再自动弹窗，
         // 改由界面上的「开启扫描」按钮触发，避免登录完突然被要定位权限
@@ -317,6 +321,96 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
             onConfirm = { viewModel.startShower(phone) })
     }
 
+    // ── 开阀失败 ──
+    //
+    // 以前 `showerError` 是**只写不读**的：失败时用户只看到「正在开启热水器…」消失，
+    // 然后什么都不发生，完全不知道是失败了还是没点上。
+    viewModel.showerError?.let { err ->
+        // ⚠️ **只有服务端明确拒绝**才可能和欠费有关。网络异常、设备被占用、结果未知
+        // 都跟账单无关——把它们也引导到「补扣」，用户会因为一次 WiFi 掉线去白扣钱
+        val bills = if (err.kind == ShowerErrorKind.SERVER_REJECTED) viewModel.deductibleBills
+                    else emptyList()
+
+        // 金额是服务端给的**字符串**，解析不出来时**不能悄悄按 0 算**：
+        // 这张弹窗存在的唯一目的就是「会动钱，再停一下」，数字失真就失去意义了
+        val amounts = bills.map { it.consumeMoney?.toDoubleOrNull() }
+        val total = amounts.sumOf { it ?: 0.0 }
+        val amountKnown = amounts.all { it != null }
+
+        // key 带上 err：错误换了一条时确认态要跟着复位，不然「确认扣款」会
+        // 叠在一条新错误上
+        var confirming by remember(err) { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = { viewModel.clearShowerError() },
+            title = {
+                Text(
+                    if (bills.isEmpty()) "开阀失败" else "开阀失败 · 有未扣账单",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column {
+                    Text(err.message, color = AppColors.TextPrimary, fontSize = 14.sp)
+                    if (bills.isNotEmpty()) {
+                        Spacer(Modifier.height(12.dp))
+                        Text("检测到 ${bills.size} 笔没扣成功的账单：",
+                            color = AppColors.Warning, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(6.dp))
+                        bills.forEach { bill ->
+                            Text(
+                                "· ¥${bill.consumeMoney ?: "?"}   ${bill.consumeDate?.take(16) ?: ""}",
+                                color = AppColors.TextSecondary, fontSize = 12.sp
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text("账户有欠费时服务端会拒绝开阀",
+                            color = AppColors.TextSecondary, fontSize = 11.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                if (bills.isNotEmpty()) {
+                    Button(
+                        onClick = { confirming = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.Warning)
+                    ) { Text("立即补扣") }
+                } else {
+                    TextButton(onClick = { viewModel.clearShowerError() }) { Text("知道了") }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.clearShowerError() }) { Text("关闭") }
+            }
+        )
+
+        // 扣钱前的二次确认（和钱包页单笔代扣共用同一个组件，文案不会各写一份）
+        if (confirming) {
+            DeductConfirmDialog(
+                amount = if (amountKnown) total else null,
+                detail = "共 ${bills.size} 笔",
+                onConfirm = {
+                    confirming = false
+                    viewModel.clearShowerError()
+                    viewModel.deductAllUnpaid { s ->
+                        viewModel.toastMessage = when {
+                            // null = 一笔都没发出去（没有可补的，或被另一个代扣挡住）
+                            s == null -> "没有可补扣的账单，或正在处理另一笔代扣"
+                            s.unknown > 0 && s.ok == 0 && s.failed == 0 ->
+                                "补扣结果未知，请下拉刷新确认后再操作"
+                            s.unknown > 0 ->
+                                "成功 ${s.ok} 笔、失败 ${s.failed} 笔、${s.unknown} 笔结果未知"
+                            s.failed == 0 -> "补扣成功，再试一次开阀"
+                            s.ok == 0 -> s.firstFailReason ?: "补扣失败，请到「钱包」页重试"
+                            else -> "成功 ${s.ok} 笔、失败 ${s.failed} 笔"
+                        }
+                    }
+                },
+                onDismiss = { confirming = false }
+            )
+        }
+    }
+
     // 开始使用中的加载提示（开阀确认需要几秒）
     if (viewModel.isStartingShower) {
         AlertDialog(
@@ -395,7 +489,10 @@ private fun ActiveOrderCard(order: com.hualala.linyu.model.ActiveOrder, viewMode
                         else -> AppColors.Accent
                     }
                 ),
-                contentAlignment = Alignment.Center) { Text(order.deviceEmoji, fontSize = 22.sp) }
+                contentAlignment = Alignment.Center) {
+                // 花洒/牙刷走图标，其余（饮水机）仍画 emoji，见 DeviceGlyph
+                DeviceGlyph(order.deviceEmoji, emojiSize = 22.sp, iconSize = 26.dp)
+            }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
                 // 和下面的「上次使用」卡片一样用 TailEllipsisText：
@@ -442,7 +539,9 @@ private fun LastDeviceCard(viewModel: MainViewModel, phone: String) {
                         else -> Color(0xFF2563EB)
                     }
                 ),
-                contentAlignment = Alignment.Center) { Text(viewModel.lastDeviceEmoji, fontSize = 22.sp) }
+                contentAlignment = Alignment.Center) {
+                DeviceGlyph(viewModel.lastDeviceEmoji, emojiSize = 22.sp, iconSize = 26.dp)
+            }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
                 // 用尾部优先省略：设备名和 MAC 都是后半段才有辨识度
@@ -541,7 +640,9 @@ private fun DeviceCard(device: NearbyDevice, onClick: () -> Unit) {
     ) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(device.typeColor),
-                contentAlignment = Alignment.Center) { Text(device.typeEmoji, fontSize = 22.sp) }
+                contentAlignment = Alignment.Center) {
+                DeviceGlyph(device.typeEmoji, emojiSize = 22.sp, iconSize = 26.dp)
+            }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(device.displayName, fontWeight = FontWeight.SemiBold,

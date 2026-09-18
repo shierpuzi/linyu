@@ -17,7 +17,9 @@ import com.hualala.linyu.R
  * 两条渠道，按「要不要打扰人」分开：
  * - [CHANNEL_IN_USE] **低优先级**：用水期间常驻的状态条，不该响铃震动，
  *   跟音乐播放器那种常驻通知是同一类。用户可以单独把它静音而不影响别的通知。
- * - [CHANNEL_EVENTS] **默认优先级**：真正有事发生的通知（结束、自动关停、设备被占）。
+ * - [CHANNEL_EVENTS] **默认优先级**：结束提醒这类「知道了就行」的通知。
+ * - [CHANNEL_ALERT] **高优先级**：开阀失败 / 设备被占用 / 超时自动关停，会弹横幅。
+ *   横幅必须 IMPORTANCE_HIGH，DEFAULT 不会弹——所以单独建了两条渠道按开关切。
  *
  * 每种通知都由 [PrefsHelper] 里对应的开关控制，用户在「我的 → 通知」里能单独关掉。
  */
@@ -27,11 +29,18 @@ object Notifier {
     private const val CHANNEL_IN_USE_QUIET = "linyu_in_use_quiet"
     private const val CHANNEL_EVENTS = "linyu_events"
 
+    /** 会弹横幅的那一类（IMPORTANCE_HIGH） */
+    private const val CHANNEL_ALERT = "linyu_alert"
+
+    /** 关掉「横幅提醒」后改走这条（IMPORTANCE_DEFAULT，同一条通知不弹横幅） */
+    private const val CHANNEL_ALERT_QUIET = "linyu_alert_quiet"
+
     /** 常驻那条的固定 id：同一个 id 反复 post 就是「更新」而不是「堆叠」 */
     const val ID_IN_USE = 1001
     const val ID_FINISHED = 1002
     const val ID_AUTO_CLOSED = 1003
     const val ID_OCCUPIED = 1004
+    const val ID_OPEN_FAILED = 1005
 
     /** 通知里「结束使用」按钮的动作，由 ShowerWatchService 接 */
     const val ACTION_STOP_SHOWER = "com.hualala.linyu.notify.ACTION_STOP_SHOWER"
@@ -66,7 +75,30 @@ object Notifier {
                 CHANNEL_EVENTS,
                 "用水提醒",
                 NotificationManager.IMPORTANCE_DEFAULT
-            ).apply { description = "开始、结束、自动关停等提醒" }
+            ).apply { description = "开始、结束等提醒" }
+        )
+
+        // ── 重要提醒：会**弹横幅**（heads-up）的那一类 ──
+        //
+        // ⚠️ 横幅要 IMPORTANCE_HIGH。DEFAULT 只是响一声、不会从屏幕顶上弹出来——
+        // 之前三条渠道最高才 DEFAULT，所以全 App 一个横幅都没有。
+        //
+        // ⚠️ 渠道的 importance **创建之后改不了**（系统不允许 App 改已存在渠道），
+        // 所以「关掉横幅」不能靠改这条渠道，只能另建一条 DEFAULT 的，
+        // 发送时按开关二选一——和上面 IN_USE / IN_USE_QUIET 是同一套办法。
+        nm.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ALERT,
+                "重要提醒",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply { description = "开阀失败、设备被占用、超时自动关停，会从屏幕顶部弹出横幅" }
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ALERT_QUIET,
+                "重要提醒（不弹横幅）",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply { description = "关闭「横幅提醒」后，这些通知只响一声，不再弹横幅" }
         )
     }
 
@@ -137,56 +169,36 @@ object Notifier {
         runCatching { NotificationManagerCompat.from(context).cancel(ID_IN_USE) }
     }
 
-    /** 手动停止 */
-    fun showFinished(context: Context, deviceName: String, elapsedSec: Int, money: Double) {
-        if (!PrefsHelper.notifyEnabled || !PrefsHelper.notifyFinished) return
-        showResult(context, ID_FINISHED, CHANNEL_EVENTS, "使用结束 · ${shortName(deviceName)}",
-            elapsedSec, money, auto = false)
-    }
-
-    /** 设备超时自动关停 */
-    fun showAutoClosed(context: Context, deviceName: String, elapsedSec: Int, money: Double) {
-        if (!PrefsHelper.notifyEnabled || !PrefsHelper.notifyAutoClose) return
-        showResult(context, ID_AUTO_CLOSED, CHANNEL_EVENTS, "设备已自动关停 · ${shortName(deviceName)}",
-            elapsedSec, money, auto = true)
-    }
-
-    /** 想开的水正被别人用着 */
-    fun showOccupied(context: Context, deviceName: String) {
-        if (!PrefsHelper.notifyEnabled || !canNotify(context)) return
-        ensureChannels(context)
-
-        // 标题只写状态、正文才带设备名：设备名很长（「某小区 3号楼南 3层 320房」），
-        // 放在标题里会把通知栏那一行占满，一眼看不出是"发生了什么"。
-        val n = NotificationCompat.Builder(context, CHANNEL_EVENTS)
-            .setSmallIcon(R.drawable.ic_notify_shower)
-            .setContentTitle("设备占用中")
-            .setContentText("${shortName(deviceName)}正在被他人使用")
-            .setStyle(NotificationCompat.BigTextStyle()
-                .bigText("${shortName(deviceName)}正在被他人使用。等对方用完再试，或者在小组件上「选用」换一台设备。"))
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setContentIntent(openApp(context, tab = 0))
-            .build()
-
-        notify(context, ID_OCCUPIED, n)
-    }
-
-    private fun showResult(
+    /**
+     * 「事件类」通知的**唯一出口**。
+     *
+     * 以前 showFinished / showAutoClosed / showOccupied / showOpenFailed 是四份
+     * 各自十几行的 Builder 复制粘贴，渠道和优先级还得各写一遍——而这两件事**必须成对**，
+     * 漏了优先级某些 ROM 就静默不弹（这个坑注释里记着，但复制时照样会漏）。
+     *
+     * @param alert true = 横幅类（开阀失败 / 设备被占用 / 超时关停），从屏幕顶上弹出
+     * @param tab   点通知落到哪个 tab：0 首页 / 1 账单
+     */
+    private fun postEvent(
         context: Context,
         id: Int,
-        channel: String,
+        alert: Boolean,
         title: String,
-        elapsedSec: Int,
-        money: Double,
-        auto: Boolean
+        body: String,
+        tab: Int = 0
     ) {
         if (!canNotify(context)) return
         ensureChannels(context)
 
-        val timeText = formatDuration(elapsedSec)
-        val moneyText = if (money > 0) "¥%.2f".format(money) else "无消费"
-        val body = "用时 $timeText · 消费 $moneyText"
+        // 渠道和优先级**一次算出来**。分成两个函数的话，调用方得自己记住
+        // 「传了 alert 渠道就得配 alert 优先级」，而类型上没有任何约束
+        val (channel, priority) = if (!alert) {
+            CHANNEL_EVENTS to NotificationCompat.PRIORITY_DEFAULT
+        } else if (PrefsHelper.notifyAlert) {
+            CHANNEL_ALERT to NotificationCompat.PRIORITY_HIGH
+        } else {
+            CHANNEL_ALERT_QUIET to NotificationCompat.PRIORITY_DEFAULT
+        }
 
         val n = NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_notify_shower)
@@ -194,11 +206,60 @@ object Notifier {
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setContentIntent(openApp(context, tab = if (auto) 1 else 0))
+            .setPriority(priority)
+            .setContentIntent(openApp(context, tab))
             .build()
 
         notify(context, id, n)
+    }
+
+    /** 结果条正文：用时 + 消费金额 */
+    private fun resultBody(elapsedSec: Int, money: Double): String {
+        val timeText = formatDuration(elapsedSec)
+        val moneyText = if (money > 0) "¥%.2f".format(money) else "无消费"
+        return "用时 $timeText · 消费 $moneyText"
+    }
+
+    /** 手动停止。点通知去账单页——刚消费完，多半想看这笔账 */
+    fun showFinished(context: Context, deviceName: String, elapsedSec: Int, money: Double) {
+        if (!PrefsHelper.notifyEnabled || !PrefsHelper.notifyFinished) return
+        postEvent(context, ID_FINISHED, alert = false,
+            title = "使用结束 · ${shortName(deviceName)}",
+            body = resultBody(elapsedSec, money),
+            tab = 1)
+    }
+
+    /** 设备超时自动关停。同样去账单页 */
+    fun showAutoClosed(context: Context, deviceName: String, elapsedSec: Int, money: Double) {
+        if (!PrefsHelper.notifyEnabled || !PrefsHelper.notifyAutoClose) return
+        postEvent(context, ID_AUTO_CLOSED, alert = true,
+            title = "设备已自动关停 · ${shortName(deviceName)}",
+            body = resultBody(elapsedSec, money),
+            tab = 1)
+    }
+
+    /** 想开的水正被别人用着。这条不是「某一单在用」，回首页就行 */
+    fun showOccupied(context: Context, deviceName: String) {
+        if (!PrefsHelper.notifyEnabled) return
+        // 标题只写状态、正文才带设备名：设备名很长（「某小区 3号楼南 3层 320房」），
+        // 放在标题里会把通知栏那一行占满，一眼看不出是"发生了什么"
+        postEvent(context, ID_OCCUPIED, alert = true,
+            title = "设备占用中",
+            body = "${shortName(deviceName)}正在被他人使用。等对方用完再试，或者在小组件上「选用」换一台设备。")
+    }
+
+    /**
+     * 开阀失败（服务端拒绝：余额不足、有未扣账单、账户异常…）。
+     *
+     * 桌面小组件那边只显示得下「开阀失败」四个字，完整原因放不下，
+     * 所以**由这条通知把服务端的原话带出来**——开阀失败时用户多半正在桌面上
+     * 点小组件，横幅是他唯一能看到原因的地方。
+     */
+    fun showOpenFailed(context: Context, deviceName: String, reason: String) {
+        if (!PrefsHelper.notifyEnabled) return
+        postEvent(context, ID_OPEN_FAILED, alert = true,
+            title = "开阀失败 · ${shortName(deviceName)}",
+            body = reason)
     }
 
     /**

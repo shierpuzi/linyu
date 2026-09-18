@@ -37,7 +37,6 @@ sealed interface WidgetState {
     data class Idle(
         val deviceName: String,
         val deviceDesc: String,
-        val emoji: String,
         /** 当前控制设备的序列号。「上次消费」是按设备分开存的，要靠它取对应的一条 */
         val snCode: String,
         /**
@@ -52,7 +51,6 @@ sealed interface WidgetState {
     data class Running(
         val deviceName: String,
         val deviceDesc: String,
-        val emoji: String,
         val preDeduct: Double,
         val startedAtMs: Long
     ) : WidgetState
@@ -97,19 +95,17 @@ object WidgetRenderer {
 
         val name = PrefsHelper.lastDeviceName.ifEmpty { "上次使用的设备" }
         val desc = deviceDesc()
-        val emoji = PrefsHelper.lastDeviceEmoji.ifEmpty { "🚿" }
 
         return if (ShowerController.isRunning(snCode)) {
             WidgetState.Running(
                 deviceName = name,
                 deviceDesc = desc,
-                emoji = emoji,
                 preDeduct = ShowerController.activeOrderFor(snCode)?.preDeduct ?: 0.0,
                 startedAtMs = ShowerController.startedAt(snCode)
             )
         } else {
             WidgetState.Idle(
-                name, desc, emoji, snCode,
+                name, desc, snCode,
                 // 记住的占用设备就是当前这台，才显示「占用中」
                 occupied = PrefsHelper.occupiedSnCode.isNotEmpty() &&
                     PrefsHelper.occupiedSnCode == snCode
@@ -130,8 +126,16 @@ object WidgetRenderer {
         disabled: DisabledReason? = null,
         tab: Int = 0
     ): RemoteViews {
+        // 面板上显示的那句话。
+        //
+        // 不用服务端的原文——「账户异常，请检查账户信息」这种句子在 2x2 的面板上
+        // 根本放不下，完整原因由通知横幅负责（见 LinYuWidgetProvider 的 Failed 分支）
+        val noticeText = disabled?.text
+
         // 1x1 是另一套结构（没有头/面板/胶囊按钮），单独一条路
-        if (size == WidgetSize.TILE) return buildTile(context, state, appWidgetId, disabled)
+        if (size == WidgetSize.TILE) {
+            return buildTile(context, state, appWidgetId, disabled)
+        }
 
         // 只有一套固定样式，不分深浅：
         // 小组件压在用户的壁纸上，深浅切换要么看不出变化、要么和壁纸撞色，
@@ -167,8 +171,8 @@ object WidgetRenderer {
 
         when (state) {
             WidgetState.LoggedOut -> {
-                bindHeader(views, "未登录", "点此打开淋浴", "🔒", running = false, showDot = false)
-                bindPanels(context, views, appWidgetId, idleText = "—", runningText = null, busyText = disabled?.text)
+                bindHeader(views, "未登录", "点此打开淋浴", running = false, showDot = false)
+                bindPanels(context, views, appWidgetId, idleText = "—", runningText = null, busyText = noticeText)
                 bindAct(running = false, disabled = disabled, action = "")
             }
 
@@ -180,9 +184,9 @@ object WidgetRenderer {
                 bindHeader(
                     views, "还没有用过设备",
                     if (wide) "点按钮选附近设备" else "点此打开淋浴",
-                    "🚿", running = false, showDot = false
+                    running = false, showDot = false
                 )
-                bindPanels(context, views, appWidgetId, idleText = "—", runningText = null, busyText = disabled?.text)
+                bindPanels(context, views, appWidgetId, idleText = "—", runningText = null, busyText = noticeText)
                 bindAct(
                     running = false, disabled = disabled, action = "",
                     explicit = if (wide) tabIntent(context, appWidgetId, TAB_NEARBY)
@@ -191,19 +195,19 @@ object WidgetRenderer {
             }
 
             is WidgetState.Idle -> {
-                bindHeader(views, shownName, state.deviceDesc, state.emoji,
+                bindHeader(views, shownName, state.deviceDesc,
                     running = false, showDot = true, occupied = state.occupied)
                 bindPanels(
                     context, views, appWidgetId,
                     idleText = lastConsumeText(state.snCode),
                     runningText = null,
-                    busyText = disabled?.text
+                    busyText = noticeText
                 )
                 bindAct(running = false, disabled = disabled, action = LinYuWidgetProvider.ACTION_START)
             }
 
             is WidgetState.Running -> {
-                bindHeader(views, shownName, state.deviceDesc, state.emoji,
+                bindHeader(views, shownName, state.deviceDesc,
                     running = true, showDot = true)
                 bindPanels(
                     context, views, appWidgetId,
@@ -211,7 +215,7 @@ object WidgetRenderer {
                     runningText = "预扣 · ¥%.2f".format(state.preDeduct),
                     timerText = null,
                     chronometerBase = chronometerBase(state.startedAtMs),
-                    busyText = disabled?.text
+                    busyText = noticeText
                 )
                 bindAct(running = true, disabled = disabled, action = LinYuWidgetProvider.ACTION_STOP)
             }
@@ -252,21 +256,25 @@ object WidgetRenderer {
         // 未登录 / 没有设备：点它没有任何可执行的动作，直接开 App 让用户去处理
         val needsApp = state is WidgetState.LoggedOut || state is WidgetState.NoDevice
 
-        // 正在开阀 / 关阀（会持续好几秒）→ 盖一层转圈。
-        // 「他人使用中」和「切换失败」是**结果**不是过程，不该转圈——
-        // 前者马上会把整块变成橙色，后者本来就没有对应动作。
-        val spinning = disabled != null &&
-            disabled != DisabledReason.PICK_FAILED &&
-            disabled != DisabledReason.IN_USE_BY_OTHERS
+        // 「正在开阀 / 关阀」是**过程**（要等好几秒）→ 盖一层转圈。
+        // 「开阀失败」「他人使用中」「切换失败」是**结果** → 不转圈，改把瓷砖上的小字换掉。
+        // 用 DisabledReason.isNotice 判断，别再手写枚举名单——加一个失败原因就会漏一处
+        val noticeOnly = disabled?.isNotice == true
+        val spinning = disabled != null && !noticeOnly
 
-        // 空闲那块是三种情况共用的（真·空闲 / 未登录 / 没选过设备），
-        // 只有顶上的字不同——「未登录」的时候写「空闲」会让人以为能直接开阀
+        // 空闲那块是三种情况共用的（真·空闲 / 未登录 / 没选过设备 / 一次失败提示），
+        // 只有顶上的字不同——「未登录」的时候写「空闲」会让人以为能直接开阀。
+        //
+        // ⚠️ 失败时这里用**枚举自带的短文案**（「开阀失败」4 个字），不用服务端那句
+        // 「账户异常，请检查账户信息」——瓷砖上只有一行 8sp 的位置，长句子放不下，
+        // 缩短版本总比截成半句强。详细原因由 App 内的弹窗负责。
         val idleLabel = when {
-            state is WidgetState.LoggedOut -> R.string.widget_1x1_state_logged_out
-            state is WidgetState.NoDevice -> R.string.widget_1x1_state_no_device
-            else -> R.string.widget_1x1_state_idle
+            noticeOnly -> disabled!!.shortText
+            state is WidgetState.LoggedOut -> context.getString(R.string.widget_1x1_state_logged_out)
+            state is WidgetState.NoDevice -> context.getString(R.string.widget_1x1_state_no_device)
+            else -> context.getString(R.string.widget_1x1_state_idle)
         }
-        views.setTextViewText(R.id.widget_tile_idle_label, context.getString(idleLabel))
+        views.setTextViewText(R.id.widget_tile_idle_label, idleLabel)
 
         val showIdle = !running && !occupied && !spinning
         views.setViewVisibility(R.id.widget_tile_idle, if (showIdle) View.VISIBLE else View.GONE)
@@ -318,7 +326,6 @@ object WidgetRenderer {
         views: RemoteViews,
         name: String,
         desc: String,
-        emoji: String,
         running: Boolean,
         showDot: Boolean,
         occupied: Boolean = false
@@ -688,7 +695,12 @@ object WidgetRenderer {
     }
 
     /** 操作进行中时按钮要显示成什么 */
-    enum class DisabledReason(val text: String) {
+    /**
+     * @param text      2x2 / 2x4 上显示的文案，放在那条能放一句话的面板里
+     * @param shortText 1x1 瓷砖上显示的一行 8sp 小字。默认和 [text] 一样；
+     *                  只有 [text] 太长、瓷砖上放不下的才需要单独给一个短的
+     */
+    enum class DisabledReason(val text: String, val shortText: String = text) {
         STARTING("正在开启…"),
         STOPPING("正在关闭…"),
         REFRESHING("正在刷新…"),
@@ -696,7 +708,7 @@ object WidgetRenderer {
         UNKNOWN("状态未知，点此刷新"),
 
         /** 「选用」失败：查不到设备或网络不通。短时间展示一下就自动消失 */
-        PICK_FAILED("切换失败，请稍后再试"),
+        PICK_FAILED("切换失败，请稍后再试", shortText = "切换失败"),
 
         /**
          * 想开的设备正被别人用着。
@@ -704,7 +716,24 @@ object WidgetRenderer {
          * 文案刻意短——小组件的忙碌面板只有一行，2x2 上大约只放得下 5 个字。
          * 「可以再点」这个意思靠徽章变成「占用中」+ 按钮仍然可点来传达。
          */
-        IN_USE_BY_OTHERS("他人使用中")
+        IN_USE_BY_OTHERS("他人使用中"),
+
+        /**
+         * 开阀失败（服务端拒绝、余额不足之类）。
+         *
+         * 文案刻意短——桌面上只有一行位置，服务端那句「账户异常，请检查账户信息」
+         * 根本放不下，**完整原因由 `Notifier.showOpenFailed` 发横幅通知带出来**。
+         * 以前失败只写一行日志，桌面上什么反应都没有，用户以为没点上。
+         */
+        FAILED("开阀失败");
+
+        /**
+         * 是「结果」而不是「过程」——渲染时不转圈，而且**按钮照常可点**。
+         *
+         * 用户在失败后想再点一次重试是很自然的，把点击清掉会让他以为小组件坏了。
+         */
+        val isNotice: Boolean
+            get() = this == FAILED || this == PICK_FAILED || this == IN_USE_BY_OTHERS
     }
 
     private fun actionIntent(
@@ -712,9 +741,13 @@ object WidgetRenderer {
         appWidgetId: Int,
         disabled: DisabledReason?,
         action: String
-    ): PendingIntent? = when (disabled) {
-        null -> toggleIntent(context, appWidgetId, action)
-        DisabledReason.UNKNOWN -> toggleIntent(context, appWidgetId, LinYuWidgetProvider.ACTION_REFRESH)
+    ): PendingIntent? = when {
+        // 没有 disabled，或只是「结果」提示（开阀失败 / 切换失败 / 他人使用中）→ 照常可点。
+        // 用户在这些情况下多半就是想重试，把点击清掉会让小组件看起来坏了
+        disabled == null || disabled.isNotice ->
+            toggleIntent(context, appWidgetId, action)
+        disabled == DisabledReason.UNKNOWN ->
+            toggleIntent(context, appWidgetId, LinYuWidgetProvider.ACTION_REFRESH)
         else -> null
     }
 

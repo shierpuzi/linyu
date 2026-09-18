@@ -117,7 +117,6 @@ object ShowerController {
 
     fun lastDeviceSnCode(): String = PrefsHelper.lastDeviceSnCode
     fun lastDeviceName(): String = PrefsHelper.lastDeviceName
-    fun lastDeviceEmoji(): String = PrefsHelper.lastDeviceEmoji
 
     // ════════════════════════════════════════════
     //  动作
