@@ -37,7 +37,7 @@
 | 洗衣机 | 2026-10-05 10:25 | `00000000000000000000000000000002` |
 | 吹风机 | 2026-10-24 00:12 | `00000000000000000000000000000001` |
 
-同一个账号（`accountId=10000101` / `13800138000`），令牌两回事 → 说明它是**每次登录新生成的会话**。
+同一个账号（`accountId=10000101` / `153****2282`），令牌两回事 → 说明它是**每次登录新生成的会话**。
 
 ---
 
@@ -52,10 +52,10 @@
 ```
 https://v3-api.china-qzxy.cn/account/wallet
   ?accountId=10000101
-  &telPhone=13800138000
+  &telPhone=153****2282
   &phoneSystem=android
   &loginCode=00000000000000000000000000000001     ← 就是它
-  &telephone=13800138000
+  &telephone=153****2282
   &projectId=3356
   &userId=10000001
   &version=6.5.29
@@ -81,9 +81,9 @@ https://v3-api.china-qzxy.cn/account/wallet
 `POST /order/tcpDevice/downRate/modeOrder`，吹风机下单，body 逐字节如下：
 
 ```
-xfModel=29&accountId=10000101&telPhone=13800138000&snCode=C47F0E2351BE
+xfModel=29&accountId=10000101&telPhone=153****2282&snCode=C47F0E2351BE
 &phoneSystem=android&loginCode=00000000000000000000000000000001
-&telephone=13800138000&isHaier=0&projectId=3356&userId=10000001&version=6.5.29
+&telephone=153****2282&isHaier=0&projectId=3356&userId=10000001&version=6.5.29
 ```
 
 请求头（**复现时这两个头不能少**）：
@@ -132,7 +132,7 @@ Host: v3-api.china-qzxy.cn
 
 ```
 GET /user/verification/code/get
-    ?telephone=13800138000
+    ?telephone=153****2282
     &secret=f000554d9cb90c44bd0ae2ded9a847aa
     &typeId=3
     &platform=1
@@ -151,7 +151,7 @@ GET /user/verification/code/get
 POST /user/registerAndLogin
 Content-Type: application/x-www-form-urlencoded
 
-telephone=13800138000&smsCode=396948&type=5&phoneSystem=android&version=6.5.29
+telephone=153****2282&smsCode=396948&type=5&phoneSystem=android&version=6.5.29
 ```
 
 > ⚠️ 这个接口**不带** `loginCode` —— 它就是用来换 loginCode 的。
@@ -165,7 +165,7 @@ telephone=13800138000&smsCode=396948&type=5&phoneSystem=android&version=6.5.29
   "errorMessage": "成功",
   "data": {
     "userId": 10000001,
-    "telephone": "13800138000",
+    "telephone": "153****2282",
     "loginCode": "00000000000000000000000000000001",
     "tags": "alLyrelease,999",
     "hasPassword": true,
@@ -186,7 +186,7 @@ telephone=13800138000&smsCode=396948&type=5&phoneSystem=android&version=6.5.29
 POST /user/login
 Content-Type: application/x-www-form-urlencoded
 
-telephone=13800138000&password=XXXXXXXXXX&phoneSystem=android&type=0&version=6.5.29
+telephone=153****2282&password=XXXXXXXXXX&phoneSystem=android&type=0&version=6.5.29
 ```
 
 `password` = **MD5(明文密码) 取后 10 位大写**。例：
@@ -265,7 +265,7 @@ HTTP/1.1 200
 ### 5.2 最省事的验证请求
 
 ```bash
-curl 'https://v3-api.china-qzxy.cn/account/wallet?accountId=10000101&telPhone=13800138000&phoneSystem=android&loginCode=<你的>&telephone=13800138000&projectId=3356&userId=10000001&version=6.5.29' \
+curl 'https://v3-api.china-qzxy.cn/account/wallet?accountId=10000101&telPhone=153****2282&phoneSystem=android&loginCode=<你的>&telephone=153****2282&projectId=3356&userId=10000001&version=6.5.29' \
   -H 'User-Agent: okhttp/4.2.2' \
   -H 'Config-Project: 3356' \
   -H 'Config-Keys: module_list,advertise_type,question_list,service_phone_list,banner_list_app,activity_list_app,aliCard_popup_config'
@@ -370,7 +370,7 @@ secret = MD5(raw)         // 32 位小写十六进制
 
 ```
 13800138000 → "138" + "8000" + "klcx" = "1388000klcx" → f000554d9cb90c44bd0ae2ded9a847aa
-13800138000 → "153" + "2282" + "klcx" = "1532282klcx" → f000554d9cb90c44bd0ae2ded9a847aa
+153****2282 → "153" + "2282" + "klcx" = "1532282klcx" → f000554d9cb90c44bd0ae2ded9a847aa
 ```
 
 因为算法里**不含任何设备密钥**，所以任何手机号都能在本地算出自己的 secret。
@@ -390,8 +390,8 @@ secret = MD5(raw)         // 32 位小写十六进制
 | `userId` | `10000001` | 用户 ID |
 | `accountId` | `10000101` | 账户 ID（跟 projectId 成对） |
 | `projectId` | `3356` | 项目/学校 ID |
-| `telephone` | `13800138000` | 手机号 |
-| `telPhone` | `13800138000` | **同上，必须也传** |
+| `telephone` | `153****2282` | 手机号 |
+| `telPhone` | `153****2282` | **同上，必须也传** |
 | `phoneSystem` | `android` | 固定 |
 | `version` | `6.5.29` | 跟 App 版本 |
 
