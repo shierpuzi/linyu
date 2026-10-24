@@ -46,6 +46,65 @@ android {
         resourceConfigurations += listOf("zh", "en")
     }
 
+    // ── 共存包 ────────────────────────────────────────────────
+    //
+    // `dev` flavor 只改 applicationId，让它和原版（com.hualala.linyu）以及官方
+    // 趣智校园 App 都能同时装在一台手机上。
+    //
+    // 为什么要共存：三个 App 共用同一个 loginCode，任何一个登录都会把另外两个挤下线。
+    // 想让官方 App 保持登录（你平时要用），同时验证第三个 App，就必须用不同包名。
+    //
+    // 产物：app-dev-debug.apk
+    flavorDimensions += "dist"
+    productFlavors {
+        create("store") {
+            dimension = "dist"
+            // 原版，什么都不改。
+            // ⚠️ 预置登录态**只在 dev 里注入**：写在 defaultConfig 会让两个 flavor
+            //    都带上凭证（实测踩过一次，原版 APK 里真的能搜到 loginCode）。
+            //    这里显式给空串，保证 store 包永远不含任何凭证。
+            buildConfigField("String", "PREFILL_LOGIN_CODE", "\"\"")
+            buildConfigField("String", "PREFILL_USER_ID", "\"\"")
+            buildConfigField("String", "PREFILL_ACCOUNT_ID", "\"\"")
+            buildConfigField("String", "PREFILL_PROJECT_ID", "\"\"")
+            buildConfigField("String", "PREFILL_TELEPHONE", "\"\"")
+        }
+        create("dev") {
+            dimension = "dist"
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
+            // 名字带个后缀，方便在桌面上和原版区分
+            resValue("string", "app_name", "淋浴·测试版")
+
+            // ── 预置登录态（**只在这个 flavor 里**）─────────────
+            //
+            // 值来自 local.properties（在 .gitignore 里，不入库）。
+            // 没配就是空串，PrefillAuth.available 为 false，行为同原版。
+            //
+            // 填法（linyu/local.properties）：
+            //   QZXY_PREFILL_LOGIN_CODE=xxxx
+            //   QZXY_PREFILL_USER_ID=10000001
+            //   QZXY_PREFILL_ACCOUNT_ID=10000101
+            //   QZXY_PREFILL_PROJECT_ID=3356
+            //   QZXY_PREFILL_TELEPHONE=13800138000
+            val prefill = Properties().apply {
+                if (localPropertiesFile.exists()) {
+                    localPropertiesFile.inputStream().use(::load)
+                }
+            }
+            buildConfigField("String", "PREFILL_LOGIN_CODE",
+                "\"${prefill.getProperty("QZXY_PREFILL_LOGIN_CODE").orEmpty()}\"")
+            buildConfigField("String", "PREFILL_USER_ID",
+                "\"${prefill.getProperty("QZXY_PREFILL_USER_ID").orEmpty()}\"")
+            buildConfigField("String", "PREFILL_ACCOUNT_ID",
+                "\"${prefill.getProperty("QZXY_PREFILL_ACCOUNT_ID").orEmpty()}\"")
+            buildConfigField("String", "PREFILL_PROJECT_ID",
+                "\"${prefill.getProperty("QZXY_PREFILL_PROJECT_ID").orEmpty()}\"")
+            buildConfigField("String", "PREFILL_TELEPHONE",
+                "\"${prefill.getProperty("QZXY_PREFILL_TELEPHONE").orEmpty()}\"")
+        }
+    }
+
     val releaseSigningConfig = if (releaseSigningReady) {
         signingConfigs.create("release") {
             storeFile = file(releaseKeystorePath!!)

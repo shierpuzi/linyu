@@ -23,6 +23,7 @@ import com.hualala.linyu.api.requestDeductSafe
 import com.hualala.linyu.api.setUseCodeSafe
 import com.hualala.linyu.api.getWalletSafe
 import com.hualala.linyu.api.queryUsingSafe
+import com.hualala.linyu.data.BillMerger
 import com.hualala.linyu.data.BalanceEstimator
 import com.hualala.linyu.data.BleArbiter
 import com.hualala.linyu.data.CloseOutcome
@@ -31,9 +32,11 @@ import com.hualala.linyu.ble.BleController
 import com.hualala.linyu.ble.BleConnectResult
 import com.hualala.linyu.ble.DeviceQueryState
 import com.hualala.linyu.data.BleShowerController
+import com.hualala.linyu.data.ProjectRepository
 import com.hualala.linyu.data.ShowerController
 import com.hualala.linyu.data.ShowerEvents
 import com.hualala.linyu.data.SettlementReconciler
+import com.hualala.linyu.data.canLogoutVoluntarily
 import com.hualala.linyu.service.ShowerWatchService
 import com.hualala.linyu.widget.LinYuWidget
 import com.hualala.linyu.model.AccountInfo
@@ -46,11 +49,14 @@ import com.hualala.linyu.model.DeviceInfo
 import com.hualala.linyu.model.MqttOrderMsg
 import com.hualala.linyu.model.NearbyDevice
 import com.hualala.linyu.model.UnpaidBill
+import com.hualala.linyu.model.UserProject
 import com.hualala.linyu.model.WalletData
+import com.hualala.linyu.model.WashMode
 import com.hualala.linyu.utils.AppLogger
 import com.hualala.linyu.utils.BluetoothScanner
 import com.hualala.linyu.utils.MqttManager
 import com.hualala.linyu.utils.Notifier
+import com.hualala.linyu.utils.NotifyTextPolicy
 import com.hualala.linyu.utils.PrefsHelper
 import com.google.gson.Gson
 import kotlinx.coroutines.CancellationException
@@ -63,8 +69,16 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 import com.hualala.linyu.utils.MoneyFormat
 import com.hualala.linyu.data.DeviceInfoCache
+import com.hualala.linyu.data.FavoriteDevice
+import com.hualala.linyu.data.FavoriteStore
+import com.hualala.linyu.data.toFavorite
 import com.hualala.linyu.widget.WidgetBridge
 import com.hualala.linyu.data.MacFormat
+import com.hualala.linyu.data.ModeOrderController
+import com.hualala.linyu.data.ModeOrderPolicy
+import com.hualala.linyu.data.ModeStatus
+import com.hualala.linyu.data.PendingModeOrder
+import com.hualala.linyu.data.PlaceOrderResult
 import com.hualala.linyu.data.SettlementEngine
 
 /**
@@ -287,6 +301,576 @@ class MainViewModel : ViewModel() {
     var isLoadingBills by mutableStateOf(false)
 
     /**
+     * 「消费合并」的合并结果，**只给趋势图用**。
+     *
+     * 为 null 表示没开合并、或合并还没跑/失败了——趋势图会退回用 [billHistory]（当前板块）。
+     * 非 null 时是一份跨板块合并后的账单（按时间倒序）。
+     *
+     * ⚠️ 千万别把它当业务数据用：不同板块的 orderNo 可能撞号，
+     * 关阀/结算/对账必须用当前板块自己的 [billHistory]。
+     */
+    var mergedBills by mutableStateOf<List<BillItem>?>(null)
+        private set
+
+    /** 合并涉及哪些板块（给界面标注「合并自：洗浴 + 洗衣饮水吹风」） */
+    var mergedFrom by mutableStateOf<List<BillMerger.BoardBills>>(emptyList())
+        private set
+
+    /** 防止重复触发合并（合并会临时改全局认证参数，绝不能并发） */
+    private var isMerging = false
+
+    // ════════════════════════════════════════════
+    //  套餐计费下单（洗衣机 / 吹风机）
+    //
+    //  与洗浴链路完全独立：不 openValve、不进 ShowerScreen、不接 ShowerWatchService。
+    //  详见 ModeOrderController 的类注释（那条链路是**不可退款扣款**）。
+    // ════════════════════════════════════════════
+
+    /** 当前正在操作套餐下单的设备；null = 不在套餐页面 */
+    var modeOrderDevice by mutableStateOf<DeviceInfo?>(null)
+        private set
+
+    /** 该设备的套餐列表（来自 `/device/mode/list`） */
+    var modeModes by mutableStateOf<List<WashMode>>(emptyList())
+        private set
+
+    /** 当前选中的套餐 modeId */
+    var selectedModeId by mutableStateOf<Int?>(null)
+        private set
+
+    /** 正在提交下单（UI 要置灰按钮 + 转圈，防双击扣两份钱） */
+    var isPlacingModeOrder by mutableStateOf(false)
+        private set
+
+    /** 套餐页的错误提示（余额不足 / 网络异常 / 未知错误）；null = 没错误 */
+    var modeOrderError by mutableStateOf<String?>(null)
+        private set
+
+    /** 下单前的钱包余额（元）。拿不到是 null，UI 就不显示这一行 */
+    var modeOrderWalletYuan by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * 设备被**别人**占用的原因（含剩余时间）。null = 没占用或不知道。
+     *
+     * 跳过详情框之后，这是用户唯一能看到「这台机器正在被用」的地方，
+     * 所以非空时选套餐页必须展示它，并且**禁用下单按钮**。
+     */
+    var modeOccupiedReason by mutableStateOf<String?>(null)
+        private set
+
+    /** 本机记着的进行中套餐单；null = 还没下单，页面停在选套餐阶段 */
+    var modePending by mutableStateOf<PendingModeOrder?>(null)
+        private set
+
+    /** 倒计时刷新用（每秒 tick 一次，只在使用中才跑） */
+    var modeOrderTick by mutableStateOf(0L)
+        private set
+
+    /**
+     * 套餐下单的**待确认套餐**；非 null = 确认弹窗开着。
+     *
+     * 不是直接下单：`modeOrder` 一发出就扣全款且不可退，必须让用户
+     * 亲眼核对设备名 + 套餐 + 金额 + 时长。见 [confirmModeOrder] / [commitModeOrder]。
+     */
+    var pendingConfirmMode by mutableStateOf<WashMode?>(null)
+        private set
+
+    private var modeOrderTickerJob: Job? = null
+
+    // ── 按量计费设备的全屏页（取代原来的详情弹窗）──
+    //
+    // 状态刻意做得很薄：设备信息直接复用 selectedDevice，使用中状态复用
+    // showerSnCode / isShowering / showerElapsedSec 那套现成的热水器状态机。
+    // 只有「要不要显示全屏页」和「确认弹窗开没开」是新的。
+
+    /** 当前是否停在这个设备的全屏操作页（按量计费）。false = 回首页列表 */
+    var meteredScreenOpen by mutableStateOf(false)
+        private set
+
+    /** 按量计费的待确认「开始使用」；非 null = 确认弹窗开着 */
+    var pendingConfirmStart by mutableStateOf(false)
+        private set
+
+    /**
+     * 待确认页的**抢占检测**：每秒查一次设备状态，发现被占用就立刻告诉用户。
+     *
+     * ## 为什么需要
+     *
+     * 用户停在「确认开启」弹窗 / 选套餐页时可能在犹豫、翻兜找卡、跟室友说话。
+     * 这段时间里设备可能被别人抢先启动。如果等他点确认时才失败，
+     * 体验是「点了没反应/报错」，而不是「早就该提示我」。
+     *
+     * ## 查到被抢占后怎么处理
+     *
+     * 不自动关弹窗、不自动跳页（那会让用户莫名其妙），而是：
+     * 1. 把 `modeOccupiedReason` 置上 → 页面上立刻出现占用横幅
+     * 2. 按钮变成禁用态（`confirmModeOrder` 里已有拦截）
+     * 3. 弹窗还开着，用户能看到"为什么不能点了"
+     *
+     * 也就是**只降级不打断**。用户自己关掉弹窗、或换台设备。
+     */
+    var preemptedByOthers by mutableStateOf<String?>(null)
+        private set
+
+    private var preemptPollJob: Job? = null
+
+    /** 上一次重发套餐倒计时通知的时刻；0 = 还没发过。用于 30 秒节流（见 [postModeOrderNotification]） */
+    private var lastModeNotifyAtMs = 0L
+
+    /**
+     * 进入套餐下单页。
+     *
+     * 进来先做三件事：读本地 pending（可能上次下单还没结束）、拉套餐、拉余额。
+     * 三者都失败也不阻塞——套餐列表空了界面会提示「正在获取套餐…」并允许重试。
+     */
+    fun enterModeOrderPicker(device: DeviceInfo) {
+        val sn = device.snCode ?: return
+        modeOrderDevice = device
+        modeOrderError = null
+        modeOccupiedReason = null
+        modeModes = emptyList()
+        selectedModeId = null
+        modeOrderWalletYuan = null
+
+        // 本地有进行中的单 → 直接进「使用中」阶段，不再让用户选套餐
+        val pending = modeOrderController.pendingOrder(sn)
+        modePending = pending?.takeUnless { it.isLikelyFinished(System.currentTimeMillis()) }
+        if (modePending != null) {
+            startModeTicker()
+            // 进程被杀/重装后重新进来：把倒计时通知补回来，否则用户只剩 App 内看得见
+            postModeOrderNotification(force = true)
+        }
+
+        val smallTypeId = device.smallTypeId ?: return
+        sessionScope().launch {
+            // 套餐列表
+            try {
+                val modes = modeOrderController.loadModes(sn, smallTypeId)
+                modeModes = modes
+                selectedModeId = ModeOrderPolicy.pickDefaultMode(modes)?.modeId
+            } catch (e: Exception) {
+                modeOrderError = "套餐列表获取失败，请检查网络后重试"
+                AppLogger.w("套餐列表获取失败：${e.message}")
+            }
+            // 余额（拿不到就不显示，不影响下单）
+            try {
+                val w = NetworkModule.apiService.getWalletSafe()
+                modeOrderWalletYuan = w.data?.money?.takeIf { it.isNotBlank() }
+            } catch (_: Exception) { }
+
+            // 设备占用检查。
+            //
+            // ⚠️ 这一步以前在详情框里靠 `refreshDeviceStatus` + `isDeviceActive` 粗判，
+            // 现在套餐设备**跳过详情框**了，用户看不到任何占用提示就会直接进选套餐页。
+            // 所以必须在这里查一次 `washer/status`，把「别人正在用」明确说出来。
+            //
+            // 三态照抄 ModeOrderController.queryStatus 的语义：
+            //   Busy    → 展示占用 + 剩余时间，**禁用下单按钮**
+            //   Idle    → 正常
+            //   Unknown → 不拦（断网不该阻止用户看到套餐），但提示网络异常
+            if (modePending == null) {
+                when (val st = modeOrderController.queryStatus(sn)) {
+                    is ModeStatus.Busy -> {
+                        modeOccupiedReason = st.reason
+                        AppLogger.i("套餐设备占用中：$sn ${st.reason}")
+                    }
+                    is ModeStatus.Idle -> modeOccupiedReason = null
+                    is ModeStatus.Unknown -> {
+                        modeOccupiedReason = null
+                        modeOrderError = "网络状态不佳，暂时无法确认设备是否空闲"
+                    }
+                }
+                // 进入待确认状态 → 开始每秒盯着这台设备，被别人抢先时立刻提示
+                if (modePending == null) startPreemptWatch(sn)
+            }
+        }
+    }
+
+    /**
+     * 进入「待确认」阶段时启动每秒状态轮询，防止别人抢先使用。
+     *
+     * 只在这两个时机跑：
+     * - 选套餐页打开（[enterModeOrderPicker] 里调用）
+     * - 确认弹窗弹出（[confirmModeOrder] 里调用）
+     *
+     * 一旦下单成功（有 pending）就停——那时设备是自己的，再轮询没意义。
+     *
+     * ponytail: 每秒一次 HTTP 打的是 `washer/status`（轻量只读）。
+     * 若将来担心流量/耗电，可放宽到 2~3 秒；但「被抢」这件事用户体感上
+     * 越早发现越好，1 秒是能接受的上限。上限就是 1 req/s/设备。
+     */
+    fun startPreemptWatch(sn: String) {
+        preemptPollJob?.cancel()
+        preemptPollJob = viewModelScope.launch {
+            while (true) {
+                delay(1000L)
+                // 已有自己的单 → 停止轮询（设备是自己的了）
+                if (modePending != null) break
+                // 页面已关闭 → 停止
+                if (modeOrderDevice == null && !meteredScreenOpen) break
+                val st = try {
+                    modeOrderController.queryStatus(sn)
+                } catch (_: Exception) {
+                    continue // 网络抖动不算"被抢占"，继续下一轮
+                }
+                if (st is ModeStatus.Busy) {
+                    val wasEmpty = preemptedByOthers == null
+                    preemptedByOthers = st.reason
+                    // 同步到页面横幅（两处 UI 都读这个）
+                    modeOccupiedReason = st.reason
+                    if (wasEmpty) {
+                        AppLogger.i("设备被抢先占用：$sn ${st.reason}")
+                    }
+                } else if (st is ModeStatus.Idle) {
+                    // 恢复了（对方结束了）→ 清掉抢占提示，允许下单
+                    if (preemptedByOthers != null) {
+                        preemptedByOthers = null
+                        modeOccupiedReason = null
+                        AppLogger.i("设备已空闲，可重新下单：$sn")
+                    }
+                }
+            }
+        }
+    }
+
+    private fun stopPreemptWatch() {
+        preemptPollJob?.cancel()
+        preemptPollJob = null
+        preemptedByOthers = null
+    }
+
+    /** 离开套餐页（不结束订单） */
+    fun exitModeOrder() {
+        stopModeTicker()
+        stopPreemptWatch()
+        modeOrderDevice = null
+        modeModes = emptyList()
+        selectedModeId = null
+        modeOrderError = null
+        modeOccupiedReason = null
+        modePending = null
+        modeOrderWalletYuan = null
+        // ⚠️ 必须一起清：否则退出页面后确认框还挂着，
+        // 用户点「确认开启」时 modeOrderDevice 已经是 null，会静默什么都不发生
+        pendingConfirmMode = null
+    }
+
+    fun selectMode(modeId: Int) {
+        selectedModeId = modeId
+        modeOrderError = null
+    }
+
+    /**
+     * 确认下单 —— **唯一的花钱入口**。
+     *
+     * 三重防重：`isPlacingModeOrder` 挡并发、`modePending` 挡已有订单、
+     * `ModeOrderController.placeOrder` 内部还有一道本地 pending 检查。
+     *
+     * 余额不足**在这里拦**：实测套餐是先扣全款，余额不够服务端会失败，
+     * 但那次失败已经是花完力气才发现的，不如提前说清楚。
+     * （饮水机那种「不足按剩余金额预扣」的规则不适用于套餐设备，见 ModeOrderPolicy）
+     */
+    /**
+     * 用户点了「确认下单」——**先弹确认框，不直接扣钱**。
+     *
+     * ## 为什么要多这一步
+     *
+     * `modeOrder` 一发出就扣套餐全款且不可退。而这个 App 是扫码/列表点进来的，
+     * 设备可能在身边、也可能扫错了一台。让用户亲眼核对**设备名 + 套餐 + 金额 + 时长**
+     * 是最后一道防线（官方 App 也是这么做的）。
+     *
+     * 校验（已有订单 / 被占用 / 余额不足）仍然在这里做——**先把不可能成功的拦掉**，
+     * 别让用户确认完才发现余额不够。
+     */
+    fun confirmModeOrder(phone: String) {
+        val device = modeOrderDevice ?: return
+        val sn = device.snCode ?: return
+        if (isPlacingModeOrder) return
+        if (modePending != null) {
+            modeOrderError = "这台设备已有进行中的订单"
+            return
+        }
+        // 占用拦截：跳过详情框之后，这是最后一道「别人正在用」的防线。
+        // ⚠️ 不能用 modeOccupiedReason 的旧值直接拦——它可能是几秒前的状态，
+        //    但也不该忽略：宁可让用户重进页面刷新，也不要扣了钱才发现机器是别人的。
+        modeOccupiedReason?.let {
+            modeOrderError = "这台设备正在被使用（$it），请稍后再试"
+            return
+        }
+        val mode = modeModes.firstOrNull { it.modeId == selectedModeId }
+        if (mode == null) {
+            modeOrderError = "请先选择套餐"
+            return
+        }
+
+        // 余额不足拦截：只在**拿得到余额**时判断，拿不到就放行（不能因为查不到余额就不让用）
+        val walletYuan = modeOrderWalletYuan?.toDoubleOrNull()
+        val priceYuan = (mode.modeMoney ?: 0) / 1000.0
+        if (walletYuan != null && walletYuan < priceYuan) {
+            modeOrderError = "余额不足：需要 ¥%.2f，当前 ¥%.2f".format(priceYuan, walletYuan)
+            return
+        }
+
+        // 校验全过 → 弹确认框，等用户点头
+        modeOrderError = null
+        pendingConfirmMode = mode
+        // 弹窗期间也要盯着：用户犹豫时设备可能被抢
+        startPreemptWatch(sn)
+    }
+
+    /** 用户在确认框里点了「取消」 */
+    fun dismissConfirmMode() { pendingConfirmMode = null }
+
+    /** 用户在确认框里点了「确认开启」——真正发下单请求 */
+    fun commitModeOrder() {
+        val device = modeOrderDevice ?: return
+        val sn = device.snCode ?: return
+        val mode = pendingConfirmMode ?: return
+        pendingConfirmMode = null
+        if (isPlacingModeOrder) return
+
+        isPlacingModeOrder = true
+        modeOrderError = null
+        // 已经开始下单，不再需要"被抢"检测（成功的话设备就是自己的了）
+        stopPreemptWatch()
+        sessionScope().launch {
+            try {
+                when (val r = modeOrderController.placeOrder(sn, mode)) {
+                    is PlaceOrderResult.Placed -> {
+                        // 拿到 orderNo：进入使用中
+                        refreshPendingFrom(sn, mode)
+                        AppLogger.i("套餐下单成功 sn=$sn orderNo=${r.orderNo}")
+                    }
+                    is PlaceOrderResult.AwaitingOrderNo -> {
+                        // ⚠️ 钱可能已经扣了，绝不能报失败让用户再点一次
+                        refreshPendingFrom(sn, mode)
+                        modeOrderError = "网络状态不佳，已提交下单，正在确认订单信息"
+                        AppLogger.w("套餐下单已发请求但未拿到 orderNo，需核对 sn=$sn")
+                    }
+                    is PlaceOrderResult.Failed -> {
+                        modeOrderError = r.message ?: "下单失败，请重试"
+                        AppLogger.w("套餐下单失败 sn=$sn：${r.message}")
+                    }
+                }
+            } catch (e: Exception) {
+                // 抛异常 = 不知道扣没扣，同样不能报失败
+                refreshPendingFrom(sn, mode)
+                modeOrderError = "网络状态不佳，请刷新核对订单状态"
+                AppLogger.e("套餐下单异常 sn=$sn", e)
+            } finally {
+                isPlacingModeOrder = false
+            }
+        }
+    }
+
+    /** 下单后重新读本地 pending（控制器已经落盘），并启动倒计时 */
+    private fun refreshPendingFrom(sn: String, mode: WashMode) {
+        val p = modeOrderController.pendingOrder(sn)
+        modePending = p ?: PendingModeOrder(
+            snCode = sn,
+            modeId = mode.modeId,
+            modeSeconds = mode.modeTimeQuantity ?: 0,
+            modeMoneyMilli = mode.modeMoney,
+            placedAtMs = System.currentTimeMillis()
+        )
+        startModeTicker()
+        postModeOrderNotification(force = true)
+    }
+
+    /**
+     * 把「套餐倒计时」那条通知按当前剩余时间重发一次。
+     *
+     * ## 为什么不是「发给一次就完事」
+     *
+     * 通知的 **Chronometer 芯片**在 ColorOS 上不渲染（真机实测，见 [Notifier.showModeOrderRunning]
+     * 的注释），所以正文里必须有**文字**的剩余时间。文字不会自己走，只能靠重发刷新。
+     *
+     * ## 为什么不每秒发
+     *
+     * 上游 OPPO 流体云适配文档的铁律：严禁 Service 每秒 `notify()`（会被限流且耗电），
+     * 走秒交给系统 Chronometer。所以这里固定 30 秒一次（[NotifyTextPolicy.REFRESH_INTERVAL_MS]），
+     * 且通知本身带 `setOnlyAlertOnce(true)`，不会重复响铃。
+     *
+     * 秒级 UI 刷新仍由 [startModeTicker] 每秒跑，两件事互不影响。
+     *
+     * @param force true = 忽略节流立即发（下单成功、进入页面时用）
+     */
+    private fun postModeOrderNotification(force: Boolean = false) {
+        val p = modePending
+        val ctx = appContext
+        val dev = modeOrderDevice
+
+        // ⚠️ 每一步都要留日志：2026-10-24 用户实测「完全看不到倒计时通知」，
+        //    排查时发现多层 `?.let` 一步失败就静默跳过，日志里连痕迹都没有，
+        //    完全无法判断是「没调」还是「调了但被系统拦」。所以宁可啰嗦。
+        if (p == null) {
+            AppLogger.w("套餐倒计时通知跳过：modePending 为 null")
+            return
+        }
+        if (ctx == null) {
+            AppLogger.w("套餐倒计时通知跳过：appContext 为 null（initManagers 还没跑完？）")
+            return
+        }
+        if (dev == null) {
+            AppLogger.w("套餐倒计时通知跳过：modeOrderDevice 为 null")
+            return
+        }
+        // 结束时刻 = 下单时刻 + 套餐时长。用**绝对时刻**而不是「剩余秒数」，
+        // 这样每次重发算出来的倒计时是连续的，不会每次跳回满格。
+        val endAtMs = p.placedAtMs + p.modeSeconds * 1000L
+        val remainingSec = (((endAtMs - System.currentTimeMillis()) / 1000L).coerceAtLeast(0L)).toInt()
+        // 节流间隔随剩余时间变：前段 30 秒（省电），最后 2 分钟 1 秒（秒级胶囊要准）
+        if (!force && !NotifyTextPolicy.shouldRefresh(
+                lastModeNotifyAtMs, System.currentTimeMillis(), remainingSec
+            )
+        ) {
+            return
+        }
+
+        val sent = Notifier.showModeOrderRunning(
+            ctx,
+            deviceName = dev.displayName,
+            modeName = modeNameFor(p),
+            endAtMs = endAtMs,
+            priceYuan = ModeOrderPolicy.formatPrice(p.modeMoneyMilli)
+        )
+        if (sent == null) {
+            AppLogger.w("套餐倒计时通知未发出：showModeOrderRunning 返回 null")
+        } else {
+            lastModeNotifyAtMs = System.currentTimeMillis()
+            AppLogger.i("套餐倒计时通知已发出 id=${Notifier.ID_MODE_ORDER}，剩余=${p.remainingSeconds(lastModeNotifyAtMs)}秒")
+            // 接上 Notifier 自己的自刷新循环。
+            //
+            // ⚠️ 为什么不能只靠 startModeTicker：ticker 在 viewModelScope 里，
+            //    App 被划掉就停，那时通知会一直挂着、Chronometer 走成负数
+            //    （实测 2026-10-24）。Notifier 的循环用 Handler，同样会随进程死，
+            //    但它至少**不依赖界面存在**——用户退出套餐页后仍然继续刷，
+            //    到点还会自己撤。
+            //    进程真被杀了就靠 `setTimeoutAfter`（系统闹钟）+ 启动时的
+            //    `cancelStaleModeOrder` 兜底。
+            if (force) {
+                Notifier.startModeOrderAutoRefresh(
+                    ctx,
+                    deviceName = dev.displayName,
+                    modeName = modeNameFor(p),
+                    endAtMs = endAtMs,
+                    priceYuan = ModeOrderPolicy.formatPrice(p.modeMoneyMilli)
+                )
+            }
+        }
+    }
+
+    /** 套餐名：优先用当前设备套餐列表里的名字，找不到就用 id 兜底 */
+    private fun modeNameFor(p: PendingModeOrder): String =
+        modeModes.firstOrNull { it.modeId == p.modeId }?.modeName ?: "套餐"
+
+    /**
+     * 刷新核对：用户点「设备已结束请点这里」时调。
+     *
+     * 套餐设备**没有结束接口**，服务端到点关停也不通知我们，
+     * 所以「结束」只能是：本地时间到 + 服务端查询确认没有进行中的单。
+     */
+    fun refreshModeOrder(sn: String? = null) {
+        val sn2 = sn ?: modeOrderDevice?.snCode ?: return
+        sessionScope().launch {
+            try {
+                when (val st = modeOrderController.queryStatus(sn2)) {
+                    is ModeStatus.Idle -> {
+                        finishModeOrderLocally(sn2)
+                        AppLogger.i("套餐订单已结束（服务端确认无进行中订单） sn=$sn2")
+                    }
+                    is ModeStatus.Busy -> {
+                        // 还在用：刷新余额，别把已花的钱当没花
+                        reloadWalletQuiet()
+                    }
+                    is ModeStatus.Unknown -> {
+                        modeOrderError = "网络状态不佳，请稍后重试"
+                    }
+                }
+            } catch (e: Exception) {
+                modeOrderError = "网络状态不佳，请稍后重试"
+                AppLogger.w("刷新套餐状态失败：${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 本地把套餐单收尾：清 pending、停 ticker、撤通知、**清掉主页残留的「使用中」**。
+     *
+     * ## 为什么要清 activeOrders
+     *
+     * 主页那张「使用中的设备」卡片读的是 `PrefsHelper.getActiveOrders()`（热水器链路的数据结构），
+     * 套餐单从来不写它。但用户实测发现：**套餐用完之后那张卡片还挂在那里**，
+     * 点「恢复」会走 `startShower` 的分流又回到套餐页——看起来像"结束不了"。
+     *
+     * 真实原因是那台设备之前用热水器留下的记录没被清。所以套餐单收尾时顺手按 snCode
+     * 清掉它（只清这一台，别动别的设备的在途订单）。
+     */
+    private fun finishModeOrderLocally(snCode: String) {
+        modeOrderController.clearPending(snCode)
+        modePending = null
+        modeOrderError = null
+        // 清零节流：下一单要立刻能发通知，不能等上一个 30 秒窗口
+        lastModeNotifyAtMs = 0L
+        stopModeTicker()
+        appContext?.let { Notifier.cancelModeOrder(it) }
+
+        // 清主页残留：这台设备的 activeOrder 记录（如果有）
+        if (activeOrders.any { it.snCode == snCode }) {
+            val remaining = activeOrders.filterNot { it.snCode == snCode }
+            PrefsHelper.saveActiveOrders(remaining)
+            syncActiveOrdersFromPrefs()
+            AppLogger.i("套餐收尾：已清掉 $snCode 的残留「使用中」记录")
+        }
+        // 「上次使用设备」留着不动——它是历史记录，清掉反而让用户找不到刚才用的那台
+    }
+
+    private suspend fun reloadWalletQuiet() {
+        try {
+            val w = NetworkModule.apiService.getWalletSafe()
+            modeOrderWalletYuan = w.data?.money?.takeIf { it.isNotBlank() }
+        } catch (_: Exception) { }
+    }
+
+    private fun startModeTicker() {
+        stopModeTicker()
+        modeOrderTickerJob = viewModelScope.launch {
+            var finishedNotified = false
+            while (true) {
+                val now = System.currentTimeMillis()
+                modeOrderTick = now
+                val p = modePending
+                if (p != null && p.isLikelyFinished(now)) {
+                    // 到点只提示一次，然后**自动去服务端核对**，不干等用户点刷新。
+                    //
+                    // 为什么不在到点就直接本地清掉：服务端到点关停不通知我们，
+                    // 本地算的时间可能早了几秒（手机时钟、网络延迟），
+                    // 直接清会让用户看到"结束了"但机器还在转。
+                    // 所以先查一次服务端——它说没单了才是真结束。
+                    if (!finishedNotified) {
+                        finishedNotified = true
+                        appContext?.let {
+                            Notifier.showModeOrderFinished(it, modeOrderDevice?.displayName ?: "设备")
+                        }
+                        refreshModeOrder(p.snCode)
+                    }
+                } else if (p != null) {
+                    // 还在用：按 30 秒节奏刷新通知的**文字**剩余时间。
+                    // 内部有节流（NotifyTextPolicy.shouldRefresh），这里每秒调也不会真的每秒发。
+                    postModeOrderNotification()
+                }
+                delay(1000L)
+            }
+        }
+    }
+
+    private fun stopModeTicker() {
+        modeOrderTickerJob?.cancel()
+        modeOrderTickerJob = null
+    }
+
+    /**
      * 账单是否**至少成功拉取过一次**。
      *
      * 余额是「用户填的初始余额 − 账单里的消费」算出来的。账单到位之前 billList 是空的，
@@ -359,6 +943,61 @@ class MainViewModel : ViewModel() {
     /** 存一份 AppContext 供刷新桌面小组件用（ViewModel 不应该长期持有 Activity） */
     private var appContext: Context? = null
 
+    // ── 多板块（项目）──
+    //
+    // 一个手机号可能绑定多个独立项目（4000 洗浴 / 3356 洗衣饮水吹风），
+    // 各有自己的 accountId、钱包、账单、设备。切板块 = 整体换一套认证参数 +
+    // 清掉按项目维度缓存的数据，见 data/ProjectRepository.switchTo。
+
+    /** 绑定过的板块（已过滤掉缺 accountId 的脏数据） */
+    var projects by mutableStateOf<List<UserProject>>(emptyList())
+        private set
+
+    /** 当前板块的 projectId（取自认证参数，不是"用户想要的那个"） */
+    var currentProjectId by mutableStateOf(PrefsHelper.projectId.toLongOrNull())
+        private set
+
+    /** 已记住的项目名。`/project/info/triple` 一次只能问当前板块，见 ProjectRepository */
+    var projectNames by mutableStateOf<Map<Long, String>>(emptyMap())
+        private set
+
+    /** 正在切板块（切换要点网络 + 重拉数据，期间给个 loading，别让人连点） */
+    var isSwitchingProject by mutableStateOf(false)
+        private set
+
+    /**
+     * 板块切换成功的次数。
+     *
+     * 切完要重扫设备，而扫描需要权限、只能由界面发起（见 MainScreen 的
+     * `scanWithPermission`），所以这里只留一个触发器让界面监听，不在 ViewModel
+     * 里直接调 [startScan]——没有权限时那会直接抛 SecurityException。
+     */
+    var projectSwitchTick by mutableStateOf(0)
+        private set
+
+    /** 绑定了 2 个以上板块才显示切换入口；单板块用户不该被塞一个点了没用的按钮 */
+    val showProjectSwitcher: Boolean get() = ProjectSelectionPolicy.hasMultiple(projects)
+
+    /**
+     * 按套餐计费的设备（洗衣机 / 吹风机）控制器。
+     *
+     * ## 为什么要在这里持有
+     *
+     * 它的「进行中的单」要跨进程存活，而订单号只能从 MQTT 推送拿——
+     * 所以必须有一个长生命周期的实例接住 [handleMqttMessage] 转发过来的消息。
+     *
+     * ## ⚠️ 这个类会**真扣钱**
+     *
+     * 调用 [ModeOrderController.placeOrder] 就等于让服务端预扣套餐全款，且没有退款接口。
+     * UI 层必须先做二次确认，见该类注释里的三条要求。
+     */
+    val modeOrderController: ModeOrderController by lazy {
+        ModeOrderController(
+            readPref = { PrefsHelper.readRaw(it) },
+            writePref = { k, v -> PrefsHelper.writeRaw(k, v) }
+        )
+    }
+
     fun initManagers(context: Context) {
         appContext = context.applicationContext
         if (scanner == null) scanner = BluetoothScanner(context, { addDevice(it) }, { ok -> onScanTimeout(ok) })
@@ -369,6 +1008,8 @@ class MainViewModel : ViewModel() {
         lastDeviceSnCode = PrefsHelper.lastDeviceSnCode
         lastDeviceEmoji = PrefsHelper.lastDeviceEmoji
         boundRoom = PrefsHelper.boundRoom
+        // 收藏是持久列表（不是易失的「上次使用」），冷启动就要能渲染
+        reloadFavorites()
 
         // 恢复所有活跃订单
         val saved = PrefsHelper.getActiveOrders()
@@ -431,14 +1072,9 @@ class MainViewModel : ViewModel() {
                 val resp = DeviceInfoCache.load(snCode)
                 if (resp.success && resp.data != null) {
                     val info = resp.data
-                    // 保存为上次使用设备
-                    PrefsHelper.lastDeviceSnCode = info.snCode
-                    PrefsHelper.lastDeviceMac = info.macAddress
-                    PrefsHelper.lastDeviceName = info.displayName
-                    PrefsHelper.lastDeviceRawName = info.deviceName   // 寝室筛选用，见 PrefsHelper
-                    PrefsHelper.lastDeviceEmoji = info.typeEmoji
-                    // 弹出设备详情
-                    selectedDevice = info; showDeviceDetail = true
+                    // 三条入口共用同一个分流：套餐设备直接进选套餐页，
+                    // 按量计费设备仍先弹详情（点「开始使用」会立刻出水计费）
+                    routeAfterDeviceInfo(info, fromScan = true)
                     refreshDeviceStatus(info.snCode)
                     // 停止扫描（避免设备详情弹出后列表还在跳）
                     scanner?.stopScan(); isScanning = false
@@ -474,10 +1110,178 @@ class MainViewModel : ViewModel() {
     //
     // 现在三种结果分开说：查到了 → 弹详情；服务端说没有这台设备 → 明说；
     // 服务端明确报错 → 把原话转给用户。
+    /**
+     * 拿到设备信息之后**该带用户去哪**——所有入口的唯一归宿。
+     *
+     * ## 为什么需要这一层
+     *
+     * 进设备有三条路：首页卡片点击（[fetchDeviceInfo]）、扫码（[scanBind]）、
+     * 以及以后可能新增的入口。以前每条路各写一遍「弹详情」，
+     * 想改行为就得改三处，漏一处就出现"有的入口跳过了有的没跳过"。
+     *
+     * ## 分流规则：按**计费模型**，和 [startShower] 保持一致
+     *
+     * | 计费模型 | 去哪 | 为什么 |
+     * |---|---|---|
+     * | `PACKAGE`（洗衣机 / 吹风机） | **直接进选套餐页** | 选套餐这一步不扣钱，多点一次无意义 |
+     * | `METERED`（热水器 / 洗手台 / 饮水机） | **先弹详情框** | 「开始使用」会**立刻开阀出水并计费**，不能误触 |
+     *
+     * ⚠️ **按量计费设备绝不能跳过详情框**：点一下设备卡片就出水，
+     * 用户滑动列表时手抖一下就是钱，而且水已经开始流了。
+     * 套餐设备无所谓——选套餐页只是列表，不点「确认下单」不会扣款。
+     *
+     * @param fromScan 是否来自扫码。目前两条路行为一致，留参数是为以后需要区分时不必改签名
+     */
+    private fun routeAfterDeviceInfo(info: DeviceInfo, fromScan: Boolean = false) {
+        // 记成「上次使用设备」（两条路都要记，原来只有扫码那条记了）
+        PrefsHelper.lastDeviceSnCode = info.snCode
+        PrefsHelper.lastDeviceMac = info.macAddress
+        PrefsHelper.lastDeviceName = info.displayName
+        PrefsHelper.lastDeviceRawName = info.deviceName
+        PrefsHelper.lastDeviceEmoji = info.typeEmoji
+
+        selectedDevice = info
+        if (info.isPackageBilling) {
+            // 套餐设备：跳过详情框，直接进选套餐
+            showDeviceDetail = false
+            meteredScreenOpen = false
+            enterModeOrderPicker(info)
+            AppLogger.i("进入套餐下单页（跳过详情）：${info.displayName} fromScan=$fromScan")
+        } else {
+            // 按量计费设备：**全屏操作页**（不再弹小对话框）。
+            //
+            // 「开始使用」按钮在这个页面里，点了先弹确认框，
+            // 用户确认后才真正 openValve——见 requestStartMetered / confirmStartMetered。
+            showDeviceDetail = false
+            meteredScreenOpen = true
+            AppLogger.i("进入按量计费全屏页：${info.displayName} fromScan=$fromScan")
+        }
+    }
+
+    // ── 按量计费：全屏页里的「开始使用」两步走 ──
+
+    /** 用户点了「开始使用」→ **只弹确认框**，不开阀 */
+    fun requestStartMetered() {
+        if (isStartingShower) return
+        val sn = selectedDevice?.snCode
+        if (sn.isNullOrBlank()) {
+            toastMessage = "设备信息不完整"
+            return
+        }
+        pendingConfirmStart = true
+    }
+
+    /** 确认框里点了「确认开启」→ 真正开阀 */
+    fun confirmStartMetered(phone: String) {
+        pendingConfirmStart = false
+        if (isStartingShower) return
+        // 复用现有热水器开阀链路：它已经处理了蓝牙表分流、306 引导、MQTT、
+        // 恢复已有订单等一整套，不要在这里重写。
+        //
+        // ⚠️ startShower 是**异步**的（内部 sessionScope().launch），并且它自己会维护
+        // `isStartingShower`。所以这里**不要**设 isStartingMetered 再立刻复位——
+        // 那样按钮会闪一下就恢复，用户以为没点上就可能再点一次。
+        // 展示用的 busy 状态直接读 `isStartingShower`（见 meteredBusy）。
+        startShower(phone)
+    }
+
+    /** 按量计费页按钮的忙碌态 = 正在开阀中。转发给 UI，避免 UI 直接摸内部字段 */
+    val meteredBusy: Boolean get() = isStartingShower
+
+    fun dismissConfirmStart() { pendingConfirmStart = false }
+
+    /** 关掉按量计费全屏页，回首页 */
+    fun closeMeteredScreen() {
+        meteredScreenOpen = false
+        pendingConfirmStart = false
+        // 如果没在使用中，把选中设备清掉，避免下次进来看到上一个的残留
+        if (!isShowering) selectedDevice = null
+    }
+
+    // ── 收藏 ──
+
+    /** 收藏列表的内存副本（启动时从 Prefs 读，增删后同步写回） */
+    var favorites by mutableStateOf<List<FavoriteDevice>>(emptyList())
+        private set
+
+    fun reloadFavorites() {
+        favorites = PrefsHelper.favorites()
+    }
+
+    /** 当前打开的设备是否已收藏 */
+    fun isFavorite(snOrMac: String?): Boolean {
+        if (snOrMac.isNullOrBlank()) return false
+        return favorites.any { it.mac.equals(snOrMac, true) || it.snCode.equals(snOrMac, true) }
+    }
+
+    /**
+     * 收藏 / 取消收藏当前打开的**任意设备**（套餐页或按量计费页都走这里）。
+     *
+     * 字段全部落盘（含 bigTypeId），所以收藏列表**离线也能渲染**、
+     * 也能直接按计费模型分流——不用联网回查设备台账。
+     */
+    fun toggleFavoriteCurrent() {
+        val dev = modeOrderDevice ?: selectedDevice ?: return
+        doToggleFavorite(dev)
+    }
+
+    /** 收藏列表里点某项 → 按计费模型分流（和扫码/列表点击同一个入口） */
+    fun openFavorite(fav: FavoriteDevice) {
+        routeAfterDeviceInfo(fav.toDeviceInfo(), fromScan = true)
+    }
+
+    /**
+     * 长按「附近设备」条目 → 收藏 / 取消收藏。
+     *
+     * 附近设备的 [NearbyDevice] 只有广播里带的 MAC 和名字，**没有 bigTypeId**，
+     * 而收藏必须存计费模型判据（否则离线时无法分流）。所以这里先查一次设备台账：
+     *
+     * - 缓存里有（[nearbyDevices] 的 `deviceInfo`）→ 直接用，不发请求
+     * - 否则 `DeviceInfoCache.load` 查一次
+     * - 查不到就提示，**不收藏**（收藏一条只有 MAC 的记录没意义，离线渲染不出名字）
+     */
+    fun favoriteNearbyDevice(device: NearbyDevice) {
+        val cachedInfo = device.deviceInfo
+        if (cachedInfo != null) {
+            doToggleFavorite(cachedInfo)
+            return
+        }
+        sessionScope().launch {
+            try {
+                val resp = DeviceInfoCache.load(device.mac)
+                val info = resp.data
+                if (resp.success && info != null) {
+                    doToggleFavorite(info)
+                } else {
+                    toastMessage = resp.displayMessage ?: "获取设备信息失败，无法收藏"
+                }
+            } catch (e: Exception) {
+                toastMessage = "获取设备信息失败，无法收藏"
+                AppLogger.w("收藏前查设备台账失败：${device.mac} ${e.message}")
+            }
+        }
+    }
+
+    /** 实际的收藏切换（字段已齐） */
+    private fun doToggleFavorite(info: DeviceInfo) {
+        val mac = info.macAddress
+        if (mac.isBlank() || info.snCode.isNullOrBlank()) {
+            toastMessage = "设备信息不完整，无法收藏"
+            return
+        }
+        val existed = FavoriteStore.contains(favorites, mac)
+        val next = if (existed) FavoriteStore.remove(favorites, mac)
+        else FavoriteStore.add(favorites, info.toFavorite(System.currentTimeMillis()))
+        favorites = FavoriteStore.sorted(next)
+        PrefsHelper.saveFavorites(favorites)
+        toastMessage = if (existed) "已取消收藏" else "已收藏：${info.displayName}"
+        AppLogger.i("${if (existed) "取消收藏" else "收藏"}设备：${info.displayName}")
+    }
+
     fun fetchDeviceInfo(mac: String) {
         val cached = nearbyDevices.find { it.mac == mac }?.deviceInfo
         if (cached != null) {
-            selectedDevice = cached; showDeviceDetail = true
+            routeAfterDeviceInfo(cached)
             sessionScope().launch { refreshDeviceStatus(cached.snCode) }
             return
         }
@@ -485,7 +1289,7 @@ class MainViewModel : ViewModel() {
             try {
                 val resp = DeviceInfoCache.load(mac)
                 if (resp.success && resp.data != null) {
-                    selectedDevice = resp.data; showDeviceDetail = true
+                    routeAfterDeviceInfo(resp.data)
                     refreshDeviceStatus(resp.data.snCode)
                 } else {
                     checkKick(resp.displayMessage)
@@ -591,11 +1395,86 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    /**
+     * 点「上次使用设备」卡片 → 走和收藏/扫码同一个入口，**不直接开阀**。
+     *
+     * ## 为什么不再调 [startShower]
+     *
+     * 原来那张卡片右下角是「开始」按钮，点一下直接 `startShower` → `openValve`：
+     * 按量计费设备会**立刻出水并开始计费**。这是列表里最容易误触的捷径
+     * （用户在首页滑动时手抖碰到卡片就出水）。
+     *
+     * 现在改成和收藏项一致：先查设备台账，再交给 [routeAfterDeviceInfo] 分流——
+     * 套餐设备进选套餐页、按量计费进全屏页（那里还要再点「开始使用」+ 确认框）。
+     *
+     * ## 活跃订单仍然保持「恢复」语义
+     *
+     * 如果这台设备**正在使用**（在 [activeOrders] 里），说明用户已经开了水/下了单，
+     * 这时点卡片的意思是"回到那个使用页"，不是重新开一次。所以这种情况下直接
+     * 恢复界面状态，不走确认流程。
+     */
+    fun openLastDevice(phone: String) {
+        val order = activeOrders.find { it.snCode == lastDeviceSnCode }
+        if (order != null) {
+            // 有活跃订单：恢复使用页（不重新开阀，不重新扣费）
+            sessionScope().launch {
+                try {
+                    val resp = DeviceInfoCache.load(order.deviceMac)
+                    val info = resp.data
+                    if (resp.success && info != null) {
+                        selectedDevice = info
+                        if (info.isPackageBilling) {
+                            enterModeOrderPicker(info)
+                        } else {
+                            // 按量计费且已在用：直接把界面挂回使用中
+                            meteredScreenOpen = true
+                            showDeviceDetail = false
+                            AppLogger.i("恢复按量计费使用页：${info.displayName}")
+                        }
+                    } else {
+                        toastMessage = "获取设备信息失败"
+                    }
+                } catch (e: Exception) {
+                    toastMessage = "获取设备信息失败"
+                }
+            }
+            return
+        }
+
+        val mac = lastDeviceMac.ifEmpty { return }
+        sessionScope().launch {
+            try {
+                val resp = DeviceInfoCache.load(mac)
+                val info = resp.data
+                if (resp.success && info != null) {
+                    routeAfterDeviceInfo(info)
+                } else {
+                    toastMessage = "获取设备信息失败"
+                }
+            } catch (e: Exception) {
+                toastMessage = "获取设备信息失败"
+            }
+        }
+    }
+
     // ════════════════════════════════════════════
     fun startShower(phone: String) {
         val device = selectedDevice ?: return
         val snCode = device.snCode
         if (snCode.isNullOrBlank()) { showerError = ShowerError("设备信息不完整", ShowerErrorKind.BAD_DEVICE); return }
+
+        // ── 分流点：按**计费模型**，不按设备类型 ──
+        //
+        // 套餐计费（洗衣机 / 吹风机）走完全独立的通道：不能 openValve（那是按量计费的开阀），
+        // 也不能进 ShowerScreen（那里有「结束使用」按钮，而套餐设备没有停止接口）。
+        // 判据见 ModeOrderPolicy.billingModel（纯函数、有单测）。
+        //
+        // 这里放在最前面：蓝牙分支、开阀、MQTT 连接那一整套都不该对套餐设备执行。
+        if (device.isPackageBilling) {
+            showDeviceDetail = false
+            enterModeOrderPicker(device)
+            return
+        }
 
         isStartingShower = true
         sessionScope().launch {
@@ -951,6 +1830,17 @@ class MainViewModel : ViewModel() {
     }
 
     private fun handleMqttMessage(message: String) {
+        // 先给「按套餐计费」的通道递一份。
+        //
+        // 它自己按 `deviceSnCode` 过滤，不会把热水器的单认成自己的；
+        // 内部所有异常都吞掉了（没有 throw），所以放在热水器解析之前是安全的，
+        // 也避免热水器那段 `try/catch` 把消息提前吃掉。
+        try {
+            modeOrderController.onMqttMessage(message)
+        } catch (_: Exception) {
+            // 双保险：条款上它不该抛，但一条推送解析失败绝不能影响热水器链路
+        }
+
         try {
             val msg = gson.fromJson(message, MqttOrderMsg::class.java)
 
@@ -1477,6 +2367,10 @@ class MainViewModel : ViewModel() {
             lastDeviceMac = ""
             lastDeviceSnCode = ""
             lastDeviceEmoji = "🚿"
+            // 板块是**账号级**的：换账号后还挂着上一任的两个板块和名字就串了
+            projects = emptyList()
+            projectNames = emptyMap()
+            currentProjectId = null
         }
         PrefsHelper.clear(preserveActiveRecovery)
         if (preserveActiveRecovery) appContext?.let(ShowerWatchService::stop)
@@ -1663,6 +2557,11 @@ class MainViewModel : ViewModel() {
         kickedOut = false
         // 换账号了，手机号跟着换（新会话的认证参数已经写进 Prefs，这里同步到界面状态）
         phone = PrefsHelper.telephone
+        // 登录时已按「上次选的 → 登录响应里的 → 列表第一个」定过板块（见 AuthRepository），
+        // 这里把结果同步到界面状态，不然标题下面还显示上一任的板块名
+        currentProjectId = ProjectRepository.currentProjectId()
+        projects = ProjectRepository.cachedProjects()
+        projectNames = ProjectRepository.projectNames()
     }
 
     fun refreshWallet() {
@@ -2063,8 +2962,140 @@ class MainViewModel : ViewModel() {
                     PrefsHelper.schoolName = n
                     schoolName = n
                 }
+                // 顺手记下「这个 projectId 叫什么」：切换列表要显示每个板块的名字，
+                // 而 /project/info/triple 只能问当前板块，所以只能切一个记一个
+                if (!n.isNullOrBlank()) {
+                    PrefsHelper.projectId.toLongOrNull()?.let { pid ->
+                        PrefsHelper.rememberProjectName(pid, n)
+                        projectNames = PrefsHelper.projectNames()
+                    }
+                }
             } catch (_: Exception) {}
         }
+    }
+
+    /**
+     * 拉账号绑定的板块列表。
+     *
+     * 失败的静默处理：拿不到列表就保持单板块的样子（`showProjectSwitcher` 为 false），
+     * 不影响原有洗浴功能——这是这次改动唯一的硬约束。
+     */
+    fun loadProjects() {
+        if (!PrefsHelper.isLoggedIn) return
+        // 当前板块以**认证参数**为准。MainViewModel 是在登录前就建好的（见 MainActivity），
+        // 构造时读到的 projectId 可能是上一任账号的，所以每次拉列表都重新对齐一次。
+        currentProjectId = ProjectRepository.currentProjectId()
+        // 先用缓存渲染一次：冷启动时不让切换入口闪一下才冒出来
+        projects = ProjectRepository.cachedProjects()
+        projectNames = ProjectRepository.projectNames()
+        sessionScope().launch {
+            val list = ProjectRepository.loadProjects().getOrNull() ?: return@launch
+            projects = list
+            projectNames = ProjectRepository.projectNames()
+        }
+    }
+
+    /**
+     * 切换到另一个板块。
+     *
+     * ⚠️ **有进行中的订单时拒绝切换**：那笔订单是用旧 accountId 开的，
+     * 换掉认证参数之后关阀和结算都会失败，用户会被卡在"水还在放、关不掉"。
+     * 和退出登录用同一条判断（[canLogoutVoluntarily]）。
+     */
+    fun switchProject(projectId: Long) {
+        if (isSwitchingProject) return
+        if (projectId == currentProjectId) return
+        if (!canLogoutVoluntarily(activeOrders)) {
+            toastMessage = "还有设备正在使用，结束后才能切换板块"
+            return
+        }
+        isSwitchingProject = true
+        sessionScope().launch {
+            val target = try {
+                ProjectRepository.switchTo(projectId).getOrNull()
+            } catch (e: Exception) {
+                null
+            }
+            if (target == null) {
+                toastMessage = "切换板块失败，账号未绑定该板块"
+                isSwitchingProject = false
+                return@launch
+            }
+            // 认证参数已经整体换掉了，内存里所有"按项目维度"的数据都必须复位，
+            // 否则界面会拿着上个板块的钱包/账单/设备继续显示（串号）。
+            currentProjectId = target.projectId
+            resetProjectScopedState()
+            refreshWallet()
+            loadBills()
+            loadCampusBalance()
+            loadSchoolName()
+            loadUnpaidBills()
+            // 姓名/学号和使用码属于 accountId 维度，换板块后重拉一遍
+            loadAccountInfo()
+            loadUseCode()
+            toastMessage = "已切换到${ProjectSelectionPolicy.label(target.projectId, projectNames)}"
+            isSwitchingProject = false
+            // 设备列表要重扫：扫描需要蓝牙权限，只能由界面发起（见 MainScreen）。
+            // 这里只发一个"板块变了"的通知，扫不扫由界面决定。
+            projectSwitchTick++
+        }
+    }
+
+    /**
+     * 板块名字。
+     *
+     * 兜底顺序见 [ProjectSelectionPolicy.label]：记住的真名 → 业务名 → 「项目 id」。
+     *
+     * 业务名兜底是给**没切过的板块**用的：`/project/info/triple` 只能问当前板块，
+     * 没去过的那条本来只有 id。正式发布时显示「项目 3356」用户会以为是 bug，
+     * 所以按已知的 projectId → 业务名做一个映射。
+     *
+     * ⚠️ 这个映射只是**显示兜底**，不参与任何业务判断。
+     * 换学校时映射可能对不上，但那时真名早就从接口拿到了，不会走到这里。
+     */
+    fun projectLabel(projectId: Long?): String =
+        ProjectSelectionPolicy.label(projectId, projectNames, knownBoardName(projectId))
+
+    /** 已知板块 id → 业务名（仅用于真名还没拿到时的显示兜底） */
+    private fun knownBoardName(projectId: Long?): String? = when (projectId) {
+        // 某某大学：4000 洗浴 / 3356 洗衣饮水吹风。
+        // 别的学校 id 不同，会走「项目 id」兜底——不影响正确性，只是不够好看。
+        4000L -> "洗浴"
+        3356L -> "洗衣饮水吹风"
+        else -> null
+    }
+
+    /**
+     * 清掉内存里按项目维度缓存的状态。
+     *
+     * 落盘的那部分由 [PrefsHelper.clearProjectScopedCache] 负责，这里是**内存副本**——
+     * 两边都要清，少一边就会先亮一个错数字再跳变。
+     */
+    private fun resetProjectScopedState() {
+        walletInfo = null
+        walletBalance = null
+        campusBalance = null
+        schoolName = ""
+        billList = emptyList()
+        billHistory = emptyList()
+        billsLoaded = false
+        unpaidBills = emptyList()
+        deductingConsumeDate = null
+        unpaidSeq++
+        // 姓名 / 学号 / 使用码也是**按 accountId** 的，两个板块的 accountId 不同。
+        // 同名同人大多一样，但校园卡绑定状态和使用码本来就是各账户一份，
+        // 拿着上个板块的码去用会直接被服务端拒掉——宁可显示「加载中」让它重拉。
+        accountInfo = null
+        useCodeData = null
+        useCodeLoaded = false
+        nearbyDevices.clear()
+        activeDeviceSnCodes.clear()
+        selectedDevice = null
+        showDeviceDetail = false
+        lastDeviceName = ""
+        lastDeviceMac = ""
+        lastDeviceSnCode = ""
+        lastDeviceEmoji = "🚿"
     }
 
     /**
@@ -2109,6 +3140,13 @@ class MainViewModel : ViewModel() {
         loadCampusBalance()
         // 残留账单同理——在别处（比如官方 App）补扣掉了，这边也得跟着消失
         loadUnpaidBills()
+        // 主页「使用中的设备」卡片：用户实测下拉刷新后它还是老样子。
+        // 原来这里不重新同步，于是那张卡片只有等别处触发 syncActiveOrdersFromPrefs 才更新。
+        syncActiveOrdersFromPrefs()
+        // 套餐单同理：到点了但用户没点「刷新核对」时，下拉刷新应该帮他核对一次
+        modePending?.let { p ->
+            if (p.isLikelyFinished(System.currentTimeMillis())) refreshModeOrder(p.snCode)
+        }
     }
 
     // ── 设备发现 ──
@@ -2224,6 +3262,8 @@ class MainViewModel : ViewModel() {
                 // 界面上只渲染 2 行，多存的不影响显示。
                 cacheBillsForWidget(all.take(20))
                 refreshWidgets()
+                // 账单到位后再拉其它板块做合并（失败不影响上面任何东西）
+                loadMergedTrend()
             } catch (e: Exception) { 
                 checkKickEx(e)
                 val msg = e.message ?: ""
@@ -2236,5 +3276,117 @@ class MainViewModel : ViewModel() {
             }
             finally { isLoadingBills = false }
         }
+    }
+
+    /**
+     * 拉「消费合并」需要的其它板块账单，合并成一份给趋势图用。
+     *
+     * ## 什么时候跑
+     *
+     * [loadBills] 成功之后调一次。没开合并（[PrefsHelper.canMergeConsume] 为 false）
+     * 或只有单个板块时直接清空 [mergedBills]，趋势图退回单板块数据。
+     *
+     * ## 为什么单独一个函数、而不是塞进 loadBills
+     *
+     * 合并要**临时切认证参数**去别的板块读账单，这件事风险独立于账单本身：
+     * 它失败了不该影响 [loadBills] 的结果（用户至少还能看当前板块的账）。
+     * 分开之后失败只记日志、清空 mergedBills，一切照常。
+     *
+     * ## 顺序与并发
+     *
+     * - 用 [isMerging] 挡住重入：合并期间认证参数是别人的，绝不能并发
+     * - 跳过**当前板块**（它的账单已经在 [billHistory] 里，再拉一遍纯浪费）
+     * - 失败逐个跳过，能合几个算几个
+     */
+    fun loadMergedTrend() {
+        val others = projects.filter { it.projectId != currentProjectId }
+        if (!PrefsHelper.canMergeConsume || others.isEmpty()) {
+            // 关掉合并、或单板块：清空，趋势图自动退回 billHistory
+            mergedBills = null
+            mergedFrom = emptyList()
+            return
+        }
+        if (isMerging) return
+        isMerging = true
+        sessionScope().launch {
+            try {
+                val boards = mutableListOf<BillMerger.BoardBills>()
+                val names = ProjectRepository.projectNames()
+
+                // 当前板块直接用已有数据，不重复请求
+                if (billHistory.isNotEmpty()) {
+                    val curId = currentProjectId ?: 0L
+                    boards += BillMerger.BoardBills(
+                        projectId = curId,
+                        projectName = names[curId] ?: schoolName,
+                        bills = billHistory
+                    )
+                }
+
+                for (p in others) {
+                    val pid = p.projectId ?: continue
+                    val fetched = ProjectRepository.withBoardContext(pid) {
+                        fetchRecentBills()
+                    } ?: continue
+                    boards += BillMerger.BoardBills(
+                        projectId = pid,
+                        projectName = names[pid] ?: "",
+                        bills = fetched
+                    )
+                }
+
+                // 只有一个板块有数据时没必要合并
+                if (boards.size < 2) {
+                    mergedBills = null
+                    mergedFrom = emptyList()
+                    return@launch
+                }
+                val merged = BillMerger.merge(boards)
+                mergedBills = merged
+                mergedFrom = boards
+                AppLogger.i(
+                    "消费合并：${boards.size} 个板块 / ${merged.size} 条，" +
+                        "合计 ¥${String.format("%.2f", BillMerger.totalYuan(merged))}"
+                )
+            } catch (e: Exception) {
+                // 合并是锦上添花，失败就退回单板块，绝不打扰用户
+                AppLogger.w("消费合并失败，退回单板块：${e.message}")
+                mergedBills = null
+                mergedFrom = emptyList()
+            } finally {
+                isMerging = false
+            }
+        }
+    }
+
+    /**
+     * 拉最近 3 个月账单（和 [loadBills] 同口径）。
+     *
+     * 抽出来是给 [ProjectRepository.withBoardContext] 复用的：
+     * 那段逻辑跑在"别人的认证参数"下，不能碰任何 UI 状态。
+     */
+    private suspend fun fetchRecentBills(): List<BillItem> {
+        val fmt = java.text.SimpleDateFormat("yyyy-MM", java.util.Locale.getDefault())
+        val cal = java.util.Calendar.getInstance()
+        val out = mutableListOf<BillItem>()
+        for (i in 0..2) {
+            val month = fmt.format(cal.time)
+            val resp = try {
+                NetworkModule.apiService.getBillListSafe(month = month)
+            } catch (_: Exception) {
+                break
+            }
+            if (resp.success && !resp.data.isNullOrEmpty()) out.addAll(resp.data)
+            cal.add(java.util.Calendar.MONTH, -1)
+        }
+        return out
+    }
+
+    /** 开关变化后重算。设置页调它，让趋势图立刻反映新设置 */
+    fun refreshMergeState() {
+        mergedBills = null
+        mergedFrom = emptyList()
+        if (PrefsHelper.canMergeConsume) loadMergedTrend()
+        refreshWidgets()
     }
 }

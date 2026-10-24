@@ -14,11 +14,16 @@ import com.hualala.linyu.model.DownRateResult
 import com.hualala.linyu.model.DeviceInfo
 import com.hualala.linyu.model.GenerateUseCodeResult
 import com.hualala.linyu.model.LoginData
+import com.hualala.linyu.model.ModeOrderInfo
 import com.hualala.linyu.model.OrderStatus
 import com.hualala.linyu.model.ProjectInfo
+import com.hualala.linyu.model.ProjectModule
 import com.hualala.linyu.model.UnpaidBill
 import com.hualala.linyu.model.UseCodeData
+import com.hualala.linyu.model.UserProject
 import com.hualala.linyu.model.WalletData
+import com.hualala.linyu.model.WashMode
+import com.hualala.linyu.model.WasherStatusData
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -331,4 +336,81 @@ suspend fun QzxyService.bluetoothFailOrderSafe(
 ): BaseResponse<Unit> = parse(
     bluetoothFailOrder(consumeDate, signature, auth).awaitString(),
     Unit::class.java
+)
+
+// ── 多项目（板块）通道 ──
+//
+// 一个手机号可能绑定多个独立项目，各有独立 accountId / 钱包 / 账单。
+// 详见 model/ProjectModels.kt 的类注释。
+
+/**
+ * 账号绑定的项目列表。
+ *
+ * 返回的每一项是 `projectId` + `accountId` 的**配对**，
+ * 切换板块时必须两个一起换（见 `NetworkModule.updateAuth`）。
+ */
+suspend fun QzxyService.getUserProjectListSafe(): BaseResponse<List<UserProject>> =
+    parseList(getUserProjectList().awaitString(), UserProject::class.java)
+
+/**
+ * 当前项目启用的业务模块。
+ *
+ * ⚠️ 依赖认证拦截器拼上的 projectId/accountId，所以调用前必须已经切到目标板块。
+ */
+suspend fun QzxyService.getProjectModuleListSafe(): BaseResponse<List<ProjectModule>> =
+    parseList(getProjectModuleList().awaitString(), ProjectModule::class.java)
+
+/** 项目信息（学校名等）。同样受当前 projectId 影响 */
+// ⚠️ 不要在这里再定义一遍：getProjectInfoSafe 在本文件 :219 已经有了（单项目时代就有）。
+
+// ── 按套餐计费的设备（洗衣机 / 吹风机）──
+
+suspend fun QzxyService.getModeListSafe(smallTypeId: String): BaseResponse<List<WashMode>> =
+    parseList(getModeList(smallTypeId).awaitString(), WashMode::class.java)
+
+/**
+ * 按套餐下单 —— **真扣钱、不可退、没有取消接口**。
+ *
+ * 响应里的 `data` 恒为 null，orderNo 要另找（MQTT 或 [lastOrderByMacSafe]）。
+ * 调用方必须先做二次确认，见 `data/ModeOrderController.kt` 的说明。
+ */
+suspend fun QzxyService.modeOrderSafe(
+    xfModel: String,
+    snCode: String,
+    isHaier: String = "0",
+    auth: Map<String, String>
+): BaseResponse<Unit> = parse(
+    modeOrder(xfModel, snCode, isHaier, auth).awaitString(),
+    Unit::class.java
+)
+
+/**
+ * 按套餐计费设备的状态。
+ *
+ * ## 返回结构（2026-10-24 实测补充）
+ *
+ * | 情况 | `success` | `errorCode` | `data` |
+ * |---|---|---|---|
+ * | 空闲 | true | 0 | **null** |
+ * | 被占用 | **true** | **307** | 非空（见 [WasherStatusData]） |
+ *
+ * ⚠️ 占用时 `success` 仍然是 **true**，必须同时看 `errorCode` 和 `data`。
+ * ⚠️ 请求本身失败时**不能**当成空闲——调用方要写三态。
+ */
+suspend fun QzxyService.washerStatusSafe(
+    snCode: String,
+    isHaier: String = "0",
+    auth: Map<String, String>
+): BaseResponse<WasherStatusData> = parse(
+    washerStatus(snCode, isHaier, auth).awaitString(),
+    WasherStatusData::class.java
+)
+
+/** 按 MAC 查最近一单。⚠️ 有时间窗口，参考 [ModeOrderInfo] 的注释 */
+suspend fun QzxyService.lastOrderByMacSafe(
+    mac: String,
+    isHaier: String = "0"
+): BaseResponse<ModeOrderInfo> = parse(
+    lastOrderByMac(mac, isHaier).awaitString(),
+    ModeOrderInfo::class.java
 )

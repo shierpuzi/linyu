@@ -5,14 +5,19 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -38,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -46,6 +52,8 @@ import androidx.compose.ui.res.painterResource
 import com.hualala.linyu.QrScanActivity
 import com.hualala.linyu.R
 import com.hualala.linyu.data.BalanceEstimator
+import com.hualala.linyu.data.FavoriteDevice
+import com.hualala.linyu.data.ModeOrderPolicy
 import com.hualala.linyu.model.DeviceInfo
 import com.hualala.linyu.model.NearbyDevice
 import com.hualala.linyu.ui.theme.AppColors
@@ -169,18 +177,107 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
             // 背景应用到「主页」时透明，让最底层的背景图透出来
             containerColor = if (BackgroundState.config(BackgroundManager.SCOPE_HOME).enabled) Color.Transparent else AppColors.Background
         ) { padding ->
-            if (viewModel.isShowering) {
-                ShowerScreen(
-                    emoji = viewModel.selectedDevice?.typeEmoji ?: "🚿",
-                    statusText = viewModel.selectedDevice?.statusText ?: "正在沐浴中",
-                    location = viewModel.selectedDevice?.locationOnly ?: "",
-                    remaining = viewModel.showerRemaining,
-                    elapsedSec = viewModel.showerElapsedSec,
-                    autoDisConSec = viewModel.autoDisConSec,
-                    isStopping = viewModel.isStopping,
-                    onStopClick = { viewModel.stopShower() },
-                    onMinimizeClick = { viewModel.minimizeShower() }
-                )
+            // 页面层级：0 = 首页列表，1 = 设备操作页（套餐 / 按量计费）。
+            //
+            // 用 AnimatedContent 做**弹性视差左右滑移**，参数与 MainActivity 的三个主 tab
+            // 完全一致（dampingRatio=0.78 / stiffness=420）——视觉语言统一，
+            // 用户不会觉得「进设备」和「切 tab」是两套交互。
+            //
+            // 方向：进入设备 = 新页从右滑入（forward）；返回 = 列表从左滑入。
+            //
+            // ⚠️ 主页分支必须**内联**在这里，不能抽成独立函数：它引用了
+            // scanLauncher / context / filteredDevices / hasScanPerm 等一堆局部变量，
+            // 抽出去就得把十几个参数一路传下来（试过一次，编译报 12 个 Unresolved）。
+            val onDevicePage = viewModel.modeOrderDevice != null ||
+                viewModel.meteredScreenOpen ||
+                viewModel.isShowering
+            AnimatedContent(
+                targetState = onDevicePage,
+                transitionSpec = {
+                    val forward = targetState
+                    val springSpec = spring<IntOffset>(dampingRatio = 0.78f, stiffness = 420f)
+                    val fadeSpec = spring<Float>(stiffness = 420f)
+                    (slideInHorizontally(
+                        animationSpec = springSpec,
+                        initialOffsetX = { full -> if (forward) full else -full }
+                    ) + fadeIn(animationSpec = fadeSpec))
+                        .togetherWith(
+                            slideOutHorizontally(
+                                animationSpec = springSpec,
+                                targetOffsetX = { full -> if (forward) -full else full }
+                            ) + fadeOut(animationSpec = fadeSpec)
+                        )
+                },
+                label = "DevicePageTransition"
+            ) { onDevice ->
+            if (onDevice) {
+                if (viewModel.modeOrderDevice != null) {
+                    val dev = viewModel.modeOrderDevice!!
+                    ModeOrderScreen(
+                        deviceName = dev.displayName,
+                        emoji = dev.typeEmoji,
+                        modes = viewModel.modeModes,
+                        selectedModeId = viewModel.selectedModeId,
+                        walletYuan = viewModel.modeOrderWalletYuan,
+                        onSelectMode = { viewModel.selectMode(it) },
+                        pending = viewModel.modePending?.let { p ->
+                            val now = viewModel.modeOrderTick
+                            PendingView(
+                                modeName = viewModel.modeModes
+                                    .firstOrNull { it.modeId == p.modeId }?.modeName,
+                                paidYuan = ModeOrderPolicy.formatPrice(p.modeMoneyMilli),
+                                remainingSec = p.remainingSeconds(now),
+                                likelyFinished = p.isLikelyFinished(now)
+                            )
+                        },
+                        placing = viewModel.isPlacingModeOrder,
+                        occupiedReason = viewModel.modeOccupiedReason,
+                        errorText = viewModel.modeOrderError,
+                        isFavorite = viewModel.isFavorite(dev.macAddress),
+                        onToggleFavorite = { viewModel.toggleFavoriteCurrent() },
+                        onConfirmOrder = { viewModel.confirmModeOrder(phone) },
+                        onRefresh = { viewModel.refreshModeOrder() },
+                        onBack = { viewModel.exitModeOrder() }
+                    )
+                } else if (viewModel.isShowering) {
+                    // 使用中的按量计费设备也走同一套全屏页，保证「开始前」和「开始后」
+                    // 是同一个界面语言（同一个按钮位置、同一个收藏入口）。
+                    val dev = viewModel.selectedDevice
+                    MeteredDeviceScreen(
+                        emoji = dev?.typeEmoji ?: "🚿",
+                        deviceName = dev?.displayName ?: "正在使用中",
+                        typeName = dev?.typeName ?: "",
+                        location = dev?.locationOnly ?: "",
+                        preDeductYuan = viewModel.showerRemaining.ifBlank {
+                            MoneyFormat.format(dev?.withholdMoney ?: 0.0)
+                        },
+                        inUse = true,
+                        elapsedSec = viewModel.showerElapsedSec,
+                        autoDisConSec = viewModel.autoDisConSec,
+                        isStopping = viewModel.isStopping,
+                        isFavorite = viewModel.isFavorite(dev?.macAddress),
+                        onToggleFavorite = { viewModel.toggleFavoriteCurrent() },
+                        onStartClick = {},
+                        onStopClick = { viewModel.stopShower() },
+                        onBack = { viewModel.minimizeShower() }
+                    )
+                } else if (viewModel.selectedDevice != null) {
+                    // 按量计费「未开始」：同样是全屏页，但按钮是「开始使用」（点了先弹确认框）
+                    val dev = viewModel.selectedDevice!!
+                    MeteredDeviceScreen(
+                        emoji = dev.typeEmoji,
+                        deviceName = dev.displayName,
+                        typeName = dev.typeName,
+                        location = dev.locationOnly,
+                        preDeductYuan = MoneyFormat.format(dev.withholdMoney),
+                        inUse = false,
+                        isFavorite = viewModel.isFavorite(dev.macAddress),
+                        onToggleFavorite = { viewModel.toggleFavoriteCurrent() },
+                        onStartClick = { viewModel.requestStartMetered() },
+                        onStopClick = {},
+                        onBack = { viewModel.closeMeteredScreen() }
+                    )
+                }
             } else {
                 Box(modifier = Modifier.padding(padding).fillMaxSize()) {
                     LazyColumn(
@@ -220,6 +317,26 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
                             }
                         }
 
+                        // 收藏的设备 —— 排在「上次使用」前面。
+                        // 用户主动加的、杀后台也不丢的列表（「上次使用」只有一个槽位）。
+                        if (viewModel.favorites.isNotEmpty()) {
+                            item {
+                                Row(Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Text("收藏设备", fontWeight = FontWeight.Bold, fontSize = 18.sp,
+                                        color = AppColors.TextPrimary)
+                                    Text("${viewModel.favorites.size} 台",
+                                        color = AppColors.TextSecondary, fontSize = 12.sp)
+                                }
+                            }
+                            viewModel.favorites.forEach { fav ->
+                                item(key = "fav_${fav.mac}") {
+                                    FavoriteDeviceCard(fav) { viewModel.openFavorite(fav) }
+                                }
+                            }
+                        }
+
                         // 使用中的设备（多个）
                         if (viewModel.activeOrders.isNotEmpty()) {
                             item {
@@ -234,6 +351,8 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
                                 Text("上次使用设备", fontWeight = FontWeight.Bold, fontSize = 18.sp,
                                     color = AppColors.TextPrimary)
                             }
+                            // 「上次使用」也走新流程：点击进对应的操作页，
+                            // 不再直接开阀。和收藏项的行为保持一致。
                             item { LastDeviceCard(viewModel, phone) }
                         }
 
@@ -305,7 +424,13 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
                         }
 
                         items(filteredDevices, key = { it.mac }) { device ->
-                            DeviceCard(device) { viewModel.fetchDeviceInfo(device.mac) }
+                            DeviceCard(
+                                device = device,
+                                onClick = { viewModel.fetchDeviceInfo(device.mac) },
+                                // 长按收藏：附近设备只有广播里的 MAC/名字，没有 bigTypeId，
+                                // 所以要先把台账查回来再存（收藏必须存完整字段，否则离线渲染不出来）
+                                onLongClick = { viewModel.favoriteNearbyDevice(device) }
+                            )
                         }
 
                         item { Spacer(Modifier.height(110.dp)) }
@@ -320,6 +445,7 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
                     )
                 }
             }
+            } // AnimatedContent
         }
     }
 
@@ -328,6 +454,38 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
         DeviceDetailDialog(viewModel.selectedDevice, isActive, viewModel.isOwner,
             onDismiss = { viewModel.showDeviceDetail = false },
             onConfirm = { viewModel.startShower(phone) })
+    }
+
+    // ── 套餐下单确认弹窗 ──
+    //
+    // modeOrder 一发出就扣全款且不可退。用户要在这里亲眼核对
+    // 设备名 + 套餐 + 金额 + 时长，点了「确认开启」才真正调 commitModeOrder。
+    viewModel.pendingConfirmMode?.let { mode ->
+        val dev = viewModel.modeOrderDevice
+        ConfirmStartDialog(
+            deviceName = dev?.displayName ?: "",
+            deviceType = dev?.typeName ?: "套餐设备",
+            mode = mode,
+            isSubmitting = viewModel.isPlacingModeOrder,
+            onConfirm = { viewModel.commitModeOrder() },
+            onDismiss = { viewModel.dismissConfirmMode() }
+        )
+    }
+
+    // ── 按量计费「开始使用」确认弹窗 ──
+    //
+    // 开阀是**立刻出水并开始计费**的动作，不能点一下就执行。
+    if (viewModel.pendingConfirmStart) {
+        val dev = viewModel.selectedDevice
+        ConfirmStartDialog(
+            deviceName = dev?.displayName ?: "",
+            deviceType = dev?.typeName ?: "用水设备",
+            preDeductYuan = dev?.let { MoneyFormat.format(it.withholdMoney) },
+            mode = null,
+            isSubmitting = viewModel.meteredBusy,
+            onConfirm = { viewModel.confirmStartMetered(phone) },
+            onDismiss = { viewModel.dismissConfirmStart() }
+        )
     }
 
     // ── 开阀失败 ──
@@ -582,11 +740,29 @@ private fun ActiveOrderCard(order: com.hualala.linyu.model.ActiveOrder, viewMode
     }
 }
 
+/**
+ * 「上次使用设备」卡片。
+ *
+ * ## 行为改过（2026-10-24 #21）
+ *
+ * 原来右下角有一个「开始」按钮，**点了直接开阀**——那是按量计费设备的
+ * 危险捷径（误触就出水计费）。现在去掉按钮，整张卡片可点，
+ * 点击后走和收藏/扫码一样的入口 `routeAfterDeviceInfo`：
+ * 套餐设备进选套餐页、按量计费进全屏操作页（还要再确认一次才开阀）。
+ */
 @Composable
 private fun LastDeviceCard(viewModel: MainViewModel, phone: String) {
-    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp),
+    Card(
+        Modifier.fillMaxWidth().clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            onClick = { viewModel.openLastDevice(phone) }
+        ),
+        shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = AppColors.Card),
-        border = BorderStroke(0.8.dp, AppColors.Border), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
+        border = BorderStroke(0.8.dp, AppColors.Border),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(48.dp).clip(RoundedCornerShape(14.dp))
                 .background(
@@ -619,9 +795,68 @@ private fun LastDeviceCard(viewModel: MainViewModel, phone: String) {
                     fontSize = 12.sp
                 )
             }
-            Button(onClick = { viewModel.startLastDevice(phone) },
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AppColors.Accent)) { Text("开始") }
+            Spacer(Modifier.width(8.dp))
+            Icon(
+                Icons.Default.KeyboardArrowRight,
+                contentDescription = null,
+                tint = AppColors.TextSecondary,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+/**
+ * 收藏设备卡片。
+ *
+ * 和 [LastDeviceCard] 视觉一致（用户不该觉得这是两种东西），差别只有：
+ * 点整张卡片就进去（不需要单独一个「开始」按钮）。
+ *
+ * 数据全部来自本地快照（[FavoriteDevice]），**离线也能渲染**。
+ */
+@Composable
+private fun FavoriteDeviceCard(fav: FavoriteDevice, onClick: () -> Unit) {
+    Card(
+        Modifier.fillMaxWidth().clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            onClick = onClick
+        ),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = AppColors.Card),
+        border = BorderStroke(0.8.dp, AppColors.Border),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(48.dp).clip(RoundedCornerShape(14.dp))
+                    .background(fav.toDeviceInfo().typeColor),
+                contentAlignment = Alignment.Center
+            ) {
+                DeviceGlyph(fav.emoji, emojiSize = 22.sp, iconSize = 26.dp)
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+                TailEllipsisText(
+                    text = fav.displayName.ifEmpty { fav.rawName },
+                    modifier = Modifier.fillMaxWidth(),
+                    fontWeight = FontWeight.SemiBold,
+                    color = AppColors.TextPrimary
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    fav.typeName + " · " + if (fav.toDeviceInfo().isPackageBilling) "按套餐" else "按量计费",
+                    color = AppColors.TextSecondary,
+                    fontSize = 12.sp
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Icon(
+                Icons.Default.KeyboardArrowRight,
+                contentDescription = null,
+                tint = AppColors.TextSecondary,
+                modifier = Modifier.size(20.dp)
+            )
         }
     }
 }
@@ -665,8 +900,9 @@ private fun ScanPermissionCard(onGrant: () -> Unit) {
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun DeviceCard(device: NearbyDevice, onClick: () -> Unit) {
+private fun DeviceCard(device: NearbyDevice, onClick: () -> Unit, onLongClick: () -> Unit = {}) {
     val signalColor = when {
         device.rssi >= -70 -> AppColors.Success
         device.rssi >= -85 -> AppColors.Warning
@@ -687,10 +923,14 @@ private fun DeviceCard(device: NearbyDevice, onClick: () -> Unit) {
             .fillMaxWidth()
             .scale(pressScale)
             .clip(RoundedCornerShape(22.dp)) // 让点击涟漪也贴合卡片圆角
-            .clickable(
+            .combinedClickable(
                 interactionSource = interactionSource,
                 indication = rememberRipple(color = AppColors.Accent.copy(alpha = 0.25f)),
-                onClick = onClick
+                onClick = onClick,
+                // 长按 = 收藏 / 取消收藏。
+                // 不加心形按钮的原因：附近设备列表可能有几十台（公共澡堂），
+                // 每张卡都塞按钮会很挤；收藏是低频操作，藏起来正合适。
+                onLongClick = onLongClick
             ),
         shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = AppColors.Card),

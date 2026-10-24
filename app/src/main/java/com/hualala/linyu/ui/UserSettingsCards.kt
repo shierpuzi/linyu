@@ -207,6 +207,59 @@ internal fun NotifyCard() {
                     NotifyRow("横幅提醒", "开阀失败、设备被占用时从屏幕顶部弹出", alert) {
                         alert = it; PrefsHelper.notifyAlert = it
                     }
+
+                    Spacer(Modifier.height(14.dp))
+                    // ── 自检按钮 ──
+                    //
+                    // 为什么要有它：排查「通知不显示」时，正常路径必须先下一单
+                    // （真扣钱、0.6 元起）。这个按钮能**不花钱**就把整条链路跑一遍：
+                    // 建渠道 → 走 notify() → 系统是否真的呈现。
+                    //
+                    // 它发的就是真实那条套餐倒计时通知（ID_MODE_ORDER），
+                    // 所以如果这里能出来、下单时出不来，问题就精确定位在
+                    // 「下单后的调用时机」而不是通知本身。
+                    var probeResult by remember { mutableStateOf<String?>(null) }
+                    TextButton(
+                        onClick = {
+                            val r = Notifier.debugProbeModeOrder(context)
+                            probeResult = r.fold(
+                                onSuccess = { "已发送，请看通知栏（3 分钟后自动结束）" },
+                                onFailure = { "发送失败：${it.message}" }
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("发送一条测试倒计时通知", fontSize = 14.sp, color = AppColors.Accent)
+                    }
+                    Text(
+                        probeResult ?: "不会扣钱，只是模拟一条套餐倒计时，用来确认通知是否正常",
+                        fontSize = 11.sp,
+                        color = if (probeResult?.startsWith("发送失败") == true)
+                            AppColors.Warning else AppColors.TextSecondary
+                    )
+
+                    // 事件类通知的自检：和上面那条分工，验证「普通通知」的样式。
+                    // 普通通知（结束/失败/时间到）走标准样式，不进流体云——
+                    // 用户要能零成本确认这两类都长得对。
+                    var eventProbeResult by remember { mutableStateOf<String?>(null) }
+                    TextButton(
+                        onClick = {
+                            val r = Notifier.debugProbeEvent(context)
+                            eventProbeResult = r.fold(
+                                onSuccess = { "已发送，请看通知栏（可划掉）" },
+                                onFailure = { "发送失败：${it.message}" }
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("发送一条测试事件通知", fontSize = 14.sp, color = AppColors.Accent)
+                    }
+                    Text(
+                        eventProbeResult ?: "不会扣钱，验证「使用结束 / 开阀失败」那类通知的样式",
+                        fontSize = 11.sp,
+                        color = if (eventProbeResult?.startsWith("发送失败") == true)
+                            AppColors.Warning else AppColors.TextSecondary
+                    )
                 }
             }
         }
@@ -214,14 +267,16 @@ internal fun NotifyCard() {
 }
 
 /**
- * 消费趋势开关。
+ * 消费趋势开关。**受控组件**：状态由调用方持有。
  *
  * 控制钱包页那张「消费趋势」统计卡片（`SpendingTrendCard`）的显隐。
  * 跟通知开关一个道理：只控制显隐，不影响账单数据本身。
+ *
+ * @param checked 当前是否开启（来自调用方的 state，**不要在这里 remember**）
+ * @param onChanged 用户翻转后的回调
  */
 @Composable
-internal fun TrendToggleCard() {
-    var enabled by remember { mutableStateOf(PrefsHelper.trendEnabled) }
+internal fun TrendToggleCard(checked: Boolean, onChanged: (Boolean) -> Unit) {
     BaseCard {
         Row(
             modifier = Modifier.fillMaxWidth().padding(20.dp),
@@ -233,16 +288,134 @@ internal fun TrendToggleCard() {
                     color = AppColors.TextPrimary)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    if (enabled) "在钱包页显示消费统计图" else "已隐藏钱包页的消费统计图",
+                    if (checked) "在钱包页显示消费统计图" else "已隐藏钱包页的消费统计图",
                     color = AppColors.TextSecondary, fontSize = 13.sp
                 )
             }
             Spacer(Modifier.width(12.dp))
             Switch(
-                checked = enabled,
-                onCheckedChange = { enabled = it; PrefsHelper.trendEnabled = it },
+                checked = checked,
+                onCheckedChange = onChanged,
                 colors = SwitchDefaults.colors(checkedTrackColor = AppColors.Accent)
             )
+        }
+    }
+}
+
+/**
+ * 「消费合并」开关。**受控组件**：状态由调用方持有。
+ *
+ * ## 它解决什么问题
+ *
+ * 趣智校园按项目拆账：洗浴、洗衣饮水吹风各一套账单。想回答
+ * 「我今天到底花了多少」，得把两边加起来。开了这个开关，钱包页的趋势图
+ * 显示的就是**合并后**的消费，而不是当前板块那一份。
+ *
+ * ## 依赖「消费趋势」
+ *
+ * 合并结果**只喂给趋势图**，趋势图关着的时候合并没有展示出口，
+ * 开着只会白拉几倍请求（还要临时切认证参数），所以 [trendOn] 为 false 时禁用。
+ *
+ * @param trendOn 消费趋势是否开着（由调用方传，决定本开关是否可用）
+ * @param checked 用户自己的意愿（存储值 `PrefsHelper.mergeConsume` 的镜像）。
+ *   趋势关着时这里可能仍是 true，但显示按 [trendOn] && [checked] 算。
+ * @param onChanged 用户翻转后的回调
+ */
+@Composable
+internal fun MergeConsumeToggleCard(
+    trendOn: Boolean,
+    checked: Boolean,
+    onChanged: (Boolean) -> Unit
+) {
+    val effective = TrendMergeLink.displayChecked(trendOn, checked)
+
+    BaseCard {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "消费合并",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (trendOn) AppColors.TextPrimary else AppColors.TextSecondary
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    when {
+                        !trendOn -> "需要先开启「消费趋势」"
+                        effective -> "趋势图显示所有板块合计消费（含洗浴）"
+                        else -> "只显示当前板块的消费"
+                    },
+                    color = AppColors.TextSecondary, fontSize = 13.sp
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Switch(
+                checked = effective,
+                enabled = TrendMergeLink.switchEnabled(trendOn),
+                onCheckedChange = onChanged,
+                colors = SwitchDefaults.colors(
+                    checkedTrackColor = AppColors.Accent,
+                    // 禁用态别做得太显眼，但也别让用户以为能点
+                    disabledUncheckedTrackColor = AppColors.Border,
+                    disabledUncheckedThumbColor = AppColors.TextSecondary
+                )
+            )
+        }
+    }
+}
+
+/**
+ * 「消费趋势 + 消费合并」两张卡片。
+ *
+ * ## 为什么两个开关要放在一起、共享 state
+ *
+ * 它们有依赖关系（合并依赖趋势），而**依赖关系的状态必须在同一处**——
+ * 各自 `remember` 会出两种 bug，都真实发生过（2026-10-24 用户实测）：
+ *
+ * 1. **状态不同步**：趋势关掉后，合并卡片因为父级没重组而不重新求值，
+ *    看起来还是开的；退出再进来才变灰
+ * 2. **看起来"被自动打开"**：关趋势时如果只改 `trendEnabled`、不动 `mergeConsume`，
+ *    用户下次打开趋势就会看到合并也是开的，像是被自动勾上了
+ *
+ * 所以这里把两个开关的 state 提升到本组件，**任一变化立即写盘 + 同步两边的显示**。
+ *
+ * ## 关趋势时**真的关掉**合并（不是隐藏）
+ *
+ * 用户实测后的明确诉求：「我要不想看消费合并的内容需要再一次的关上」——
+ * 说明「重开趋势自动恢复合并」是反直觉的。所以关趋势时把
+ * `PrefsHelper.mergeConsume` 也置 false，语义变成「趋势没了，合并跟着没了」。
+ *
+ * @param onChanged 任一开关变化后的回调（让 ViewModel 重算合并数据）
+ */
+@Composable
+internal fun TrendAndMergeCards(onChanged: () -> Unit) {
+    // 初值从 Prefs 读一次；之后以这里的 state 为准，**每次都写回 Prefs**
+    var trendOn by remember { mutableStateOf(PrefsHelper.trendEnabled) }
+    var mergeOn by remember { mutableStateOf(PrefsHelper.mergeConsume) }
+
+    Column {
+        TrendToggleCard(checked = trendOn) { on ->
+            // 联动规则统一走 TrendMergeLink，别在这里手写 if——测试测的是同一份
+            val (newTrend, newMerge) = TrendMergeLink.afterTrendToggle(on, mergeOn)
+            trendOn = newTrend
+            mergeOn = newMerge
+            PrefsHelper.trendEnabled = newTrend
+            PrefsHelper.mergeConsume = newMerge
+            onChanged()
+        }
+        Spacer(Modifier.height(10.dp))
+        // 紧跟在趋势下面：它俩是依赖关系，放远了用户会以为合并开关点了没反应
+        MergeConsumeToggleCard(
+            trendOn = trendOn,
+            checked = mergeOn
+        ) { on ->
+            mergeOn = on
+            PrefsHelper.mergeConsume = on
+            onChanged()
         }
     }
 }

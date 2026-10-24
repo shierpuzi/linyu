@@ -101,6 +101,28 @@ data class DeviceInfo(
     val isHotWater: Boolean get() =
         deviceName.contains("热") || deviceName.contains("开水") || bigTypeName?.contains("热") == true
 
+    /**
+     * 计费模型——**决定用哪个下单界面**，比 [typeName] 那套显示用派生更重要。
+     *
+     * 判据在 [com.hualala.linyu.data.ModeOrderPolicy.billingModel]（纯函数、有单测），
+     * 这里只是转发，**不要在这里重写判断**。
+     *
+     * | | 计费模型 | 界面 |
+     * |---|---|---|
+     * | 热水器 / 洗手台 / 饮水机 | METERED | `ShowerScreen`（已用时长 + 结束按钮） |
+     * | 洗衣机 / 吹风机 | PACKAGE | `ModeOrderScreen`（选套餐 + 剩余倒计时 + 无停止按钮） |
+     *
+     * ⚠️ 饮水机是 METERED，虽然它和洗衣/吹风在同一个项目里。
+     * 实测账单：饮水机 preDeduct=2.0 而 consumeMoney=0.1/0.44（**不等**，按量结算），
+     * 洗衣/吹风则是 preDeduct == consumeMoney（扣全款）。
+     */
+    val billingModel: com.hualala.linyu.data.BillingModel
+        get() = com.hualala.linyu.data.ModeOrderPolicy.billingModel(bigTypeId, smallTypeId)
+
+    /** 是否走「套餐下单」通道（洗衣机 / 吹风机） */
+    val isPackageBilling: Boolean
+        get() = billingModel == com.hualala.linyu.data.BillingModel.PACKAGE
+
     /** 设备类型名称 */
     val typeName: String get() = when {
         isDrinkingWater -> "饮水机"

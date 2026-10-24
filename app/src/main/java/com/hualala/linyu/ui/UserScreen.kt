@@ -432,7 +432,10 @@ private fun UserCardContent(
         UserCardType.USE_CODE -> UseCodeCard(useCode, viewModel)
         UserCardType.BOUND_ROOM -> BoundRoomCard(viewModel)
         UserCardType.NOTIFY -> NotifyCard()
-        UserCardType.TREND -> TrendToggleCard()
+        // 「消费趋势」和「消费合并」是一对：合并依赖趋势，两者的状态必须在同一处管理，
+        // 否则会出现"关了趋势但合并还显示开着"的状态不同步（用户实测过一次）。
+        // 见 TrendAndMergeCards 的注释。
+        UserCardType.TREND -> TrendAndMergeCards { viewModel?.refreshMergeState() }
         UserCardType.BACKGROUND -> BackgroundCard(onShowBackground)
         UserCardType.LOG -> LogCard(onShowLog)
         UserCardType.ABOUT -> AboutCard()

@@ -52,6 +52,34 @@
     -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+      Android 16 QPR1（API 36.1）Live Update / ColorOS 流体云提升所需的**普通权限**
+      （不是运行时权限，声明即可，系统会在安装时授予）。
+
+      ⚠️ 这是 API 36.1 新增的权限，本工程 compileSdk 36 的 android.jar 里还没有这个常量，
+        所以只能按字符串声明；`Manifest.permission.POST_PROMOTED_NOTIFICATIONS` 编译不过。
+
+      用途：让「正在用水 / 套餐倒计时」这两条常驻通知有机会被系统提升为
+      状态栏胶囊 + 锁屏卡片（见 Notifier.requestLiveUpdate）。
+      旧系统不认识这条权限，会直接忽略，无副作用。
+    -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+
+    <!--
+      勿扰穿透所需（套餐倒计时通知在「睡眠勿扰」时段也要能看到）。
+
+      ⚠️ 这是**特殊权限**，不是普通的运行时权限：
+        · 声明它只是「告诉系统我想用」
+        · 真正生效要用户在 系统设置 → 通知 → 勿扰模式访问权限 里手动授予
+        · 没授予时 `NotificationChannel.setBypassDnd(true)` 会被系统**静默忽略**
+          （实测：渠道建出来了但 mBypassDnd=false，见开发日志 #8/#9）
+
+      所以代码里**不能假设它能穿透**，只做「尽力而为」：
+      拿到权限就让倒计时穿透，拿不到就照常在勿扰里安静待着。
+      同时 App 内会明确提示用户怎么开（见 Notifier.canBypassDnd + 设置页文案）。
+    -->
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"

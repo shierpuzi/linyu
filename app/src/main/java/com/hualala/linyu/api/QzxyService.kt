@@ -225,6 +225,93 @@ interface QzxyService {
     @GET("/project/info/triple")
     fun getProjectInfo(): Call<ResponseBody>
 
+    // ════════════════════════════════════════════
+    //  多项目（板块）通道
+    //
+    //  一个手机号可能绑定**多个独立项目**（如某某大学：
+    //  4000 洗浴 / 3356 洗衣饮水吹风），各有独立 accountId、钱包、账单。
+    //  loginCode 全局一套，但 projectId 与 accountId **必须成对切换**。
+    // ════════════════════════════════════════════
+
+    /** 账号绑定过哪些项目。[UserProject] 里给的是 projectId/accountId 配对 */
+    @GET("/user/project/list")
+    fun getUserProjectList(): Call<ResponseBody>
+
+    /**
+     * 当前项目启用了哪些业务模块（洗烘 / 饮水 / 吹风机 / 公寓洗澡 …）。
+     *
+     * 官方 App 首页那排图标就是按它渲染的，`isUse == 1` 才显示。
+     * ⚠️ 必须用**该项目自己的** projectId+accountId 调用，
+     * 否则返回「没有项目权限，请确认身份」。
+     */
+    @GET("/project/module/list")
+    fun getProjectModuleList(): Call<ResponseBody>
+
+    // ════════════════════════════════════════════
+    //  按套餐计费的设备通道（洗衣机 / 吹风机）
+    //
+    //  和上面的 tcpDevice/downRate/rateOrder（热水表按量计费）是**两条不同的路**：
+    //  · rateOrder：开阀，按用量结算，可以中途 closeOrder
+    //  · modeOrder：按套餐**一次性预扣全款**，到点服务端自动关停，
+    //                **没有任何停止/取消/退款接口**（实测两个设备类型都没有）
+    // ════════════════════════════════════════════
+
+    /**
+     * 套餐列表。
+     *
+     * 洗衣机 `smallTypeId=3`（标准洗/快速洗/单脱水/大件洗），
+     * 吹风机 `smallTypeId=5`（电吹风模式一/二/三）。
+     */
+    @GET("/device/mode/list")
+    fun getModeList(@Query("smallTypeId") smallTypeId: String): Call<ResponseBody>
+
+    /**
+     * 按套餐下单 —— **一发出就扣套餐全款，不可退**。
+     *
+     * `xfModel` 传的是套餐的 `modeId`（不是 `id`）。
+     * 响应恒为 `{"success":true,"errorCode":0,"data":null}`：
+     * **orderNo 不在这里**，只能从 MQTT `app_downRate_{phone}` 推送
+     * 或 `GET /order/query/lastOrder/byMac` 兜底获取。
+     *
+     * ⚠️ 调用方必须自己做二次确认 UI。这是钱，不是水。
+     */
+    @FormUrlEncoded
+    @POST("/order/tcpDevice/downRate/modeOrder")
+    fun modeOrder(
+        @Field("xfModel") xfModel: String,
+        @Field("snCode") snCode: String,
+        @Field("isHaier") isHaier: String = "0",
+        @FieldMap auth: Map<String, String>
+    ): Call<ResponseBody>
+
+    /**
+     * 按套餐计费设备的状态查询。
+     *
+     * ⚠️ 名字叫 washer 但**吹风机也调它**，不是洗衣机专用。
+     * 实测空闲时 `data == null`；占用时的返回仍未抓到样本。
+     */
+    @FormUrlEncoded
+    @POST("/order/tcpDevice/washer/status")
+    fun washerStatus(
+        @Field("snCode") snCode: String,
+        @Field("isHaier") isHaier: String = "0",
+        @FieldMap auth: Map<String, String>
+    ): Call<ResponseBody>
+
+    /**
+     * 按 MAC 查最近一单。**开发期免费拿 orderNo 的入口**。
+     *
+     * @param mac 12 位、不带冒号（如 `C47F0E2351BE`）
+     *
+     * ⚠️ 有时间窗口：实测 1 小时前的单查得到，19 天前的返回 `data:null`，
+     * 不存在的 MAC 也返回同样的 `null`。**不能当「设备空闲」判据。**
+     */
+    @GET("/order/query/lastOrder/byMac")
+    fun lastOrderByMac(
+        @Query("macAddress") mac: String,
+        @Query("isHaier") isHaier: String = "0"
+    ): Call<ResponseBody>
+
     // ── 短信验证码 ──
     // secret 由 SignUtils.smsSecret(telephone) 按手机号动态计算，不再硬编码
     @GET("/user/verification/code/get")

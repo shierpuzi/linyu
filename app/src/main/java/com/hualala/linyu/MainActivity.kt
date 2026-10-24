@@ -47,7 +47,9 @@ import com.hualala.linyu.ui.theme.ThemeMode
 import com.hualala.linyu.utils.AppLogger
 import com.hualala.linyu.utils.BackgroundManager
 import com.hualala.linyu.utils.BackgroundState
+import com.hualala.linyu.utils.Notifier
 import com.hualala.linyu.utils.PrefsHelper
+import com.hualala.linyu.utils.PrefillAuth
 
 /** 一次「从外部跳进来」的请求：落到哪个 tab、要不要直接进使用页 */
 data class NavRequest(val tab: Int, val showShower: Boolean)
@@ -80,8 +82,25 @@ class MainActivity : ComponentActivity() {
         // 这样自定义背景才能铺满到状态栏（各页面用 statusBarsPadding 自保内容位置）
         androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
         PrefsHelper.init(this)
+        // 调试包启动即登录：凭证来自 local.properties，公开构建里是空串（此行为 no-op）。
+        // ⚠️ 必须在下面读 isLoggedIn 之前调用，否则第一帧会闪一下登录页。
+        PrefillAuth.seed()
         AppLogger.init(this)
         AppLogger.installCrashHandler(this)
+        // 通知渠道**启动就建好**，不要等第一次发通知时才懒加载。
+        //
+        // ⚠️ 这是 2026-10-24 排查出的真 bug：原来 ensureChannels 只在
+        //    Notifier.xxx() 里调，而 Android 8+ 往**不存在的渠道**发通知是
+        //    **静默丢弃**的（不报错）。于是第一次发就没了，渠道也没建出来，
+        //    日志里连痕迹都没有——用户看到的就是「完全没有倒计时通知」。
+        // 放在 AppLogger.init 之后：ensureChannels 里要写日志。
+        Notifier.ensureChannels(this)
+        // 清掉上次遗留的**过期**倒计时通知。
+        //
+        // ⚠️ `setTimeoutAfter` 只对**新发的**通知生效。老版本发的、或用户改过系统
+        //    时间的，那条 1006 会一直挂在通知栏，Chronometer 过了 when 就变成负数。
+        //    实测 2026-10-24 10:08 有一条挂了 17 分钟（when=09:50:30）。
+        Notifier.cancelStaleModeOrder(this)
         BackgroundState.refresh() // 恢复自定义背景配置（与深浅模式无关）
 
         val initialThemeMode = try {

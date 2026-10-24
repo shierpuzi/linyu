@@ -42,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hualala.linyu.data.BillMerger
 import com.hualala.linyu.data.DailySpend
 import com.hualala.linyu.data.SpendingAnalytics
 import com.hualala.linyu.data.TrendRange
@@ -65,7 +66,13 @@ enum class TrendChartType(val label: String) {
 fun SpendingTrendCard(
     bills: List<BillItem>,
     loading: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /**
+     * 非空表示这张图是**跨板块合并**的结果，会标一行「合并自：洗浴 + 洗衣饮水吹风」。
+     *
+     * 空列表 = 单板块数据（当前板块），不显示任何合并提示。
+     */
+    mergedFrom: List<BillMerger.BoardBills> = emptyList()
 ) {
     // ⚠️ 这三个要**跨会话保留**：原来用 `remember` 存在 Composable 里，退出「我的」页
     // 再进来就复位成「7 天 / 折线 / 折叠」，用户每次都得重新点一遍。
@@ -102,6 +109,23 @@ fun SpendingTrendCard(
         Column(Modifier.padding(18.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("消费趋势", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AppColors.TextPrimary)
+                // 合并态的角标：不给提示的话，「总消费」变大了用户会以为是 bug
+                if (mergedFrom.isNotEmpty()) {
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(AppColors.Accent.copy(alpha = 0.14f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            "合并",
+                            fontSize = 10.sp,
+                            color = AppColors.Accent,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
                 Spacer(Modifier.weight(1f))
                 Box(
                     modifier = Modifier
@@ -127,6 +151,17 @@ fun SpendingTrendCard(
                     TrendMetric("总消费", MoneyFormat.withSymbol(summary.total), Modifier.weight(1f))
                     TrendMetric("消费次数", "${summary.count} 次", Modifier.weight(1f))
                     TrendMetric("单次平均", MoneyFormat.withSymbol(summary.average), Modifier.weight(1f))
+                }
+
+                if (mergedFrom.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "合并自：" + mergedFrom.joinToString(" + ") { it.shortName },
+                        fontSize = 11.sp,
+                        color = AppColors.TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
 
                 Spacer(Modifier.height(18.dp))

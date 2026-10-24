@@ -153,9 +153,13 @@ fun WalletScreen(viewModel: MainViewModel) {
             Spacer(Modifier.height(24.dp))
 
             if (trendEnabled) {
+                // 开了「消费合并」就用跨板块的合并数据，否则用当前板块的
+                val merged = viewModel.mergedBills
                 SpendingTrendCard(
-                    bills = viewModel.billHistory,
-                    loading = viewModel.isLoadingBills && !viewModel.billsLoaded
+                    bills = merged ?: viewModel.billHistory,
+                    loading = viewModel.isLoadingBills && !viewModel.billsLoaded,
+                    // 只在真的合并了（≥2 个板块）时才提示，否则会误导
+                    mergedFrom = if (merged != null) viewModel.mergedFrom else emptyList()
                 )
                 Spacer(Modifier.height(24.dp))
             }

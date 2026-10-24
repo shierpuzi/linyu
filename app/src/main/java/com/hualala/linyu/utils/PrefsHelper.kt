@@ -11,6 +11,7 @@ import com.hualala.linyu.data.BillHistoryCache
 import com.hualala.linyu.data.shouldPreserveForRecovery
 import com.hualala.linyu.model.ActiveOrder
 import com.hualala.linyu.model.BillItem
+import com.hualala.linyu.model.UserProject
 
 object PrefsHelper {
     /** 加密存储的文件名 */
@@ -127,8 +128,128 @@ object PrefsHelper {
         set(v) = prefs.edit().putString("walletBalance", v).apply()
     var schoolName: String get() = prefs.getString("schoolName", "") ?: ""; set(v) = prefs.edit().putString("schoolName", v).apply()
     val isLoggedIn: Boolean get() = loginCode.isNotEmpty()
+
+    // ── 多板块（项目）──
+    //
+    // 一个手机号可能绑定多个**独立项目**（4000 洗浴 / 3356 洗衣饮水吹风），
+    // 各有自己的 accountId、钱包、账单。loginCode 全局一套，但 projectId 与
+    // accountId 必须成对切换——见 data/ProjectRepository.kt。
+
+    /**
+     * 用户**选中的**项目 id。
+     *
+     * 和上面那个 [projectId] 是两件事：
+     * - [projectId] 是认证参数，永远是"当前真正在用的"那一个
+     * - 这个是"用户想要的那个"，重新登录后用它把板块还原回去
+     *
+     * 分开存是为了**不破坏老用户**：升级后本项为空，就退回登录响应里的
+     * projectId（= 他原来在用的那个），行为完全不变。
+     */
+    var currentProjectId: String get() = prefs.getString("currentProjectId", "") ?: ""
+        set(v) = prefs.edit().putString("currentProjectId", v).apply()
+
+    /** `/user/project/list` 的原始 JSON 快照。冷启动时先用它渲染板块列表，不用等网络 */
+    var projectListJson: String get() = prefs.getString("projectListJson", "") ?: ""
+        set(v) = prefs.edit().putString("projectListJson", v).apply()
+
+    /**
+     * 已知的 `projectId → 项目名`（JSON）。
+     *
+     * ⚠️ `/project/info/triple` 只能问**当前项目**的名字，而切换列表要显示所有板块的名字，
+     * 所以每切到一个板块就把名字记下来。没去过的板块只能显示「项目 3356」——
+     * `ponytail:` 代价是首次使用有占位文案，换来的是绝不为取名字临时改全局认证状态
+     * （那会让并发的钱包/账单请求打到错误的板块上，真的会串号）。
+     */
+    var projectNamesJson: String get() = prefs.getString("projectNamesJson", "") ?: ""
+        set(v) = prefs.edit().putString("projectNamesJson", v).apply()
+
+    fun cachedProjects(): List<UserProject> = runCatching {
+        JsonParser().parse(projectListJson).asJsonArray.map {
+            gson.fromJson(it, UserProject::class.java)
+        }
+    }.getOrDefault(emptyList())
+
+    fun saveCachedProjects(list: List<UserProject>) {
+        projectListJson = gson.toJson(list)
+    }
+
+    fun projectNames(): Map<Long, String> = runCatching {
+        JsonParser().parse(projectNamesJson).asJsonObject.entrySet().mapNotNull { e ->
+            e.key.toLongOrNull()?.let { it to e.value.asString }
+        }.toMap()
+    }.getOrDefault(emptyMap())
+
+    fun rememberProjectName(projectId: Long, name: String) {
+        if (projectId <= 0L || name.isBlank()) return
+        val map = projectNames().toMutableMap()
+        if (map[projectId] == name) return
+        map[projectId] = name
+        projectNamesJson = gson.toJson(map.mapKeys { it.key.toString() })
+    }
+
+    /**
+     * 切换板块时**必须**清掉的缓存。
+     *
+     * 这些数据全是"按项目维度"的，不清就会串号——最典型的是账单缓存：
+     * [BillHistoryCache] 的 key 是 `billCache_<userId>`，两个板块**同一个 userId**，
+     * 不清的话切过去先显示上一个板块的账单，余额估算跟着一起错。
+     *
+     * ⚠️ **不清** pendingSettlements / activeOrders / consume_* / startedAt_*：
+     * 那些是在途的钱和设备计时，丢了就找不回来了。所以调用方必须先确认没有进行中的订单。
+     */
+    fun clearProjectScopedCache() {
+        try {
+            val editor = prefs.edit()
+            editor.remove("walletBalance")
+                .remove("campusBalance").remove("campusBalanceTime")
+                .remove("schoolName")
+                // 小组件快照是上个板块的设备/账单
+                .remove("widgetNearbyJson").remove("widgetNearbyTime")
+                .remove("widgetBillJson").remove("widgetBillTime")
+                // 占用标记属于上个板块的设备
+                .remove("occupiedSnCode").remove("occupiedAtMs")
+                // 「上次使用设备」整个是项目内的概念
+                .remove("lastDeviceName").remove("lastDeviceMac").remove("lastDeviceSnCode")
+                .remove("lastDeviceRawName").remove("lastDeviceEmoji")
+                .remove("lastDeviceWithholdMoney").remove("lastDeviceTypeName")
+            // billCache_* 的 key 只带 userId（两个板块相同），必须逐条清
+            prefs.all.keys.filter { it.startsWith("billCache_") }.forEach { editor.remove(it) }
+            // 按套餐计费的单（洗衣机/吹风机）：切板块后不该带到另一个板块
+            // ⚠️ 但**只清已完成/无效的**是不现实的——调用方必须先确认没有在途套餐单
+            //    （见 ProjectRepository.switchTo 的前置检查）
+            prefs.all.keys.filter { it.startsWith("mode_order_") }.forEach { editor.remove(it) }
+            editor.apply()
+        } catch (_: Exception) {
+            // 同 clear()：加密存储偶发异常时不崩，界面状态由调用方自己复位
+        }
+    }
     fun saveAuth(lc: String, uid: String, aid: String, pid: String, phone: String, name: String?) {
         loginCode = lc; userId = uid; accountId = aid; projectId = pid; telephone = phone; userName = name ?: ""
+    }
+
+    /**
+     * 通用字符串读写。给 `data/ModeOrderController` 这类「自己管键名」的组件用。
+     *
+     * ⚠️ [writeRaw] 收到**空串表示删除**——不删的话 `prefs.all` 里会留一堆空值键，
+     * 而且「没有值」和「值是空串」两种状态会让调用方多写一层判断。
+     */
+    fun readRaw(key: String): String? = try {
+        prefs.getString(key, null)
+    } catch (_: Exception) {
+        null
+    }
+
+    fun writeRaw(key: String, value: String) {
+        try {
+            if (value.isEmpty()) {
+                prefs.edit().remove(key).apply()
+            } else {
+                prefs.edit().putString(key, value).apply()
+            }
+        } catch (_: Exception) {
+            // 加密存储偶发异常时不崩：丢一条本地记录不致命，
+            // ModeOrderController 的 pendingOrder() 返回 null 会退化成「重新查服务端」
+        }
     }
     fun clear(preserveActiveRecovery: Boolean = false) {
         // 保留余额和填写时间
@@ -141,6 +262,8 @@ object PrefsHelper {
             editor.remove("loginCode").remove("userId").remove("accountId")
                 .remove("projectId").remove("telephone").remove("userName")
                 .remove("boundRoom")
+                // 板块列表和当前板块是**账号级**的，换账号必须重拉
+                .remove("currentProjectId").remove("projectListJson").remove("projectNamesJson")
                 .remove("lastConsumeMoney").remove("lastConsumeTime")
                 .remove("widgetNearbyJson").remove("widgetBillJson")
                 .remove("widgetNearbyTime").remove("widgetBillTime")
@@ -408,6 +531,35 @@ object PrefsHelper {
         set(v) = prefs.edit().putBoolean("trendEnabled", v).apply()
 
     /**
+     * 「消费合并」——把多个板块（洗浴 / 洗衣饮水吹风）的账单合成一份，
+     * 看到**今天实际花了多少钱**，而不是各算各的。
+     *
+     * ## 与「消费趋势」的关系：**联动关闭**
+     *
+     * 合并结果只喂给钱包页那张趋势图（[com.hualala.linyu.ui.SpendingTrendCard]），
+     * 趋势关掉时合并没有展示出口。所以：
+     *
+     * - 设置页关趋势时**同时把本值置 false**（见 `TrendAndMergeCards`）
+     * - 这一条是用户实测后明确要求的（2026-10-24）：原来"关趋势不动合并"的做法
+     *   会让用户重开趋势时看到合并又亮了，以为开关坏了
+     *
+     * 因此 [canMergeConsume] 就是两个值的与——两边都开才真合并。
+     *
+     * @see canMergeConsume 实际生效值
+     */
+    var mergeConsume: Boolean get() = prefs.getBoolean("mergeConsume", false)
+        set(v) = prefs.edit().putBoolean("mergeConsume", v).apply()
+
+    /**
+     * 消费合并**是否真的生效**。
+     *
+     * 取交集而不是只读 [mergeConsume]：万一存储值因为某种原因和趋势不一致
+     * （旧版本升级上来、或外部改了 Prefs），这里兜住，不会出现
+     * 「趋势关着却在偷偷拉别的板块账单」。
+     */
+    val canMergeConsume: Boolean get() = trendEnabled && mergeConsume
+
+    /**
      * 消费趋势卡片的**视图状态**（跨会话保留）。
      *
      * ⚠️ 这三个原来用 `remember` 存在 Composable 里，退出「我的」页再进来就复位成
@@ -497,6 +649,26 @@ object PrefsHelper {
     /** 上次使用设备的类型名（热水器 / 洗手台 / 饮水机），小组件副标题用 */
     var lastDeviceTypeName: String get() = prefs.getString("lastDeviceTypeName", "") ?: ""
         set(v) = prefs.edit().putString("lastDeviceTypeName", v).apply()
+
+    // ── 收藏设备 ──
+    //
+    // 和上面那组 lastDevice* 的区别：那是「1 个槽位、被每次操作覆盖」的易失记录，
+    // 收藏是**多条、用户主动添加、杀后台也不丢**的持久列表。
+    // 渲染卡片需要的字段全部存进 JSON，**不依赖联网回查**（离线也要能显示）。
+
+    /** 收藏列表的 JSON。读写请走 [com.hualala.linyu.data.FavoriteStore]，别直接解析 */
+    var favoritesJson: String get() = prefs.getString("favoritesJson", "") ?: ""
+        set(v) = prefs.edit().putString("favoritesJson", v).apply()
+
+    /** 收藏列表（已排序：新收藏在前）。数据损坏时返回空列表，不抛异常 */
+    fun favorites(): List<com.hualala.linyu.data.FavoriteDevice> =
+        com.hualala.linyu.data.FavoriteStore.sorted(
+            com.hualala.linyu.data.FavoriteStore.decode(favoritesJson)
+        )
+
+    fun saveFavorites(list: List<com.hualala.linyu.data.FavoriteDevice>) {
+        favoritesJson = com.hualala.linyu.data.FavoriteStore.encode(list)
+    }
 
     // ── 小组件离线快照 ──
     // 小组件自己扫不了蓝牙、拉不了账单，所以由 App 在干活时把结果存下来，
