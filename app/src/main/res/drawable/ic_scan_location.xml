@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  定位 / 附近扫描的权限引导（「开启扫描，发现附近设备」）。
+  原来标题前画的是 emoji 🔍（Android 11 及以下）或 📶（Android 12+）。
+
+  和 ic_device_* 同一套视觉语言：24dp 画布、单色实心、颜色由使用处 tint 决定。
+  放大镜：镜片圆环（evenOdd 挖空）+ 45° 手柄。圆用 A 命令。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 镜片：外 r=6.15，内 r=4.55，圆心 (10.2,10.2) -->
+    <path
+        android:fillColor="#FF000000"
+        android:fillType="evenOdd"
+        android:pathData="M4.05,10.2A6.15,6.15 0 1 1 16.35,10.2A6.15,6.15 0 1 1 4.05,10.2ZM5.65,10.2A4.55,4.55 0 1 0 14.75,10.2A4.55,4.55 0 1 0 5.65,10.2Z" />
+    <!-- 手柄：45° 粗直条 -->
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M14.6,16.05L16.05,14.6L20.2,18.75A1.025,1.025 0 0 1 18.75,20.2Z" />
+</vector>

@@ -400,7 +400,10 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                     // 存的就是寝室键，但老版本存过 `320房` / 完整设备名，
                                     // 过一遍 roomKey 让两种历史值都显示成同一个样子
-                                    Text("🏠 已筛选：${DeviceInfo.roomKey(viewModel.boundRoom) ?: viewModel.boundRoom}",
+                                    Icon(painterResource(R.drawable.ic_room), contentDescription = null,
+                                        tint = AppColors.Accent, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("已筛选：${DeviceInfo.roomKey(viewModel.boundRoom) ?: viewModel.boundRoom}",
                                         color = AppColors.Accent, fontSize = 13.sp,
                                         fontWeight = FontWeight.Medium)
                                     Spacer(Modifier.width(8.dp))
@@ -988,8 +991,18 @@ private fun ScanPermissionCard(onGrant: () -> Unit) {
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(Modifier.padding(20.dp)) {
-            Text("${if (needLocation) "🔍" else "📶"} 开启扫描，发现附近设备",
-                fontWeight = FontWeight.SemiBold, color = AppColors.TextPrimary)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    painter = painterResource(
+                        if (needLocation) R.drawable.ic_scan_location else R.drawable.ic_scan_signal
+                    ),
+                    contentDescription = null, tint = AppColors.TextPrimary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("开启扫描，发现附近设备",
+                    fontWeight = FontWeight.SemiBold, color = AppColors.TextPrimary)
+            }
             Spacer(Modifier.height(6.dp))
             Text(
                 if (needLocation)
@@ -1006,8 +1019,13 @@ private fun ScanPermissionCard(onGrant: () -> Unit) {
                 Text("授予权限并扫描")
             }
             Spacer(Modifier.height(6.dp))
-            Text("也可以直接用右上角 📷 扫码绑定设备，无需任何权限",
-                color = AppColors.TextSecondary, fontSize = 11.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(painterResource(R.drawable.ic_qr_code_scanner), contentDescription = null,
+                    tint = AppColors.TextSecondary, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(5.dp))
+                Text("也可以直接用右上角扫码绑定设备，无需任何权限",
+                    color = AppColors.TextSecondary, fontSize = 11.sp)
+            }
         }
     }
 }

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  浅色模式（太阳）。「我的」页右上角原来画的是 Text("☀️")。
+
+  和 ic_device_* 同一套视觉语言：24dp 画布、单色实心、颜色由使用处 tint 决定。
+  圆心 + 8 道光芒，**全部直角**（四道正交用矩形、四道 45° 用平行四边形）。
+  不做圆角：正交的圆角矩形和 45° 的直角形混在一起时，斜光会读成一串菱形。
+
+  ⚠️ 斜光的顶点是算出来的（内径 5.4u、外径 8.6u、宽 1.8u、沿 45°）。
+     改数字前按同样的三角换一遍，别手调——手调过一版，四道全歪。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 圆心 r=4.4（两条 A 半圆弧合成整圆） -->
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M7.6,12A4.4,4.4 0 1 1 16.4,12A4.4,4.4 0 1 1 7.6,12Z" />
+    <!-- 正交四道：宽 2.4u、长 3.6u -->
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M10.8,1.4H13.2V5H10.8Z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M10.8,19H13.2V22.6H10.8Z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M1.4,10.8H5V13.2H1.4Z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M19,10.8H22.6V13.2H19Z" />
+    <!-- 45° 四道（内径 5.6、外径 9.2、半宽 1.2，和正交四道同宽） -->
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M16.808,15.111L19.354,17.657L17.657,19.354L15.111,16.808Z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M8.889,16.808L6.343,19.354L4.646,17.657L7.192,15.111Z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M15.111,7.192L17.657,4.646L19.354,6.343L16.808,8.889Z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M7.192,8.889L4.646,6.343L6.343,4.646L8.889,7.192Z" />
+</vector>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  深色模式（月亮）。「我的」页右上角原来画的是 Text("🌙")。
+
+  和 ic_device_* 同一套视觉语言：24dp 画布、单色实心、颜色由使用处 tint 决定。
+  弯月用一条 A 圆弧挖出来（evenOdd），不用 C/S 近似。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:fillType="evenOdd"
+        android:pathData="M14.1,2.4A9.6,9.6 0 1 0 14.1,21.6A10.8,10.8 0 0 1 14.1,2.4Z" />
+</vector>

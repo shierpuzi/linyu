@@ -203,7 +203,7 @@ fun LoginScreen(
                             placeholder = { Text("32 位，可直接粘整条请求 URL", fontSize = 12.sp) },
                             trailingIcon = {
                                 if (viewModel.loginCode.isNotEmpty()) {
-                                    TextButton(onClick = { viewModel.loginCode = "" }) { Text("✕", color = Color.Gray) }
+                                    ClearFieldButton { viewModel.loginCode = "" }
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -235,7 +235,7 @@ fun LoginScreen(
                             onValueChange = { viewModel.phone = it },
                             label = { Text("手机号") },
                             leadingIcon = { Icon(Icons.Default.Phone, null, tint = Color(0xFF1A73E8)) },
-                            trailingIcon = { if (viewModel.phone.isNotEmpty()) TextButton(onClick = { viewModel.phone = "" }) { Text("✕", color = Color.Gray) } },
+                            trailingIcon = { if (viewModel.phone.isNotEmpty()) ClearFieldButton { viewModel.phone = "" } },
                             modifier = Modifier.fillMaxWidth().loginAutofill(phoneAutofill, autofill),
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
@@ -281,7 +281,7 @@ fun LoginScreen(
                                 onValueChange = { viewModel.password = it },
                                 label = { Text("密码") },
                                 leadingIcon = { Icon(Icons.Default.Lock, null, tint = Color(0xFF1A73E8)) },
-                                trailingIcon = { if (viewModel.password.isNotEmpty()) TextButton(onClick = { viewModel.password = "" }) { Text("✕", color = Color.Gray) } },
+                                trailingIcon = { if (viewModel.password.isNotEmpty()) ClearFieldButton { viewModel.password = "" } },
                                 modifier = Modifier.fillMaxWidth().loginAutofill(passwordAutofill, autofill),
                                 singleLine = true,
                                 visualTransformation = PasswordVisualTransformation(),
@@ -378,8 +378,25 @@ private fun loginFieldColors() = OutlinedTextFieldDefaults.colors(
     cursorColor = Color(0xFF1A73E8)
 )
 
-/** 抓包拿 loginCode 的教程（仓库 wiki）。和 UserScreen 的 openUrl 同款写法，失败静默 */
-private const val WIKI_GET_LOGIN_CODE =
+/**
+ * 输入框右侧的「清空」按钮。
+ *
+ * 原来三个输入框各写一遍 `Text("✕")`，用的是 emoji/符号当图标——美术统一后
+ * 一律走矢量。用 `Icon`（24dp 基线）比原来的 20sp 文本大，所以缩到 18dp。
+ */
+@Composable
+private fun ClearFieldButton(onClick: () -> Unit) {
+    IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
+        Icon(
+            painter = painterResource(R.drawable.ic_close),
+            contentDescription = "清空",
+            tint = Color.Gray,
+            modifier = Modifier.size(18.dp)
+        )
+    }
+}
+
+/** 抓包拿 loginCode 的教程（仓库 wiki）。和 UserScreen 的 openUrl 同款写法，失败静默 */private const val WIKI_GET_LOGIN_CODE =
     "https://github.com/shierpuzi/linyu/blob/master/docs/WIKI-%E6%8A%93%E5%8C%85%E8%8E%B7%E5%8F%96loginCode.md"
 
 private fun openWiki(context: android.content.Context) {

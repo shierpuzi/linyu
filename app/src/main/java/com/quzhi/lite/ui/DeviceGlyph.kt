@@ -34,7 +34,7 @@ fun deviceIconRes(emoji: String?): Int = when (emoji) {
     "🪥" -> R.drawable.ic_device_sink
     "🧺" -> R.drawable.ic_device_washer
     "💨" -> R.drawable.ic_device_dryer
-    // 饮水机三种取值（热水 ♨️ / 冷水 ❄️ / 未知 🚰）共用同一个水龙头图标：
+    // 饮水机三种取值（热水 ♨️ / 冷水 ❄️ / 未知 🚰）共用同一个饮水机图标：
     // 26dp 单色图标塞不下冷热差异，而冷热已经由文案「正在接热水/凉水」表达
     "♨️", "❄️", "🚰" -> R.drawable.ic_device_faucet
     else -> R.drawable.ic_device_shower

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  关闭 / 清空（登录页三个输入框右侧的清空按钮，原来是 Text("✕")）。
+
+  和 ic_device_* 同一套视觉语言：24dp 画布、单色实心、颜色由使用处 tint 决定。
+  造型取 Material Icons「close」的几何——纯直线，18dp 下依然清楚。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12Z" />
+</vector>

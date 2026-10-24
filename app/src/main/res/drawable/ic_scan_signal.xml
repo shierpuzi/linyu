@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  「附近的设备」权限引导（Android 12+ 那条）。
+  原来标题前画的是 emoji 📶（信号格）。
+
+  和 ic_device_* 同一套视觉语言：24dp 画布、单色实心、颜色由使用处 tint 决定。
+  信号格：四根柱，宽 3.2u、间距 3.2u，整组居中（总宽 22.4u），底边对齐 y=21.6，
+  最高一根到 y=7.4。全是直角矩形，没有圆弧。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M0.8,17.9H4V21.6H0.8Z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M7.2,14.4H10.4V21.6H7.2Z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M13.6,10.9H16.8V21.6H13.6Z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M20,7.4H23.2V21.6H20Z" />
+</vector>

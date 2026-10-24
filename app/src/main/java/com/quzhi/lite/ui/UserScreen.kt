@@ -241,7 +241,14 @@ fun UserScreen(
                         themeBtnPos = coords.boundsInRoot().center
                     }
                 ) {
-                    Text(if (themeMode == ThemeMode.DARK) "🌙" else "☀️", fontSize = 20.sp)
+                    Icon(
+                        painter = painterResource(
+                            if (themeMode == ThemeMode.DARK) R.drawable.ic_theme_dark
+                            else R.drawable.ic_theme_light
+                        ),
+                        contentDescription = if (themeMode == ThemeMode.DARK) "切换到浅色模式" else "切换到深色模式",
+                        tint = AppColors.TextSecondary
+                    )
                 }
                 IconButton(onClick = { showSettings = true }) {
                     Icon(Icons.Default.Settings, contentDescription = "打开设置", tint = AppColors.TextSecondary)
@@ -632,7 +639,10 @@ private fun BoundRoomCard(viewModel: MainViewModel?) {
                     // 存的就是寝室键本身（`某小区-1栋-1层-101`），直接显示。
                     // 外面再套一次 roomKey 是为了**兼容老版本存下来的值**——
                     // 那些可能是 `320房`，甚至是完整设备名。
-                    Text("🏠 ${DeviceInfo.roomKey(boundRoom) ?: boundRoom}",
+                    Icon(painterResource(R.drawable.ic_room), contentDescription = null,
+                        tint = AppColors.TextSecondary, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(DeviceInfo.roomKey(boundRoom) ?: boundRoom,
                         fontWeight = FontWeight.Medium,
                         color = AppColors.TextPrimary, maxLines = 1,
                         overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
@@ -1180,10 +1190,16 @@ private fun AboutCard() {
             Spacer(Modifier.height(6.dp))
             // Star 数来自 GitHub API，拉取失败时省略（不显示假数据）
             val stars = repo?.stars
-            Text(
-                "项目名：趣智Lite" + (stars?.let { " · ⭐ $it" } ?: ""),
-                color = AppColors.TextSecondary, fontSize = 13.sp
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("项目名：趣智Lite", color = AppColors.TextSecondary, fontSize = 13.sp)
+                if (stars != null && stars > 0) {
+                    Spacer(Modifier.width(6.dp))
+                    Icon(painterResource(R.drawable.ic_star), contentDescription = "GitHub 星标数",
+                        tint = AppColors.TextSecondary, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(3.dp))
+                    Text("$stars", color = AppColors.TextSecondary, fontSize = 13.sp)
+                }
+            }
 
             Spacer(Modifier.height(6.dp))
             // 作者固定写本仓库 owner，不再回退到旧项目作者名。
