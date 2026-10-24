@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  警告（凭证未加密提示里的图标）。
+
+  自己画而不是用 Icons.Default.Warning：项目已移除 material-icons-extended，
+  只保留 material3 传递进来的 material-icons-core，能用哪些图标没有保证。
+  自带一个单色矢量最稳，也和 ic_drop / ic_device_* 风格一致。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 三角形外框（evenOdd 挖空，得到环形边框） -->
+    <path
+        android:fillColor="#FF000000"
+        android:fillType="evenOdd"
+        android:pathData="M12,2.4c0.44,0 0.84,0.23 1.06,0.61l9.1,15.6A1.22,1.22 0 0 1 21.1,20.5H2.9a1.22,1.22 0 0 1 -1.06,-1.79l9.1,-15.6A1.22,1.22 0 0 1 12,2.4zM12,4.9L4.3,18.5h15.4z" />
+    <!-- 感叹号竖条 -->
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M11.05,9.2a0.95,0.95 0 0 1 1.9,0v4.2a0.95,0.95 0 0 1 -1.9,0z" />
+    <!-- 感叹号圆点 -->
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M12,15.5a1.1,1.1 0 1 0 0,2.2a1.1,1.1 0 1 0 0,-2.2z" />
+</vector>

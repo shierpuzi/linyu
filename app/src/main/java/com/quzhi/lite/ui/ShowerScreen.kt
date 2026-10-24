@@ -17,10 +17,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.quzhi.lite.R
 import com.quzhi.lite.ui.theme.AppColors
 import com.quzhi.lite.ui.theme.LocalThemeMode
 import com.quzhi.lite.ui.theme.ThemeMode
@@ -92,8 +94,18 @@ fun ShowerScreen(
                     modifier = Modifier.padding(20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text("💧 已预扣 ¥$remaining", fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold, color = AppColors.Accent)
+                    // 美术统一：💧 改成矢量水滴图标
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_drop),
+                            contentDescription = null,
+                            tint = AppColors.Accent,
+                            modifier = Modifier.size(18.dp).padding(bottom = 3.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("已预扣 ¥$remaining", fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold, color = AppColors.Accent)
+                    }
                     Spacer(Modifier.height(4.dp))
                     Text("计费以热水器显示为准", fontSize = 12.sp, color = AppColors.TextSecondary)
                 }

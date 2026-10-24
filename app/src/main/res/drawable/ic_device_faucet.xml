@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  饮水机 / 水龙头（设备头像）——热水、凉水、默认三种状态共用这一个图标。
+  单色实心：冷水/热水的区别不放进图形里（26dp 单色塞不下，且界面文案已写明），
+  由 DeviceInfo.colorForEmoji 的绿色底 + 文案区分。
+  
+  造型：左侧墙面法兰 + 横向管身 + 向下出水嘴 + 顶部旋钮 + 滴水。
+  和 ic_widget_faucet.xml（描边风格、账单条目用）不同，这个是实心，
+  与 shower/sink/washer/dryer 同一套视觉语言。
+  
+  由 _icon_preview/_final_gen_faucet.py 生成，别手改数字——改生成器再跑一遍。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M4.956,5.218H4.956A1.056,1.056 0 0 1 6.012,6.275V10.611A1.056,1.056 0 0 1 4.956,11.667H4.956A1.056,1.056 0 0 1 3.9,10.611V6.275A1.056,1.056 0 0 1 4.956,5.218Z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M8.069,6.664H17.742A1.946,1.946 0 0 1 19.687,8.609V8.609A1.946,1.946 0 0 1 17.742,10.555H8.069A1.946,1.946 0 0 1 6.124,8.609V8.609A1.946,1.946 0 0 1 8.069,6.664Z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M17.908,10.444H17.908A1.779,1.779 0 0 1 19.687,12.223V13.446A1.779,1.779 0 0 1 17.908,15.224H17.908A1.779,1.779 0 0 1 16.13,13.446V12.223A1.779,1.779 0 0 1 17.908,10.444Z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M12.35,3.328H12.35A1.556,1.556 0 0 1 13.906,4.885V5.218A1.556,1.556 0 0 1 12.35,6.775H12.35A1.556,1.556 0 0 1 10.793,5.218V4.885A1.556,1.556 0 0 1 12.35,3.328Z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M17.908,15.892A1.89,1.89 0 0 1 19.798,18.782A1.89,1.89 0 0 1 16.018,18.782A1.89,1.89 0 0 1 17.908,15.892Z" />
+</vector>

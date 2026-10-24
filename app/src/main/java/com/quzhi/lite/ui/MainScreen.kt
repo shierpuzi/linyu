@@ -672,8 +672,20 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
         AlertDialog(
             onDismissRequest = {},
             title = {
-                Text("⚠️ 热水器已自动关闭", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth())
+                Row(
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_device_shower),
+                        contentDescription = null,
+                        tint = AppColors.TextPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text("热水器已自动关闭", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                }
             },
             text = {
                 Column(
@@ -681,7 +693,13 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("🚿 ", fontSize = 16.sp)
+                        Icon(
+                            painter = painterResource(R.drawable.ic_device_shower),
+                            contentDescription = null,
+                            tint = AppColors.TextSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
                         Text(viewModel.autoCloseDeviceName, fontWeight = FontWeight.Medium, color = AppColors.TextPrimary)
                     }
                     Spacer(Modifier.height(6.dp))

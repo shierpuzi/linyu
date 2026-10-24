@@ -42,12 +42,17 @@ fun DeviceDetailDialog(
         title = {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // ⚠️ 这里用 emoji，**不要**换成 DeviceGlyph。
+                    // 美术统一：设备图标全部改成矢量图，这里不再画 emoji。
                     //
-                    // DeviceGlyph 的图标 tint 写死是白色，因为它默认压在设备类型色的
-                    // 圆底上（首页那几张卡片都有底色）。而这个标题行**没有底色**——
-                    // 白图标直接压在对话框的浅色背景上，等于看不见。
-                    Text(emoji, fontSize = 22.sp)
+                    // ⚠️ 但这一行**没有底色**，不能用默认的白色 tint（白图标压在
+                    //    对话框浅色背景上等于看不见）。DeviceGlyph 加了 tint 参数，
+                    //    这里传设备自己的类型色——和首页卡片底色同源，视觉一致。
+                    DeviceGlyph(
+                        emoji = emoji,
+                        emojiSize = 22.sp,
+                        iconSize = 24.dp,
+                        tint = device.typeColor
+                    )
                     Spacer(Modifier.width(6.dp))
                     Text(type, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 }

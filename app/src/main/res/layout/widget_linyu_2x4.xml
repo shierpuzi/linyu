@@ -454,14 +454,15 @@
                         android:paddingStart="7dp"
                         android:paddingEnd="7dp">
 
-                        <TextView
+                        <ImageView
                             android:id="@+id/widget_near0_emoji"
                             android:layout_width="26dp"
                             android:layout_height="26dp"
                             android:background="@drawable/widget_avatar"
-                            android:gravity="center"
-                            android:textSize="13sp"
-                            android:text="🚿" />
+                            android:padding="5dp"
+                            android:scaleType="fitCenter"
+                            android:tint="#FFFFFF"
+                            android:contentDescription="@null" />
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -547,14 +548,15 @@
                         android:paddingStart="7dp"
                         android:paddingEnd="7dp">
 
-                        <TextView
+                        <ImageView
                             android:id="@+id/widget_near1_emoji"
                             android:layout_width="26dp"
                             android:layout_height="26dp"
                             android:background="@drawable/widget_avatar"
-                            android:gravity="center"
-                            android:textSize="13sp"
-                            android:text="🚿" />
+                            android:padding="5dp"
+                            android:scaleType="fitCenter"
+                            android:tint="#FFFFFF"
+                            android:contentDescription="@null" />
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -709,14 +711,15 @@
                         android:orientation="horizontal"
                         android:gravity="center_vertical">
 
-                        <TextView
+                        <ImageView
                             android:id="@+id/widget_bill0_emoji"
                             android:layout_width="26dp"
                             android:layout_height="26dp"
                             android:background="@drawable/widget_avatar"
-                            android:gravity="center"
-                            android:textSize="13sp"
-                            android:text="🚿" />
+                            android:padding="5dp"
+                            android:scaleType="fitCenter"
+                            android:tint="#FFFFFF"
+                            android:contentDescription="@null" />
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -764,14 +767,15 @@
                         android:orientation="horizontal"
                         android:gravity="center_vertical">
 
-                        <TextView
+                        <ImageView
                             android:id="@+id/widget_bill1_emoji"
                             android:layout_width="26dp"
                             android:layout_height="26dp"
                             android:background="@drawable/widget_avatar"
-                            android:gravity="center"
-                            android:textSize="13sp"
-                            android:text="🚿" />
+                            android:padding="5dp"
+                            android:scaleType="fitCenter"
+                            android:tint="#FFFFFF"
+                            android:contentDescription="@null" />
 
                         <LinearLayout
                             android:layout_width="0dp"

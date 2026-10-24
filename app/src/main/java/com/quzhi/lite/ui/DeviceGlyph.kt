@@ -2,7 +2,6 @@ package com.quzhi.lite.ui
 
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -14,7 +13,7 @@ import androidx.compose.ui.unit.sp
 import com.quzhi.lite.R
 
 /**
- * 设备 emoji → 图标资源。**没有对应图标的返回 null**，调用方回退去画 emoji。
+ * 设备 emoji → 图标资源。
  *
  * ## 为什么数据层还是 emoji
  *
@@ -25,44 +24,46 @@ import com.quzhi.lite.R
  *
  * 所以这里只做「**渲染时映射**」：数据层一个字节不动，老数据零迁移。
  *
- * ⚠️ `🪥` 和 `♨️`/`❄️` 暂无矢量图：设备头像处是**实心**风格，项目里现有的
- * `ic_widget_faucet` 是描边风格，混在同一列会明显不协调，所以仍回退画 emoji。
+ * ## 现在覆盖全部设备类型（美术统一，不再回退画 emoji）
+ *
+ * 以前饮水机那几个没有矢量图，会和别的设备图标混在同一列里。
+ * 现在每种设备都有 `ic_device_*`，所以本函数**不再返回 null**：
+ * 未知值兜底给热水器图标，至少显示成一台设备，而不是空白或彩色 emoji。
  */
-fun deviceIconRes(emoji: String?): Int? = when (emoji) {
-    "🚿" -> R.drawable.ic_device_shower
+fun deviceIconRes(emoji: String?): Int = when (emoji) {
     "🪥" -> R.drawable.ic_device_sink
-    // 洗衣 / 吹风（新增取值，见 DeviceInfo.typeEmoji）
     "🧺" -> R.drawable.ic_device_washer
     "💨" -> R.drawable.ic_device_dryer
-    else -> null
+    // 饮水机三种取值（热水 ♨️ / 冷水 ❄️ / 未知 🚰）共用同一个水龙头图标：
+    // 26dp 单色图标塞不下冷热差异，而冷热已经由文案「正在接热水/凉水」表达
+    "♨️", "❄️", "🚰" -> R.drawable.ic_device_faucet
+    else -> R.drawable.ic_device_shower
 }
 
 /**
  * 设备头像里的那个图形。
  *
- * 有图标就用图标（`ic_device_*`），没有就原样画 emoji ——
- * 所以饮水机那几个目前还是彩色 emoji，和花洒/牙刷的图标会**混在同一列里**。
- * 这是「只换这两个」的必然结果，等饮水机也有图了再收口。
+ * 全部走矢量图标。`emojiSize` 保留只是为了不改各处调用签名（历史原因），
+ * 现在只有 [iconSize] 生效。
  *
  * ⚠️ 图标固定用**白色**：它压在设备类型色的圆底上（洗手台橙、饮水机绿、其余蓝），
  * 单色图标跟底色同色就糊了，白色对比度最稳。
+ *
+ * ⚠️ 如果用在**没有底色**的地方（比如对话框标题行），不能直接用它——
+ * 白色图标压在浅色背景上等于看不见，那种场合要用 `tintedGlyph` 或显式传色。
  */
 @Composable
 fun DeviceGlyph(
     emoji: String,
     emojiSize: TextUnit,
     iconSize: Dp,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    tint: Color = Color.White
 ) {
-    val res = deviceIconRes(emoji)
-    if (res != null) {
-        Icon(
-            painter = painterResource(res),
-            contentDescription = null,
-            tint = Color.White,
-            modifier = modifier.size(iconSize)
-        )
-    } else {
-        Text(emoji, fontSize = emojiSize, modifier = modifier)
-    }
+    Icon(
+        painter = painterResource(deviceIconRes(emoji)),
+        contentDescription = null,
+        tint = tint,
+        modifier = modifier.size(iconSize)
+    )
 }

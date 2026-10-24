@@ -328,7 +328,13 @@ private fun PlaintextStorageWarning() {
             modifier = Modifier.padding(14.dp),
             verticalAlignment = Alignment.Top
         ) {
-            Text("⚠️", fontSize = 18.sp)
+            // 美术统一：emoji ⚠️ 换成自带矢量图标（emoji 字形随 ROM 变化，图标不会）
+            Icon(
+                painter = painterResource(R.drawable.ic_warning),
+                contentDescription = null,
+                tint = AppColors.Danger,
+                modifier = Modifier.size(18.dp)
+            )
             Spacer(Modifier.width(10.dp))
             Column {
                 Text(

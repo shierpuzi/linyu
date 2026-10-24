@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  水滴（预扣金额提示里的小图标）。
+
+  与 ic_device_* 同一套视觉语言：24dp 画布、单色实心填充、颜色由使用处 tint 决定。
+
+  造型取 Material Icons「water_drop」的几何：上方尖顶收成圆角，下方是圆润的水滴底。
+  用 A 圆弧画底部圆，不用 C/S 贝塞尔（20dp 下贝塞尔的圆会显出棱角）。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M12,2.2c-0.3,0 -0.6,0.14 -0.78,0.38C9.9,4.4 4.6,11.1 4.6,14.4A7.4,7.4 0 0 0 12,21.8A7.4,7.4 0 0 0 19.4,14.4C19.4,11.1 14.1,4.4 12.78,2.58A0.98,0.98 0 0 0 12,2.2z" />
+</vector>

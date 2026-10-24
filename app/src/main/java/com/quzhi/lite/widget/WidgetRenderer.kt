@@ -569,11 +569,16 @@ object WidgetRenderer {
             val d = list.getOrNull(i)
             if (d == null) {
                 // 只扫到一台时第二行留空，不要塞「—」显得像出错
-                rowIds[i].forEach { views.setTextViewText(it, "") }
+                views.setImageViewResource(rowIds[i][0], android.R.color.transparent)
+                views.setTextViewText(rowIds[i][1], "")
+                views.setTextViewText(rowIds[i][2], "")
+                views.setTextViewText(rowIds[i][3], "")
+                views.setTextViewText(rowIds[i][4], "")
                 views.setOnClickPendingIntent(pickIds[i], null)
             } else {
-                // 一律兜底：缓存里可能是旧版本写的 JSON，缺字段就是 null
-                views.setTextViewText(rowIds[i][0], d.emoji ?: "🚿")
+                // 美术统一：设备图标走矢量图，不再画 emoji。
+                // 缓存里可能是旧版本写的 JSON，缺字段就是 null → setDeviceIcon 内部兜底
+                setDeviceIcon(views, rowIds[i][0], d.emoji)
                 views.setTextViewText(rowIds[i][1], d.name ?: "")
                 views.setTextViewText(rowIds[i][2], d.desc ?: "")
                 // 信号点 + dB 数值：沿用 App 首页的强/中/弱配色。
@@ -639,12 +644,13 @@ object WidgetRenderer {
         for (i in 0..1) {
             val b = list.getOrNull(i)
             if (b == null) {
-                views.setTextViewText(rowIds[i][0], "—")
+                views.setImageViewResource(rowIds[i][0], android.R.color.transparent)
                 views.setTextViewText(rowIds[i][1], if (i == 0) "在 App 里刷新账单" else "—")
                 views.setTextViewText(rowIds[i][2], "")
                 views.setTextViewText(rowIds[i][3], "")
             } else {
-                views.setTextViewText(rowIds[i][0], b.emoji ?: "🚿")
+                // 美术统一：账单里的设备图标也走矢量图
+                setDeviceIcon(views, rowIds[i][0], b.emoji)
                 views.setTextViewText(rowIds[i][1], b.name ?: "")
                 views.setTextViewText(rowIds[i][2], b.timeText ?: "")
                 views.setTextViewText(rowIds[i][3], b.moneyText ?: "")
@@ -685,6 +691,29 @@ object WidgetRenderer {
     private fun lastConsumeText(snCode: String): String {
         val money = PrefsHelper.lastConsumeFor(snCode)
         return if (money > 0f) MoneyFormat.withSymbol(money.toDouble()) else "¥ —"
+    }
+
+    /**
+     * 把设备 emoji 映射成矢量图并塞进 RemoteViews。
+     *
+     * ## 为什么小组件里也要做这层映射
+     *
+     * 组件是 RemoteViews，**不能**用 Compose 的 DeviceGlyph，也不能画 emoji 文本了
+     * （美术统一后 emoji 只作为数据层的取值存在）。这里要把 emoji 字符串翻译成
+     * `ic_device_*` 资源 id，再交给 `setImageViewResource`。
+     *
+     * 映射必须和 `ui/DeviceGlyph.deviceIconRes` **保持一致**，否则同一台设备在
+     * App 里和桌面上会显示成两个图标。改一边记得改另一边。
+     */
+    private fun setDeviceIcon(views: RemoteViews, viewId: Int, emoji: String?) {
+        val res = when (emoji) {
+            "🪥" -> R.drawable.ic_device_sink
+            "🧺" -> R.drawable.ic_device_washer
+            "💨" -> R.drawable.ic_device_dryer
+            "♨️", "❄️", "🚰" -> R.drawable.ic_device_faucet
+            else -> R.drawable.ic_device_shower
+        }
+        views.setImageViewResource(viewId, res)
     }
 
     /** 早期版本写进去的是「热水器 / 洗手台 / 饮水机」这种简写，认出来就用 emoji 重推一遍 */

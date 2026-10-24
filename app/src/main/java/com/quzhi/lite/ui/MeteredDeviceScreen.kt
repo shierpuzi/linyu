@@ -19,10 +19,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.quzhi.lite.R
 import com.quzhi.lite.ui.theme.AppColors
 import com.quzhi.lite.ui.theme.LocalThemeMode
 import com.quzhi.lite.ui.theme.ThemeMode
@@ -152,8 +154,18 @@ fun MeteredDeviceScreen(
                         Text("已用 ${fmtTime(elapsedSec)}", fontSize = 18.sp,
                             fontWeight = FontWeight.Bold, color = AppColors.Accent)
                         Spacer(Modifier.height(6.dp))
-                        Text("💧 已预扣 ¥$preDeductYuan", fontSize = 13.sp,
-                            color = AppColors.TextSecondary)
+                        // 美术统一：💧 改成矢量水滴图标（emoji 在不同 ROM 上字形差异大）
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_drop),
+                                contentDescription = null,
+                                tint = AppColors.TextSecondary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text("已预扣 ¥$preDeductYuan", fontSize = 13.sp,
+                                color = AppColors.TextSecondary)
+                        }
                         Text("计费以设备显示为准", fontSize = 11.sp,
                             color = AppColors.TextSecondary)
                     }
