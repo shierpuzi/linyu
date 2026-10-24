@@ -260,8 +260,11 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
                             MoneyFormat.format(dev?.withholdMoney ?: 0.0)
                         },
                         inUse = true,
-                        // 余额用趣智钱包（`/account/wallet` 的 money），不是一卡通
-                        walletYuan = viewModel.walletBalance?.let { MoneyFormat.format(it) },
+                        // 余额取**这台设备所属板块**的钱包，不是当前板块的。
+                        // 用户可能停在洗衣板块却开着洗浴的热水器，拿当前板块的钱包
+                        // 就是他报的「余额不准」（显示的是另一个板块的钱）。
+                        // 见 MainViewModel.loadDeviceBoardWallet / DeviceBoardPolicy
+                        walletYuan = viewModel.deviceBoardWallet?.let { MoneyFormat.format(it) },
                         elapsedSec = viewModel.showerElapsedSec,
                         autoDisConSec = viewModel.autoDisConSec,
                         isStopping = viewModel.isStopping,
@@ -281,7 +284,8 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
                         location = dev.locationOnly,
                         preDeductYuan = MoneyFormat.format(dev.withholdMoney),
                         inUse = false,
-                        walletYuan = viewModel.walletBalance?.let { MoneyFormat.format(it) },
+                        // 同上：按设备所属板块取余额，不是当前板块
+                        walletYuan = viewModel.deviceBoardWallet?.let { MoneyFormat.format(it) },
                         // 每秒轮询来的「被占用」状态：非空时禁用开始按钮并显示横幅
                         occupiedReason = viewModel.modeOccupiedReason,
                         isFavorite = viewModel.isFavorite(dev.macAddress),

@@ -31,7 +31,25 @@ data class DeviceInfo(
     /** 通信类型 id（服务端字段 `communicationTypeId`），暂未使用，留作诊断 */
     val communicationTypeId: Int? = null,
     /** 真实 MAC。部分设备 `macAddress` 是虚拟的，优先用这个 */
-    val realMac: String? = null
+    val realMac: String? = null,
+    /**
+     * 这台设备**属于哪个板块**（`/device/info/mac` 原样下发）。
+     *
+     * ## 为什么必须按设备算，而不是按「当前板块」
+     *
+     * 一个账号可以绑多个独立项目（4000 洗浴 / 3356 洗衣饮水吹风），**各有独立的钱包**。
+     * 而界面上「当前板块」是用户手动切的：他在洗衣板块时点开一台热水器，
+     * 那台热水器属于洗浴板块，余额就该显示洗浴钱包的钱。
+     * 照当前板块取会拿错钱包——用户看到的就是「余额不对」（实际已发生过：
+     * 洗浴页显示 24.84，而那是洗衣饮水吹风板块的钱）。
+     *
+     * ⚠️ 字段一律可空：服务端不一定下发（见 [CONTEXT-任务包.md] 的实测字段清单，
+     * 有 `projectId`/`projectName`，但老接口或某些学校可能没有）。
+     * 取不到时由调用方决定回退，**不要在这里猜**。
+     */
+    val projectId: Long? = null,
+    /** 设备所属板块名（如「安徽三联学院洗浴」），仅用于显示，判断一律用 [projectId] */
+    val projectName: String? = null
 ) {
     /**
      * 是否属于「只能靠手机蓝牙直连控制」的水表。

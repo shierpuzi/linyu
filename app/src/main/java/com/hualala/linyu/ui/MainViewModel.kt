@@ -68,6 +68,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import com.hualala.linyu.utils.MoneyFormat
+import com.hualala.linyu.data.DeviceBoardPolicy
 import com.hualala.linyu.data.DeviceInfoCache
 import com.hualala.linyu.data.FavoriteDevice
 import com.hualala.linyu.data.FavoriteStore
@@ -453,10 +454,21 @@ class MainViewModel : ViewModel() {
                 modeOrderError = "套餐列表获取失败，请检查网络后重试"
                 AppLogger.w("套餐列表获取失败：${e.message}")
             }
-            // 余额（拿不到就不显示，不影响下单）
+            // 余额（拿不到就不显示，不影响下单）。
+            // ⚠️ 必须按**设备所属板块**取：用户可能停在洗衣板块去开洗浴的热水器
+            //    （或反之），照当前板块取就是拿错钱包，显示的是另一个板块的钱。
+            //    判定见 DeviceBoardPolicy，借参数见 ProjectRepository.withBoardContext。
             try {
-                val w = NetworkModule.apiService.getWalletSafe()
-                modeOrderWalletYuan = w.data?.money?.takeIf { it.isNotBlank() }
+                val boardId = DeviceBoardPolicy.resolve(device.projectId, currentProjectId)
+                val sameBoard = boardId == null || !DeviceBoardPolicy.needsBorrow(boardId, currentProjectId)
+                val w = if (sameBoard) {
+                    NetworkModule.apiService.getWalletSafe()
+                } else {
+                    ProjectRepository.withBoardContext(boardId!!) {
+                        NetworkModule.apiService.getWalletSafe()
+                    }
+                }
+                modeOrderWalletYuan = w?.data?.money?.takeIf { it.isNotBlank() }
             } catch (_: Exception) { }
 
             // 设备占用检查。
@@ -1212,6 +1224,62 @@ class MainViewModel : ViewModel() {
         meteredScreenOpen = true
         val sn = info.snCode
         if (!sn.isNullOrBlank()) startPreemptWatch(sn, packageBilling = false)
+        loadDeviceBoardWallet(info)
+    }
+
+    /**
+     * 设备页面要显示的「当前余额」。
+     *
+     * 和 [walletBalance]（当前板块的钱包）分开存：用户可能停在洗衣板块却点开一台
+     * 热水器，那台热水器属于洗浴板块，余额得显示洗浴钱包的钱。
+     * 直接复用 [walletBalance] 就是他报的「余额不准」——显示的是另一个板块的钱。
+     *
+     * 值为 null 表示「还没取到/判断不出」，界面此时不显示这一行，宁可不显示也不错显示。
+     */
+    var deviceBoardWallet by mutableStateOf<Double?>(null)
+        private set
+
+    /** 设备所属板块（判定逻辑见 [DeviceBoardPolicy]）。null = 判断不出 */
+    var deviceBoardProjectId by mutableStateOf<Long?>(null)
+        private set
+
+    /**
+     * 按**设备自己的板块**取钱包余额。
+     *
+     * 三步：
+     * 1. 用设备自报的 `projectId`（`/device/info/mac` 下发）定板块
+     * 2. 就是当前板块 → 直接用已有的 [walletBalance]，不重复请求
+     * 3. 跨板块 → 借那个板块的认证参数查一次（[ProjectRepository.withBoardContext]，
+     *    finally 里必定还原，不会把全局认证状态留错）
+     */
+    private fun loadDeviceBoardWallet(info: DeviceInfo) {
+        val target = DeviceBoardPolicy.resolve(
+            deviceProjectId = info.projectId,
+            currentProjectId = currentProjectId
+        ) ?: run {
+            // 设备没报板块、当前板块也没有：退回洗浴兜底。
+            // ponytail: 兜底是硬编码（本项目实测校 4000 洗浴），换学校可能不对——
+            //           但比显示一个确定错误的钱包好，且只在服务端不下发 projectId 时才会走到。
+            deviceBoardProjectId = DeviceBoardPolicy.BATH_PROJECT_ID
+            deviceBoardWallet = null
+            return
+        }
+        deviceBoardProjectId = target
+
+        if (!DeviceBoardPolicy.needsBorrow(target, currentProjectId)) {
+            // 同板块：界面上的钱包余额本来就是它
+            deviceBoardWallet = walletBalance
+            return
+        }
+
+        deviceBoardWallet = null
+        sessionScope().launch {
+            val money = ProjectRepository.withBoardContext(target) {
+                NetworkModule.apiService.getWalletSafe().data?.money?.toDoubleOrNull()
+            }
+            // 借数据期间用户可能已经退出页面/换了设备，此时别把结果盖到新状态上
+            if (deviceBoardProjectId == target) deviceBoardWallet = money
+        }
     }
 
     /** 用户点了「开始使用」→ **只弹确认框**，不开阀 */
