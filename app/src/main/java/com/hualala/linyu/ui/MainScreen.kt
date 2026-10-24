@@ -260,6 +260,8 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
                             MoneyFormat.format(dev?.withholdMoney ?: 0.0)
                         },
                         inUse = true,
+                        // 余额用趣智钱包（`/account/wallet` 的 money），不是一卡通
+                        walletYuan = viewModel.walletBalance?.let { MoneyFormat.format(it) },
                         elapsedSec = viewModel.showerElapsedSec,
                         autoDisConSec = viewModel.autoDisConSec,
                         isStopping = viewModel.isStopping,
@@ -279,6 +281,7 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
                         location = dev.locationOnly,
                         preDeductYuan = MoneyFormat.format(dev.withholdMoney),
                         inUse = false,
+                        walletYuan = viewModel.walletBalance?.let { MoneyFormat.format(it) },
                         // 每秒轮询来的「被占用」状态：非空时禁用开始按钮并显示横幅
                         occupiedReason = viewModel.modeOccupiedReason,
                         isFavorite = viewModel.isFavorite(dev.macAddress),

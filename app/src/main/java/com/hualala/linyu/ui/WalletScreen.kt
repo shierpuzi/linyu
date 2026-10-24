@@ -164,22 +164,35 @@ fun WalletScreen(viewModel: MainViewModel) {
                 Spacer(Modifier.height(24.dp))
             }
 
+            // 开了「消费合并」时，**下面的订单列表也用合并数据**——
+            // 否则趋势图显示合并后的总数、列表却只有当前板块的单，两个数字对不上，
+            // 用户会以为漏账。用户明确要求过："消费合并开了之后，下面的订单列表应该
+            // 是两个板块订单混在一起"。
+            val mergedForList = viewModel.mergedBills
+            val shownBills = mergedForList ?: viewModel.billList
+            val mergedList = mergedForList != null && viewModel.mergedFrom.size >= 2
+
             Text("账单", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AppColors.TextPrimary)
-            Text("最近20次消费记录", fontSize = 12.sp, color = AppColors.TextSecondary)
+            Text(
+                if (mergedList) "最近20次消费记录 · 已合并两个板块"
+                else "最近20次消费记录",
+                fontSize = 12.sp,
+                color = if (mergedList) AppColors.Accent else AppColors.TextSecondary
+            )
             Spacer(Modifier.height(12.dp))
 
             if (viewModel.isLoadingBills) {
                 Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(Modifier.size(24.dp), color = AppColors.Accent, strokeWidth = 2.dp)
                 }
-            } else if (viewModel.billList.isEmpty()) {
+            } else if (shownBills.isEmpty()) {
                 Text("暂无账单数据", color = AppColors.TextSecondary, modifier = Modifier.padding(top = 8.dp))
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     // ⚠️ 在循环外取一次。unpaidConsumeDates 是计算属性，
                     // 写在 forEach 里的话每渲染一行就重建一次整个 Set
                     val unpaidDates = viewModel.unpaidConsumeDates
-                    viewModel.billList.forEach { bill ->
+                    shownBills.take(20).forEach { bill ->
                         val dto = bill.consumeBillDTO
                         BillCard(
                             bill = bill,

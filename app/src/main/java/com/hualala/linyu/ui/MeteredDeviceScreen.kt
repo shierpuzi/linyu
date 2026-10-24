@@ -61,6 +61,8 @@ fun MeteredDeviceScreen(
     typeName: String,
     location: String,
     preDeductYuan: String,
+    /** 当前钱包余额（元，两位小数）。null = 拿不到，不显示这一行 */
+    walletYuan: String? = null,
     inUse: Boolean,
     elapsedSec: Int = 0,
     autoDisConSec: Int = 0,
@@ -224,6 +226,17 @@ fun MeteredDeviceScreen(
                                 fontWeight = FontWeight.Bold, color = AppColors.Accent)
                         }
                         Spacer(Modifier.height(8.dp))
+                        // 当前余额：预扣金额旁边必须能看到自己有多少钱，
+                        // 否则用户要点开钱包才知道够不够
+                        if (walletYuan != null) {
+                            Text(
+                                "当前余额 ¥$walletYuan",
+                                fontSize = 13.sp,
+                                color = AppColors.TextPrimary,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(Modifier.height(4.dp))
+                        }
                         Text("开启后开始计费，用完请记得关闭",
                             fontSize = 12.sp, color = AppColors.TextSecondary,
                             textAlign = TextAlign.Center)
@@ -283,9 +296,7 @@ fun MeteredDeviceScreen(
                             fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
                     }
                 }
-                Spacer(Modifier.height(10.dp))
-                Text("点开会先让你确认设备名", fontSize = 11.sp,
-                    color = AppColors.TextSecondary, textAlign = TextAlign.Center)
+
             }
         }
 
