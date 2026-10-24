@@ -62,14 +62,19 @@ class LoginViewModel : ViewModel() {
     /**
      * loginCode 登录。
      *
-     * 用户常常直接从抓包 URL 里复制，所以先过一遍 [LoginCodePolicy.extractLoginCode]
-     * ——整条 URL 粘进来也能用，不用要求他手抠那 32 位。
+     * 两个框都只接受**值本身**（32 位 hex / 纯数字），不做 URL 解析：
+     * 文档明确让用户去抓包工具里分别抄这两个字段，「粘整条 URL」这个便利
+     * 没有产品需求，去掉少一层猜测（也少一类误判——URL 里本来就有很多数字）。
      */
     private fun codeLogin() {
-        val code = LoginCodePolicy.extractLoginCode(loginCode)
-        val uid = LoginCodePolicy.extractUserId(codeUserId)
-        if (code.isEmpty()) { errorMessage = "没找到 32 位 loginCode，请检查粘贴内容"; return }
-        if (uid.isEmpty()) { errorMessage = "没找到 userId，请检查粘贴内容"; return }
+        val code = LoginCodePolicy.normalize(loginCode)
+        val uid = codeUserId.trim()
+        if (!LoginCodePolicy.isValidLoginCode(code)) {
+            errorMessage = "loginCode 格式不对（应该是 32 位十六进制）"; return
+        }
+        if (!LoginCodePolicy.isValidUserId(uid)) {
+            errorMessage = "userId 格式不对（应该是一串数字）"; return
+        }
 
         viewModelScope.launch {
             isLoading = true; errorMessage = null

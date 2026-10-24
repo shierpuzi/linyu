@@ -123,8 +123,8 @@ https://v3-api.china-qzxy.cn/account/wallet
    - POST 请求 → 看 body（`Content-Type: application/x-www-form-urlencoded`）
 5. 搜 `loginCode=`，抄下后面那 32 位；**同一条请求里再搜 `userId=`**，抄下它
 
-> 💡 直接**复制整条 URL** 更省事：本 App 的登录输入框会自动从里面认出这两个值，
-> 粘贴一整条进去也能用（见 §5.4）。
+> ⚠️ 两个值要**分别、准确**地抄下来，只填那串字符本身。
+> 不要把整条 URL 直接粘进输入框——那样会校验不通过。
 
 ### 拿到之后怎么验证这两个能配对
 
@@ -378,11 +378,12 @@ curl 'https://v3-api.china-qzxy.cn/account/wallet?accountId=10000101&telPhone=15
 拿到这两个值之后，在登录页：
 
 1. 点登录按钮下方的 **「通过 loginCode + userId 登录」**
-2. **loginCode** 框：粘贴那 32 位
-   —— 也可以**直接粘整条抓包 URL**，程序会自动从里面认出 `loginCode`
-3. **userId** 框：粘贴那个纯数字
-   —— 同样支持粘整条 URL，会自动认出 `userId=`
+2. **loginCode** 框：填那 32 位（纯十六进制，不带 `loginCode=` 前缀）
+3. **userId** 框：填那个纯数字（不带 `userId=` 前缀）
 4. 点「用 loginCode 登录」
+
+> 两个框都只接受**值本身**，不要粘整条 URL。
+> 填错格式时会有「32 位十六进制」/「一串数字」的提示。
 
 登录成功后，`accountId` / `projectId` / `telephone` 全由 App 自己解析，
 **你不需要填、也不需要再去抓**。
