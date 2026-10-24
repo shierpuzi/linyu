@@ -3118,6 +3118,24 @@ class MainViewModel : ViewModel() {
     fun projectLabel(projectId: Long?): String =
         ProjectSelectionPolicy.label(projectId, projectNames, knownBoardName(projectId))
 
+    /**
+     * 板块的**短名**，只给「标题里拼一句话」这类地方用（如余额标题）。
+     *
+     * 和 [projectLabel] 的差别只在**去掉学校前缀**：`/project/info/triple` 的
+     * `projectName` 是「安徽三联学院洗浴」这种全名，直接拼进标题会变成
+     * 「趣智校园安徽三联学院洗浴余额」——一句话里重复了学校名，太长。
+     *
+     * 板块切换列表仍然用 [projectLabel]（全名），那里需要分清「哪个学校」。
+     */
+    fun projectShortLabel(projectId: Long?): String? {
+        val name = ProjectSelectionPolicy.label(projectId, projectNames, knownBoardName(projectId))
+        // 「未知板块」/「项目 3356」是兜底文案，不是真名：这种情况下**不拼进标题**，
+        // 让标题退回「趣智校园余额」。宁可少写，也不要在正式版里露出裸 id。
+        if (name.startsWith("项目 ") || name == "未知板块") return null
+        val pid = projectId ?: return null
+        return BillMerger.shortProjectName(name, pid)
+    }
+
     /** 已知板块 id → 业务名（仅用于真名还没拿到时的显示兜底） */
     private fun knownBoardName(projectId: Long?): String? = when (projectId) {
         // 某某大学：4000 洗浴 / 3356 洗衣饮水吹风。

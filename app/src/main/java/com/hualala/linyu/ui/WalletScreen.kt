@@ -96,10 +96,12 @@ fun WalletScreen(viewModel: MainViewModel) {
                 .verticalScroll(rememberScrollState())
                 .padding(20.dp)
         ) {
-            // 标题按**钱在哪**写：一卡通 → 「一卡通余额」，趣智校园钱包 → 「趣智校园余额」。
+            // 标题按**钱在哪**写：一卡通 → 「一卡通余额」，趣智校园钱包 → 「趣智校园{板块}余额」。
+            // 板块名必须带上：两个板块各有独立钱包，只写「趣智校园余额」用户分不清
+            // 这个数字是洗浴的还是洗衣饮水吹风的（见 MainViewModel.projectLabel）。
             // （卡片内那行「账户余额 (元)」保持不动。）
             Text(
-                BalanceEstimator.title(),
+                BalanceEstimator.title(viewModel.projectShortLabel(viewModel.currentProjectId)),
                 fontSize = 22.sp, fontWeight = FontWeight.Bold, color = AppColors.TextPrimary
             )
             Spacer(Modifier.height(16.dp))

@@ -55,12 +55,28 @@ object BalanceEstimator {
     /**
      * 余额标题——按**钱在哪**来写，避免张冠李戴：
      * - 一卡通余额 → 「一卡通余额」
-     * - 趣智校园钱包余额 → 「趣智校园余额」
+     * - 趣智校园钱包余额 → 「趣智校园{板块}余额」（如「趣智校园洗浴余额」）
      * - 只有本地估算 → 「余额」
+     *
+     * @param projectName 当前板块的**短名**（「洗浴」「洗衣饮水吹风」，已去掉学校前缀）。
+     *   传 null 或空串就退回不带板块的「趣智校园余额」——**不知道板块宁可不写**，
+     *   写上「项目 3356」这种裸 id 比不写更像 bug。
      */
-    fun title(): String = when {
-        hasCampusBalance() -> "一卡通余额"
-        hasWalletBalance() -> "趣智校园余额"
+    fun title(projectName: String? = null): String =
+        titleFor(hasCampusBalance(), hasWalletBalance(), projectName)
+
+    /**
+     * 标题的纯逻辑部分（不读 Prefs，所以能直接单测）。
+     *
+     * 抽出来是因为三个分支的**文案错一个字就是张冠李戴**：把钱包的钱写成
+     * 「一卡通余额」，用户会去校园卡系统对账，然后发现对不上。
+     */
+    fun titleFor(hasCampus: Boolean, hasWallet: Boolean, projectName: String?): String = when {
+        hasCampus -> "一卡通余额"
+        hasWallet -> {
+            val board = projectName?.trim().orEmpty()
+            if (board.isEmpty()) "趣智校园余额" else "趣智校园${board}余额"
+        }
         else -> "余额"
     }
 

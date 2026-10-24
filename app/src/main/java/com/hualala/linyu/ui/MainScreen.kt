@@ -379,9 +379,14 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
                                 verticalAlignment = Alignment.CenterVertically) {
                                 Text("附近设备", fontWeight = FontWeight.Bold, fontSize = 18.sp,
                                     color = AppColors.TextPrimary)
-                                // 余额在 LazyColumn 外已算好并缓存
-                                Text(displayBalance?.let { "${BalanceEstimator.title()} ¥${BalanceEstimator.formatMoney(it)}" } ?: "${BalanceEstimator.title()} ¥ —",
-                                    color = AppColors.TextSecondary, fontSize = 14.sp)
+                                // 余额在 LazyColumn 外已算好并缓存。
+                                // 标题带板块名（和钱包页一致）：两个板块钱包独立，
+                                // 不写板块用户分不清这个数字属于哪一边。
+                                Text(
+                                    "${BalanceEstimator.title(viewModel.projectShortLabel(viewModel.currentProjectId))} " +
+                                        (displayBalance?.let { "¥${BalanceEstimator.formatMoney(it)}" } ?: "¥ —"),
+                                    color = AppColors.TextSecondary, fontSize = 14.sp
+                                )
                             }
                         }
 
