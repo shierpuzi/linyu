@@ -31,4 +31,16 @@ local.properties
 *.zip
 
 # ── 开发过程文档（调研/草稿/清单，不进仓库）──
-docs/
+# 只有草稿性质的放这里；正式文档（开发日志/交接文档）在 docs/ 里，**必须入库**
+docs/drafts/
+docs/research/
+
+# ── 抓包分析工具（tools/）的运行时产物 ──
+# 脚本本身入库（别人能用），但这些是本地状态/用户数据，绝不能进仓库
+tools/.qzxy_session.json
+tools/filtered/
+tools/live_records/
+tools/_capture*/
+tools/_freeze_*/
+tools/__pycache__/
+tools/*.pyc

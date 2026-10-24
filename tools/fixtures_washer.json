@@ -1,0 +1,308 @@
+{
+  "captured_at": "2026-10-05 10:24:45 ~ 2026-10-05 10:24:57",
+  "http": [
+    {
+      "seq": 88,
+      "time": "2026-10-05 10:24:45",
+      "method": "GET",
+      "url": "https://v3-api.china-qzxy.cn/device/info/mac?accountId=10000101&macAddress=866064204595&telPhone=13800138000&phoneSystem=android&loginCode=00000000000000000000000000000002&telephone=13800138000&isNew=1&isHaier=0&projectId=3356&userId=10000001&version=6.5.28",
+      "path": "/device/info/mac",
+      "host": "v3-api.china-qzxy.cn",
+      "query": "accountId=10000101&macAddress=866064204595&telPhone=13800138000&phoneSystem=android&loginCode=00000000000000000000000000000002&telephone=13800138000&isNew=1&isHaier=0&projectId=3356&userId=10000001&version=6.5.28",
+      "req_headers": {
+        "Config-Project": "3356",
+        "Config-Keys": "module_list,advertise_type,question_list,service_phone_list,banner_list_app,activity_list_app,aliCard_popup_config",
+        "Host": "v3-api.china-qzxy.cn",
+        "Connection": "Keep-Alive",
+        "Accept-Encoding": "gzip",
+        "User-Agent": "okhttp/4.2.2"
+      },
+      "req_body": "",
+      "status": 200,
+      "resp_body": "{\"success\":true,\"errorCode\":0,\"errorMessage\":\"成功\",\"data\":{\"deviceId\":1259,\"deviceName\":\"洗衣机-洗衣机-3号宿舍楼-6层-洗衣房-4\",\"deviceDesc\":\"洗衣机-洗衣机-3号宿舍楼-6层-洗衣房-4\",\"areaId\":1,\"areaName\":\"洗衣机\",\"buildingId\":11,\"buildingName\":\"3号宿舍楼\",\"floorId\":348,\"floorName\":\"6层\",\"roomId\":1802,\"roomName\":\"洗衣房-4\",\"isUse\":1,\"smallTypeId\":3,\"childTypeId\":0,\"smallTypeName\":\"洗衣机\",\"bigTypeId\":6,\"bigTypeName\":\"洗衣机\",\"projectId\":3356,\"projectName\":\"某某大学洗衣饮水吹风\",\"ownStatusId\":0,\"isUpdateProtocol\":null,\"isNewDryer\":1,\"snCode\":\"866064204595\",\"macAddress\":\"86:60:64:20:45:95\",\"communicationTypeId\":4,\"onlineStatusId\":1,\"keyStatus\":null,\"keyNo\":null,\"deductionMethod\":1,\"withholdMoney\":0.0,\"modelCode\":null,\"imei\":null,\"isMigrated\":1,\"bindDeviceSnCode\":null,\"leftGoodsId\":null,\"rightGoodsId\":null,\"leftGoodsMiss\":null,\"leftGoodsVol\":null,\"leftCodeNo\":null,\"rightCodeNo\":null,\"rightGoodsMiss\":null,\"rightGoodsVol\":null,\"timestamp\":\"1791167085665\",\"modeId\":null,\"modeTime\":null,\"deviceOrderPagePromptText\":\"请先放入衣物，再操作使用\",\"isShowStandards\":null,\"chargeMode\":0,\"feeDescription\":null,\"deviceUseTimeList\":[{\"startTime\":\"\",\"endTime\":\"\"}],\"showFaultTip\":null,\"showDeviceUseTimeContent\":null,\"disableTip\":null,\"DevID\":1259}}",
+      "known": true,
+      "semantic": "按 MAC 查设备台账（bigTypeId/smallTypeId 在这里）",
+      "reason": "域名含 qzxy/klcxkj"
+    },
+    {
+      "seq": 84,
+      "time": "2026-10-05 10:24:46",
+      "method": "GET",
+      "url": "https://v3-api.china-qzxy.cn/account/wallet?accountId=10000101&telPhone=13800138000&phoneSystem=android&loginCode=00000000000000000000000000000002&telephone=13800138000&projectId=3356&userId=10000001&version=6.5.28",
+      "path": "/account/wallet",
+      "host": "v3-api.china-qzxy.cn",
+      "query": "accountId=10000101&telPhone=13800138000&phoneSystem=android&loginCode=00000000000000000000000000000002&telephone=13800138000&projectId=3356&userId=10000001&version=6.5.28",
+      "req_headers": {
+        "Config-Project": "3356",
+        "Config-Keys": "module_list,advertise_type,question_list,service_phone_list,banner_list_app,activity_list_app,aliCard_popup_config",
+        "Host": "v3-api.china-qzxy.cn",
+        "Connection": "Keep-Alive",
+        "Accept-Encoding": "gzip",
+        "User-Agent": "okhttp/4.2.2"
+      },
+      "req_body": "",
+      "status": 200,
+      "resp_body": "{\"success\":true,\"errorCode\":0,\"errorMessage\":\"成功\",\"data\":{\"projectId\":3356,\"accountId\":10000101,\"accountRealMoney\":16680,\"accountGivenMoney\":0,\"accountRealMoneyStr\":\"16.680\",\"accountGivenMoneyStr\":\"0.000\",\"money\":\"16.680\",\"accountMonthCardList\":null,\"projectHasMonthCard\":null}}",
+      "known": true,
+      "semantic": "钱包余额（验证扣款靠它）",
+      "reason": "域名含 qzxy/klcxkj"
+    },
+    {
+      "seq": 85,
+      "time": "2026-10-05 10:24:46",
+      "method": "GET",
+      "url": "https://v3-api.china-qzxy.cn/device/mode/list?accountId=10000101&telPhone=13800138000&phoneSystem=android&smallTypeId=3&loginCode=00000000000000000000000000000002&telephone=13800138000&projectId=3356&userId=10000001&version=6.5.28",
+      "path": "/device/mode/list",
+      "host": "v3-api.china-qzxy.cn",
+      "query": "accountId=10000101&telPhone=13800138000&phoneSystem=android&smallTypeId=3&loginCode=00000000000000000000000000000002&telephone=13800138000&projectId=3356&userId=10000001&version=6.5.28",
+      "req_headers": {
+        "Config-Project": "3356",
+        "Config-Keys": "module_list,advertise_type,question_list,service_phone_list,banner_list_app,activity_list_app,aliCard_popup_config",
+        "Host": "v3-api.china-qzxy.cn",
+        "Connection": "Keep-Alive",
+        "Accept-Encoding": "gzip",
+        "User-Agent": "okhttp/4.2.2"
+      },
+      "req_body": "",
+      "status": 200,
+      "resp_body": "{\"success\":true,\"errorCode\":0,\"errorMessage\":\"成功\",\"data\":[{\"projectId\":3356,\"id\":2835,\"modeId\":33,\"smallTypeId\":3,\"modeName\":\"标准洗\",\"modeDesc\":\"一般日常的洗涤衣物\",\"modeMoney\":4000,\"modeMoneyYuan\":4.0,\"modeTimeMinute\":\"35\",\"modeTimeQuantity\":2100,\"typeValue\":\"4.0元/35分钟\",\"isSelected\":1,\"positionId\":null,\"goodsId\":null},{\"projectId\":3356,\"id\":2836,\"modeId\":34,\"smallTypeId\":3,\"modeName\":\"快速洗\",\"modeDesc\":\"清污的小件衣物\",\"modeMoney\":3000,\"modeMoneyYuan\":3.0,\"modeTimeMinute\":\"25\",\"modeTimeQuantity\":1500,\"typeValue\":\"3.0元/25分钟\",\"isSelected\":0,\"positionId\":null,\"goodsId\":null},{\"projectId\":3356,\"id\":2837,\"modeId\":35,\"smallTypeId\":3,\"modeName\":\"单脱水\",\"modeDesc\":\"仅对衣物进行脱水甩干\",\"modeMoney\":1000,\"modeMoneyYuan\":1.0,\"modeTimeMinute\":\"10\",\"modeTimeQuantity\":600,\"typeValue\":\"1.0元/10分钟\",\"isSelected\":0,\"positionId\":null,\"goodsId\":null},{\"projectId\":3356,\"id\":2838,\"modeId\":36,\"smallTypeId\":3,\"modeName\":\"大件洗\",\"modeDesc\":\"大件家纺类衣物的洗涤\",\"modeMoney\":5000,\"modeMoneyYuan\":5.0,\"modeTimeMinute\":\"45\",\"modeTimeQuantity\":2700,\"typeValue\":\"5.0元/45分钟\",\"isSelected\":0,\"positionId\":null,\"goodsId\":null}]}",
+      "known": true,
+      "semantic": "套餐列表（洗衣机；吹风机可能也有）",
+      "reason": "域名含 qzxy/klcxkj"
+    },
+    {
+      "seq": 86,
+      "time": "2026-10-05 10:24:46",
+      "method": "GET",
+      "url": "https://v3-api.china-qzxy.cn/coupon/order/givenByBigType/info?bigTypeId=6&accountId=10000101&telPhone=13800138000&phoneSystem=android&loginCode=00000000000000000000000000000002&telephone=13800138000&projectId=3356&userId=10000001&version=6.5.28",
+      "path": "/coupon/order/givenByBigType/info",
+      "host": "v3-api.china-qzxy.cn",
+      "query": "bigTypeId=6&accountId=10000101&telPhone=13800138000&phoneSystem=android&loginCode=00000000000000000000000000000002&telephone=13800138000&projectId=3356&userId=10000001&version=6.5.28",
+      "req_headers": {
+        "Config-Project": "3356",
+        "Config-Keys": "module_list,advertise_type,question_list,service_phone_list,banner_list_app,activity_list_app,aliCard_popup_config",
+        "Host": "v3-api.china-qzxy.cn",
+        "Connection": "Keep-Alive",
+        "Accept-Encoding": "gzip",
+        "User-Agent": "okhttp/4.2.2"
+      },
+      "req_body": "",
+      "status": 200,
+      "resp_body": "{\"success\":true,\"errorCode\":0,\"errorMessage\":\"成功\",\"data\":[]}",
+      "known": true,
+      "semantic": "订单赠送券",
+      "reason": "域名含 qzxy/klcxkj"
+    },
+    {
+      "seq": 87,
+      "time": "2026-10-05 10:24:46",
+      "method": "POST",
+      "url": "https://v3-api.china-qzxy.cn/order/tcpDevice/washer/status",
+      "path": "/order/tcpDevice/washer/status",
+      "host": "v3-api.china-qzxy.cn",
+      "query": "",
+      "req_headers": {
+        "Config-Project": "3356",
+        "Config-Keys": "module_list,advertise_type,question_list,service_phone_list,banner_list_app,activity_list_app,aliCard_popup_config",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Length": "197",
+        "Host": "v3-api.china-qzxy.cn",
+        "Connection": "Keep-Alive",
+        "Accept-Encoding": "gzip",
+        "User-Agent": "okhttp/4.2.2"
+      },
+      "req_body": "accountId=10000101&telPhone=13800138000&snCode=866064204595&phoneSystem=android&loginCode=00000000000000000000000000000002&telephone=13800138000&isHaier=0&projectId=3356&userId=10000001&version=6.5.28",
+      "status": 200,
+      "resp_body": "{\"success\":true,\"errorCode\":0,\"errorMessage\":\"成功\",\"data\":null}",
+      "known": true,
+      "semantic": "洗衣机状态",
+      "reason": "域名含 qzxy/klcxkj"
+    },
+    {
+      "seq": 83,
+      "time": "2026-10-05 10:24:47",
+      "method": "GET",
+      "url": "https://v3-api.china-qzxy.cn/coupon/user/listByBigType?bigTypeId=6&accountId=10000101&telPhone=13800138000&orderAmount=4.00&phoneSystem=android&couponStatus=0&loginCode=00000000000000000000000000000002&telephone=13800138000&projectId=3356&userId=10000001&version=6.5.28",
+      "path": "/coupon/user/listByBigType",
+      "host": "v3-api.china-qzxy.cn",
+      "query": "bigTypeId=6&accountId=10000101&telPhone=13800138000&orderAmount=4.00&phoneSystem=android&couponStatus=0&loginCode=00000000000000000000000000000002&telephone=13800138000&projectId=3356&userId=10000001&version=6.5.28",
+      "req_headers": {
+        "Config-Project": "3356",
+        "Config-Keys": "module_list,advertise_type,question_list,service_phone_list,banner_list_app,activity_list_app,aliCard_popup_config",
+        "Host": "v3-api.china-qzxy.cn",
+        "Connection": "Keep-Alive",
+        "Accept-Encoding": "gzip",
+        "User-Agent": "okhttp/4.2.2"
+      },
+      "req_body": "",
+      "status": 200,
+      "resp_body": "{\"success\":true,\"errorCode\":0,\"errorMessage\":\"成功\",\"data\":{\"seeList\":[],\"noSeeList\":[]}}",
+      "known": true,
+      "semantic": "可用券查询",
+      "reason": "域名含 qzxy/klcxkj"
+    },
+    {
+      "seq": 50,
+      "time": "2026-10-05 10:24:56",
+      "method": "POST",
+      "url": "https://v3-api.china-qzxy.cn/order/tcpDevice/downRate/modeOrder",
+      "path": "/order/tcpDevice/downRate/modeOrder",
+      "host": "v3-api.china-qzxy.cn",
+      "query": "",
+      "req_headers": {
+        "Config-Project": "3356",
+        "Config-Keys": "module_list,advertise_type,question_list,service_phone_list,banner_list_app,activity_list_app,aliCard_popup_config",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Length": "208",
+        "Host": "v3-api.china-qzxy.cn",
+        "Connection": "Keep-Alive",
+        "Accept-Encoding": "gzip",
+        "User-Agent": "okhttp/4.2.2"
+      },
+      "req_body": "xfModel=33&accountId=10000101&telPhone=13800138000&snCode=866064204595&phoneSystem=android&loginCode=00000000000000000000000000000002&telephone=13800138000&isHaier=0&projectId=3356&userId=10000001&version=6.5.28",
+      "status": 200,
+      "resp_body": "{\"success\":true,\"errorCode\":0,\"errorMessage\":\"成功\",\"data\":null}",
+      "known": true,
+      "semantic": "★按套餐下单（洗衣机扣全款）",
+      "reason": "域名含 qzxy/klcxkj"
+    },
+    {
+      "seq": 45,
+      "time": "2026-10-05 10:24:57",
+      "method": "GET",
+      "url": "https://v3-api.china-qzxy.cn/project/adv/title/get?accountId=10000101&telPhone=13800138000&phoneSystem=android&loginCode=00000000000000000000000000000002&telephone=13800138000&projectId=3356&userId=10000001&version=6.5.28",
+      "path": "/project/adv/title/get",
+      "host": "v3-api.china-qzxy.cn",
+      "query": "accountId=10000101&telPhone=13800138000&phoneSystem=android&loginCode=00000000000000000000000000000002&telephone=13800138000&projectId=3356&userId=10000001&version=6.5.28",
+      "req_headers": {
+        "Config-Project": "3356",
+        "Config-Keys": "module_list,advertise_type,question_list,service_phone_list,banner_list_app,activity_list_app,aliCard_popup_config",
+        "Host": "v3-api.china-qzxy.cn",
+        "Connection": "Keep-Alive",
+        "Accept-Encoding": "gzip",
+        "User-Agent": "okhttp/4.2.2"
+      },
+      "req_body": "",
+      "status": 200,
+      "resp_body": "{\"success\":true,\"errorCode\":0,\"errorMessage\":\"成功\",\"data\":[{\"iconImg\":\"https://oss.china-qzxy.cn/qzxy_images/prod/5b608b0912bb4a3d5e67a009993e196f.png\",\"title\":\"淘宝外卖满25减14\",\"jumpType\":6,\"jumpContent\":\"{\\\"id\\\":127,\\\"channelAdvertiseClass\\\":\\\"外卖补贴\\\",\\\"channelName\\\":\\\"自定义广告\\\",\\\"tagName\\\":\\\"28元\\\",\\\"sort\\\":2,\\\"iconImg\\\":\\\"https://oss.china-qzxy.cn/qzxy_images/prod/63b7b6fa7d2d27a236fb77d0ad405bc6.png\\\",\\\"channelType\\\":7,\\\"thirdAdvConfig\\\":{\\\"acquiredCoin\\\":null,\\\"bottomTag\\\":null,\\\"timeLimit\\\":null,\\\"functionPageTimeLimit\\\":null,\\\"customAdvFlag\\\":2,\\\"androidThirdAdvId\\\":null,\\\"iosThirdAdvId\\\":null,\\\"advCustomDataList\\\":null,\\\"appTaskAdvCustom\\\":{\\\"jumpType\\\":2,\\\"h5Link\\\":null,\\\"h5LinkParam\\\":null,\\\"appDeepLink\\\":\\\"tbopen://m.taobao.com/tbopen/index.html?&action=ali.open.nav&module=h5&h5Url=https%3A%2F%2Ftb.ele.me%2Fwow%2Fz%2Funiapp%2F1100497%2Fad-miniapp%2Fet-union%2Fhome%3Fwh_weex%3Dtrue%26weex_mode%3Ddom%26channelInfo%3D%257B%2522subSubChannel%2522%253A%2522miniapp.taobao.et%2522%257D%26alsc_exsrc%3DES0007485972%26o2i_1st_clk%3D__CLICK_ID__%26tfPos%3Dh5%26scene%3D4dca059c23d642dbb2fa975648cf5d58\\\",\\\"appBackupLink\\\":\\\"tbopen://m.taobao.com/tbopen/index.html?&action=ali.open.nav&module=h5&h5Url=https%3A%2F%2Ftb.ele.me%2Fwow%2Fz%2Funiapp%2F1100497%2Fad-miniapp%2Fet-union%2Fhome%3Fwh_weex%3Dtrue%26weex_mode%3Ddom%26channelInfo%3D%257B%2522subSubChannel%2522%253A%2522miniapp.taobao.et%2522%257D%26alsc_exsrc%3DES0007485972%26o2i_1st_clk%3D__CLICK_ID__%26tfPos%3Dh5%26scene%3D4dca059c23d642dbb2fa975648cf5d58\\\",\\\"appLinkParam\\\":null,\\\"appId\\\":null,\\\"path\\\":null,\\\"param\\\":null},\\\"unsupportedClientType\\\":0,\\\"h5Priority\\\":null}}\",\"channelType\":7}]}",
+      "known": true,
+      "semantic": "趣智自己的广告位（功能用不到）",
+      "reason": "域名含 qzxy/klcxkj"
+    },
+    {
+      "seq": 46,
+      "time": "2026-10-05 10:24:57",
+      "method": "GET",
+      "url": "https://v3-api.china-qzxy.cn/device/smallType/id?accountId=10000101&telPhone=13800138000&phoneSystem=android&smallTypeId=3&loginCode=00000000000000000000000000000002&telephone=13800138000&projectId=3356&userId=10000001&version=6.5.28",
+      "path": "/device/smallType/id",
+      "host": "v3-api.china-qzxy.cn",
+      "query": "accountId=10000101&telPhone=13800138000&phoneSystem=android&smallTypeId=3&loginCode=00000000000000000000000000000002&telephone=13800138000&projectId=3356&userId=10000001&version=6.5.28",
+      "req_headers": {
+        "Config-Project": "3356",
+        "Config-Keys": "module_list,advertise_type,question_list,service_phone_list,banner_list_app,activity_list_app,aliCard_popup_config",
+        "Host": "v3-api.china-qzxy.cn",
+        "Connection": "Keep-Alive",
+        "Accept-Encoding": "gzip",
+        "User-Agent": "okhttp/4.2.2"
+      },
+      "req_body": "",
+      "status": 200,
+      "resp_body": "{\"success\":true,\"errorCode\":0,\"errorMessage\":\"成功\",\"data\":{\"smallTypeId\":3,\"smallTypeName\":\"洗衣机\",\"bigTypeId\":6,\"bigTypeName\":\"洗烘设备\",\"withholdMoney\":0.0,\"isAllowClose\":null,\"allowCloseTime\":null}}",
+      "known": true,
+      "semantic": "小类信息（withholdMoney / isAllowClose）",
+      "reason": "域名含 qzxy/klcxkj"
+    },
+    {
+      "seq": 47,
+      "time": "2026-10-05 10:24:57",
+      "method": "GET",
+      "url": "https://v3-api.china-qzxy.cn/account/wallet?accountId=10000101&telPhone=13800138000&phoneSystem=android&loginCode=00000000000000000000000000000002&telephone=13800138000&projectId=3356&userId=10000001&version=6.5.28",
+      "path": "/account/wallet",
+      "host": "v3-api.china-qzxy.cn",
+      "query": "accountId=10000101&telPhone=13800138000&phoneSystem=android&loginCode=00000000000000000000000000000002&telephone=13800138000&projectId=3356&userId=10000001&version=6.5.28",
+      "req_headers": {
+        "Config-Project": "3356",
+        "Config-Keys": "module_list,advertise_type,question_list,service_phone_list,banner_list_app,activity_list_app,aliCard_popup_config",
+        "Host": "v3-api.china-qzxy.cn",
+        "Connection": "Keep-Alive",
+        "Accept-Encoding": "gzip",
+        "User-Agent": "okhttp/4.2.2"
+      },
+      "req_body": "",
+      "status": 200,
+      "resp_body": "{\"success\":true,\"errorCode\":0,\"errorMessage\":\"成功\",\"data\":{\"projectId\":3356,\"accountId\":10000101,\"accountRealMoney\":12680,\"accountGivenMoney\":0,\"accountRealMoneyStr\":\"12.680\",\"accountGivenMoneyStr\":\"0.000\",\"money\":\"12.680\",\"accountMonthCardList\":null,\"projectHasMonthCard\":null}}",
+      "known": true,
+      "semantic": "钱包余额（验证扣款靠它）",
+      "reason": "域名含 qzxy/klcxkj"
+    },
+    {
+      "seq": 48,
+      "time": "2026-10-05 10:24:57",
+      "method": "GET",
+      "url": "https://v3-api.china-qzxy.cn/coupon/order/givenByBigType/info?bigTypeId=6&accountId=10000101&telPhone=13800138000&phoneSystem=android&loginCode=00000000000000000000000000000002&telephone=13800138000&projectId=3356&userId=10000001&version=6.5.28",
+      "path": "/coupon/order/givenByBigType/info",
+      "host": "v3-api.china-qzxy.cn",
+      "query": "bigTypeId=6&accountId=10000101&telPhone=13800138000&phoneSystem=android&loginCode=00000000000000000000000000000002&telephone=13800138000&projectId=3356&userId=10000001&version=6.5.28",
+      "req_headers": {
+        "Config-Project": "3356",
+        "Config-Keys": "module_list,advertise_type,question_list,service_phone_list,banner_list_app,activity_list_app,aliCard_popup_config",
+        "Host": "v3-api.china-qzxy.cn",
+        "Connection": "Keep-Alive",
+        "Accept-Encoding": "gzip",
+        "User-Agent": "okhttp/4.2.2"
+      },
+      "req_body": "",
+      "status": 200,
+      "resp_body": "{\"success\":true,\"errorCode\":0,\"errorMessage\":\"成功\",\"data\":[]}",
+      "known": true,
+      "semantic": "订单赠送券",
+      "reason": "域名含 qzxy/klcxkj"
+    }
+  ],
+  "mqtt": [
+    {
+      "clientId": "android_13800138000",
+      "username": "android-client",
+      "password": "android-client",
+      "subscriptions": [
+        "app_downRate_13800138000"
+      ],
+      "publishes": [
+        {
+          "topic": "app_downRate_13800138000",
+          "parsed": {
+            "xfModelName": "标准洗",
+            "consumeDate": "20261005102456",
+            "consumeSceneType": 4,
+            "result": 0,
+            "liquidOrderStatusDisplay": "",
+            "rightGoodsModel": "",
+            "deviceSnCode": "866064204595",
+            "preDeductMoney": 4000,
+            "state": 1,
+            "liquidOrderNo": "",
+            "leftModeMoney": "",
+            "orderNo": "13202610051024562144",
+            "accountType": 2,
+            "liquidModeName": "",
+            "telephone": "13800138000",
+            "leftModeName": "",
+            "liquidOrderStatus": "",
+            "leftGoodsModel": "",
+            "accountId": 10000101,
+            "rightModeName": "",
+            "createTime": "1791167096",
+            "liquidConsumeMoney": "",
+            "relatePreDeductMoney": "",
+            "projectId": "",
+            "rightModeMoney": ""
+          },
+          "raw": "{\"xfModelName\":\"标准洗\",\"consumeDate\":\"20261005102456\",\"consumeSceneType\":4,\"result\":0,\"liquidOrderStatusDisplay\":\"\",\"rightGoodsModel\":\"\",\"deviceSnCode\":\"866064204595\",\"preDeductMoney\":4000,\"state\":1,\"liquidOrderNo\":\"\",\"leftModeMoney\":\"\",\"orderNo\":\"13202610051024562144\",\"accountType\":2,\"liquidModeName\":\"\",\"telephone\":\"13800138000\",\"leftModeName\":\"\",\"liquidOrderStatus\":\"\",\"leftGoodsModel\":\"\",\"accountId\":10000101,\"rightModeName\":\"\",\"createTime\":\"1791167096\",\"liquidConsumeMoney\":\"\",\"relatePreDeductMoney\":\"\",\"projectId\":\"\",\"rightModeMoney\":\"\"}"
+        }
+      ],
+      "seq": 49,
+      "time": "2026-10-05 10:24:56",
+      "remote": "47.107.37.60:1883"
+    }
+  ]
+}
