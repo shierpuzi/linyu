@@ -1,5 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  趣智 · 桌面图标（adaptive icon）
+
+  三层：
+    background = @color/ic_launcher_background（#2563EB）
+    foreground = drawable/ic_launcher_foreground（字标 #FFFFFF，透明底）
+    monochrome = drawable/ic_launcher_monochrome（Android 13+ 主题图标）
+
+  ⚠️ monochrome 在 API 26~32 上会被资源解析器忽略（未知子元素不报错），
+     所以不需要另建 mipmap-anydpi-v33 副本，一个文件通吃。
+
+  ⚠️ foreground 必须是**透明底矢量**。工程里原来的 mipmap-*/ic_launcher_foreground.png
+     五套密度 alpha 全 255、四角纯黑，导致：① 盖死 background 底色
+     ② 遮罩裁到黑角 ③ 当 monochrome 用时糊成一整块实心色。
+-->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@color/ic_launcher_background"/>
-    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
 </adaptive-icon>

@@ -18,11 +18,11 @@ val releaseSigningReady = releaseSigningFields.all { !releaseSigningProperties.g
     releaseKeystorePath?.let { file(it).isFile } == true
 
 android {
-    namespace = "com.hualala.linyu"
+    namespace = "com.quzhi.lite"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.hualala.linyu"
+        applicationId = "com.quzhi.lite"
         minSdk = 26
         targetSdk = 36
         versionCode = 16
@@ -48,7 +48,7 @@ android {
 
     // ── 共存包 ────────────────────────────────────────────────
     //
-    // `dev` flavor 只改 applicationId，让它和原版（com.hualala.linyu）以及官方
+    // `dev` flavor 只改 applicationId，让它和原版（com.quzhi.lite）以及官方
     // 趣智校园 App 都能同时装在一台手机上。
     //
     // 为什么要共存：三个 App 共用同一个 loginCode，任何一个登录都会把另外两个挤下线。
@@ -74,7 +74,7 @@ android {
             applicationIdSuffix = ".dev"
             versionNameSuffix = "-dev"
             // 名字带个后缀，方便在桌面上和原版区分
-            resValue("string", "app_name", "淋浴·测试版")
+            resValue("string", "app_name", "趣智Lite·测试版")
 
             // ── 预置登录态（**只在这个 flavor 里**）─────────────
             //

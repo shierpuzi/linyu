@@ -118,9 +118,9 @@
             android:label="@string/app_name">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.hualala.linyu.widget.ACTION_START" />
-                <action android:name="com.hualala.linyu.widget.ACTION_STOP" />
-                <action android:name="com.hualala.linyu.widget.ACTION_REFRESH" />
+                <action android:name="com.quzhi.lite.widget.ACTION_START" />
+                <action android:name="com.quzhi.lite.widget.ACTION_STOP" />
+                <action android:name="com.quzhi.lite.widget.ACTION_REFRESH" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
@@ -133,9 +133,9 @@
             android:label="@string/app_name">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.hualala.linyu.widget.ACTION_START" />
-                <action android:name="com.hualala.linyu.widget.ACTION_STOP" />
-                <action android:name="com.hualala.linyu.widget.ACTION_REFRESH" />
+                <action android:name="com.quzhi.lite.widget.ACTION_START" />
+                <action android:name="com.quzhi.lite.widget.ACTION_STOP" />
+                <action android:name="com.quzhi.lite.widget.ACTION_REFRESH" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
@@ -148,9 +148,9 @@
             android:label="@string/app_name">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.hualala.linyu.widget.ACTION_START" />
-                <action android:name="com.hualala.linyu.widget.ACTION_STOP" />
-                <action android:name="com.hualala.linyu.widget.ACTION_REFRESH" />
+                <action android:name="com.quzhi.lite.widget.ACTION_START" />
+                <action android:name="com.quzhi.lite.widget.ACTION_STOP" />
+                <action android:name="com.quzhi.lite.widget.ACTION_REFRESH" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"

@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">淋浴</string>
+    <string name="app_name">趣智Lite</string>
 
     <!-- 桌面小组件 -->
     <string name="widget_1x1_description">一个按钮开关热水（最省地方）</string>

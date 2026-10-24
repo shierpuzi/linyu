@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "LinYu"
+rootProject.name = "QuzhiLite"
 include(":app")
