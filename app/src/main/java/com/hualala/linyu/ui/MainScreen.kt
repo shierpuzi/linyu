@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
@@ -42,6 +43,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -293,7 +295,11 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
                                 verticalAlignment = Alignment.CenterVertically) {
                                 Column {
                                     Text("淋浴", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = AppColors.TextPrimary)
-                                    Text("Hualala", color = AppColors.TextSecondary, fontSize = 14.sp)
+                                    // 板块切换入口（绑定 2 个以上项目时才显示）。
+                                    // ⚠️ 这里是**唯一**的板块入口：曾经被误删过一次，
+                                    // 表现是"洗浴/洗衣饮水吹风切换没了"，但 ViewModel 里
+                                    // switchProject 还在——所以只需把入口补回来，逻辑不用动。
+                                    ProjectSwitcher(viewModel)
                                 }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     // 扫码按钮
@@ -690,6 +696,119 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
             },
             dismissButton = {}
         )
+    }
+}
+
+/**
+ * 板块（项目）切换入口 —— 首页标题下方那行。
+ *
+ * ## 一个账号可能绑定多个独立项目
+ *
+ * 实测：洗浴（projectId 4000）与洗衣饮水吹风（3356）是**两条独立账户**，
+ * 各有 accountId、钱包、账单、设备。`loginCode` 全局一套，但 `accountId` + `projectId`
+ * 必须成对切换（见 `ProjectRepository.switchTo`）。
+ *
+ * ## 只绑 1 个项目时不显示
+ *
+ * 多一个可点的东西就是多一份噪音，而点开只有一行「当前板块」。
+ * 判据在 `ProjectSelectionPolicy.hasMultiple`。
+ *
+ * ## ⚠️ 这个组件曾被误删
+ *
+ * `MainViewModel` 里的 `switchProject` / `projects` / `showProjectSwitcher` 都还在，
+ * 只有 UI 入口没了，表现成「顶部变成一行写死的副标题、切换功能消失」。
+ * 以后改 `MainScreen.kt` 大结构时，**别把它当成可删的装饰**。
+ */
+@Composable
+private fun ProjectSwitcher(viewModel: MainViewModel) {
+    // 只有 1 个板块时退化成项目名（没有可切换的东西就不给一个假下拉）
+    val multi = viewModel.showProjectSwitcher
+    val current = viewModel.projectLabel(viewModel.currentProjectId)
+    var expanded by remember { mutableStateOf(false) }
+
+    if (!multi) {
+        Text(
+            viewModel.schoolName.ifEmpty { current },
+            color = AppColors.TextSecondary, fontSize = 14.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis
+        )
+        return
+    }
+
+    Box {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { expanded = true }
+                .padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                current,
+                color = AppColors.TextSecondary,
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 190.dp)
+            )
+            Spacer(Modifier.width(2.dp))
+            if (viewModel.isSwitchingProject) {
+                CircularProgressIndicator(
+                    Modifier.size(12.dp), strokeWidth = 1.5.dp, color = AppColors.TextSecondary
+                )
+            } else {
+                Icon(
+                    Icons.Default.KeyboardArrowDown,
+                    contentDescription = "切换板块",
+                    tint = AppColors.TextSecondary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            viewModel.projects.forEach { p ->
+                val pid = p.projectId ?: return@forEach
+                val name = viewModel.projectLabel(pid)
+                val selected = pid == viewModel.currentProjectId
+                DropdownMenuItem(
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                name,
+                                color = if (selected) AppColors.Accent else AppColors.TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                            )
+                            if (selected) {
+                                Spacer(Modifier.width(6.dp))
+                                Text("当前", color = AppColors.Accent, fontSize = 11.sp)
+                            }
+                        }
+                    },
+                    onClick = {
+                        expanded = false
+                        if (!selected) viewModel.switchProject(pid)
+                    }
+                )
+            }
+            // 有在途订单时切换会被拒——这里说明原因，别让用户以为点坏了
+            if (viewModel.activeOrders.isNotEmpty()) {
+                HorizontalDivider(color = AppColors.Border)
+                Text(
+                    "有设备正在使用时无法切换板块",
+                    color = AppColors.TextSecondary,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                )
+            }
+        }
     }
 }
 
