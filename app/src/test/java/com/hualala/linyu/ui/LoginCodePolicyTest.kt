@@ -25,15 +25,6 @@ class LoginCodePolicyTest {
         assertFalse(LoginCodePolicy.isValidLoginCode("z" + code.drop(1)))      // 非 hex
     }
 
-    /** 整条抓包 URL 不是合法输入——登录框只收值本身 */
-    @Test
-    fun `a full request url is rejected as login code`() {
-        val url = "https://v3-api.china-qzxy.cn/account/wallet?loginCode=$code&userId=10000001"
-
-        assertFalse(LoginCodePolicy.isValidLoginCode(url))
-        assertFalse(LoginCodePolicy.isValidUserId(url))
-    }
-
     @Test
     fun `normalize lowercases and trims`() {
         assertEquals(code, LoginCodePolicy.normalize("  ${code.uppercase()} "))
@@ -46,5 +37,25 @@ class LoginCodePolicyTest {
         assertFalse(LoginCodePolicy.isValidUserId(""))
         assertFalse(LoginCodePolicy.isValidUserId("abc"))
         assertFalse(LoginCodePolicy.isValidUserId("10000001x"))
+    }
+
+    /** 教程教用户从抓包 URL 里复制，所以整条 URL 粘进来必须能抠出来 */
+    @Test
+    fun `extract loginCode and userId from a full request url`() {
+        val url = "https://v3-api.china-qzxy.cn/account/wallet" +
+            "?accountId=10000101&telPhone=13800138000&phoneSystem=android" +
+            "&loginCode=$code&telephone=13800138000&projectId=3356" +
+            "&userId=10000001&version=6.5.29"
+
+        assertEquals(code, LoginCodePolicy.extractLoginCode(url))
+        assertEquals("10000001", LoginCodePolicy.extractUserId(url))
+    }
+
+    @Test
+    fun `extract falls back to bare values`() {
+        assertEquals(code, LoginCodePolicy.extractLoginCode(code))
+        assertEquals("10000001", LoginCodePolicy.extractUserId("10000001"))
+        assertEquals("", LoginCodePolicy.extractLoginCode("not-a-code"))
+        assertEquals("", LoginCodePolicy.extractUserId("not-a-user-id"))
     }
 }

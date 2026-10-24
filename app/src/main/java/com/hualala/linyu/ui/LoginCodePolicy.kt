@@ -29,4 +29,23 @@ internal object LoginCodePolicy {
 
     /** 存进 Prefs / 发请求之前统一小写去空白，避免同一份码大小写不同被当成两个 */
     fun normalize(raw: String): String = raw.trim().lowercase()
+
+    /**
+     * 从用户粘贴的内容里抠出 loginCode。
+     *
+     * 用户常常会把**整条请求 URL** 一起复制过来（教程就是让人从抓包 URL 里复制）。
+     * 直接整段塞进请求会失败，所以这里优先按正则找 32 位 hex；找不到再退回去空白。
+     * 找不到合法码时返回空串，由调用方提示用户。
+     */
+    fun extractLoginCode(raw: String): String {
+        val match = Regex("[0-9a-fA-F]{32}").find(raw) ?: return ""
+        return match.value.lowercase()
+    }
+
+    /** 同 [extractLoginCode]，从粘贴内容里找 `userId=`（或纯数字本身） */
+    fun extractUserId(raw: String): String {
+        Regex("[?&]userId=(\\d{1,20})").find(raw)?.let { return it.groupValues[1] }
+        val trimmed = raw.trim()
+        return if (isValidUserId(trimmed)) trimmed else ""
+    }
 }

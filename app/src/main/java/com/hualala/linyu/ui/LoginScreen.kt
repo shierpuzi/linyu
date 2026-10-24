@@ -200,7 +200,7 @@ fun LoginScreen(
                             value = viewModel.loginCode,
                             onValueChange = { viewModel.loginCode = it },
                             label = { Text("loginCode") },
-                            placeholder = { Text("32 位十六进制", fontSize = 12.sp) },
+                            placeholder = { Text("32 位，可直接粘整条请求 URL", fontSize = 12.sp) },
                             trailingIcon = {
                                 if (viewModel.loginCode.isNotEmpty()) {
                                     TextButton(onClick = { viewModel.loginCode = "" }) { Text("✕", color = Color.Gray) }
@@ -216,7 +216,8 @@ fun LoginScreen(
                             value = viewModel.codeUserId,
                             onValueChange = { viewModel.codeUserId = it },
                             label = { Text("userId") },
-                            placeholder = { Text("与 loginCode 同一条请求里的 userId", fontSize = 12.sp) },                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("与 loginCode 同一条请求里的 userId", fontSize = 12.sp) },
+                            modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             shape = RoundedCornerShape(14.dp),
