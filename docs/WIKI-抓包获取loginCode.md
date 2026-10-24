@@ -63,6 +63,80 @@ https://v3-api.china-qzxy.cn/account/wallet
 
 这一条就把 `loginCode` / `userId` / `accountId` / `projectId` / `telephone` 全给了。
 
+### ⚠️ 只拿 loginCode 不够——还必须同时给 `userId`
+
+实测（2026-10-24，本账号真实 loginCode 逐个接口验证）：
+
+| 只传什么 | 结果 |
+|---|---|
+| 只有 `loginCode` | ❌ `errorCode=8 未获取到用户信息，请重新登录` |
+| `loginCode` + `accountId`、或 + `projectId`、或 `userId=0` | ❌ 同样 `8`，其中 `userId=0` 报「登录失效」 |
+| **`loginCode` + `userId`** | ✅ `success`，`/user/project/list` 直接返回绑定的全部板块 |
+
+**服务端把 `loginCode` 和 `userId` 当作一对来识别会话。** 而 `loginCode` 是 32 位随机
+十六进制，**从它反推不出 `userId`**，所以两个都得拿到。
+
+> 好消息：只要这两个凑齐，其余参数（`accountId` / `projectId` / `telephone`）全能自己解析，
+> 不用也去抓——见下面「userId 从哪来」。
+
+### userId 从哪来（四种取法，按省事程度排）
+
+**取法 1：从同一条业务请求里一起拿（推荐，和 loginCode 同一处）**
+
+上一条 `GET /account/wallet` 的 URL 里本来就有 `userId=10000001`，
+和 `loginCode` 挨着。抓包工具里那条请求的 query 从头看到尾即可，**不需要另外操作**。
+
+**取法 2：登录响应里直接有 `data.userId`**
+
+`POST /user/registerAndLogin`（或 `POST /user/login`）的响应体：
+
+```json
+{
+  "success": true,
+  "data": {
+    "userId": 10000001,        ← 这里
+    "loginCode": "...",
+    "userAccount": { "accountId": 10000101, "projectId": 3356, ... }
+  }
+}
+```
+
+`userId` 和 `loginCode` 在同一次响应里，一起复制走的成本为零。
+
+**取法 3：App 内「我的」页 / 日志里的接口响应**
+
+linyu 自己的日志会把每个请求打进去（自动脱敏了 `loginCode`/`userId`，但**服务端响应体
+如果没被脱敏**，`/user/project/list` 的响应里有 `userId`）。公开构建下不可靠，
+**只建议调试包用**。
+
+**取法 4：`/user/project/list` 的响应（需要已有 userId，鸡生蛋，不适用首次）**
+
+---
+
+### 拿到之后怎么验证这两个能配对
+
+最省事的验证请求（**不需要任何业务权限，只读**）：
+
+```bash
+curl 'https://v3-api.china-qzxy.cn/user/project/list?loginCode=<你的>&userId=<你的>' \
+  -H 'User-Agent: okhttp/4.2.2'
+```
+
+成功的样子：
+
+```json
+{"success":true,"errorCode":0,"errorMessage":"成功",
+ "data":[{"userId":10000001,"projectId":3356,"accountId":10000101},
+         {"userId":10000001,"projectId":4000,"accountId":3987}]}
+```
+
+- 返回 `success:true` → 两个都有效、且配对正确，`accountId` + `projectId` 也顺手拿到了
+- 返回 `errorCode=8 未获取到用户信息` → 大概率是 **userId 漏了或填错**（不是 loginCode 过期）
+- 返回 `errorCode=8 登录失效，请重新登录` → loginCode 真的失效/被挤了
+
+> ⚠️ 这两个错误文案只差后半句，**别混**：
+> 「未获取到用户信息」= 缺参数 / userId 不对；「登录失效」= 令牌本身死了。
+
 ### 操作步骤
 
 1. **打开抓包工具，让它开始抓**（这时 App 保持已登录状态，**不要重新登录**）
