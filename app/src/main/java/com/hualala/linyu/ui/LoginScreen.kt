@@ -167,20 +167,16 @@ fun LoginScreen(
                     Text("请使用校园账号登录", fontSize = 13.sp, color = Color.Gray,
                         modifier = Modifier.padding(bottom = 20.dp, top = 4.dp))
 
-                    // 密码/验证码切换
-                    Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.Center) {
-                        TextButton(onClick = {
-                            // 从 loginCode 模式切回来时，先退出该模式再切密码/验证码
-                            if (viewModel.isCodeMode) viewModel.switchCodeMode() else viewModel.switchMode()
-                        }) {
-                            Text(
-                                when {
-                                    viewModel.isCodeMode -> "账号登录"
-                                    viewModel.isSmsMode -> "密码登录"
-                                    else -> "验证码登录"
-                                },
-                                color = Color(0xFF1A73E8), fontSize = 13.sp
-                            )
+                    // 密码/验证码切换。
+                    // ⚠️ 只在「账号登录」下出现：loginCode 是第三种独立方式，用下面那个
+                    //    独立按钮进出。以前把三种揉进这一个按钮里，结果是
+                    //    `switchMode()` 只在密码/验证码之间翻转，loginCode 入口**永远点不到**。
+                    if (!viewModel.isCodeMode) {
+                        Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalArrangement = Arrangement.Center) {
+                            TextButton(onClick = { viewModel.switchMode() }) {
+                                Text(if (viewModel.isSmsMode) "密码登录" else "验证码登录",
+                                    color = Color(0xFF1A73E8), fontSize = 13.sp)
+                            }
                         }
                     }
                     // 当前模式的一句说明。放这儿是因为用户最容易卡住的两个点都在这：
@@ -330,6 +326,20 @@ fun LoginScreen(
                                 textAlign = TextAlign.Center
                             )
                         }
+                    }
+
+                    // 第三种登录方式的入口/出口。
+                    // ⚠️ 必须和上面那个「密码/验证码」切换分开：那个按钮按下只翻 isSmsMode，
+                    //    永远到不了 loginCode 模式（第一版就是这么挂的，界面看着有入口其实点不进去）。
+                    Spacer(Modifier.height(12.dp))
+                    TextButton(
+                        onClick = { viewModel.switchCodeMode() },
+                        contentPadding = PaddingValues(horizontal = 8.dp)
+                    ) {
+                        Text(
+                            if (viewModel.isCodeMode) "返回账号登录" else "通过 loginCode + userId 登录",
+                            fontSize = 13.sp, color = Color(0xFF1A73E8)
+                        )
                     }
 
                     viewModel.errorMessage?.let { msg ->
