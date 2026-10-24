@@ -16,7 +16,7 @@ import org.junit.Test
  */
 class ProjectSelectionPolicyTest {
 
-    private val shower = UserProject(userId = 10000001, projectId = 4000, accountId = 3987)
+    private val shower = UserProject(userId = 10000001, projectId = 4000, accountId = 10000002)
     private val laundry = UserProject(userId = 10000001, projectId = 3356, accountId = 10000101)
     private val all = listOf(laundry, shower)
 
@@ -44,8 +44,8 @@ class ProjectSelectionPolicyTest {
 
     @Test
     fun `projectId resolves to its own paired accountId`() {
-        assertEquals(3987L, ProjectSelectionPolicy.resolve(all, 4000)?.accountId)
-        assertEquals(15384L, ProjectSelectionPolicy.resolve(all, 3356)?.accountId)
+        assertEquals(10000002L, ProjectSelectionPolicy.resolve(all, 4000)?.accountId)
+        assertEquals(10000101L, ProjectSelectionPolicy.resolve(all, 3356)?.accountId)
     }
 
     @Test
@@ -68,6 +68,6 @@ class ProjectSelectionPolicyTest {
     @Test
     fun `duplicated projectId keeps the first occurrence`() {
         val dup = listOf(shower, UserProject(projectId = 4000, accountId = 1111))
-        assertEquals(3987L, ProjectSelectionPolicy.resolve(dup, 4000)?.accountId)
+        assertEquals(10000002L, ProjectSelectionPolicy.resolve(dup, 4000)?.accountId)
     }
 }

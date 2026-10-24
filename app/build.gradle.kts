@@ -81,12 +81,15 @@ android {
             // 值来自 local.properties（在 .gitignore 里，不入库）。
             // 没配就是空串，PrefillAuth.available 为 false，行为同原版。
             //
-            // 填法（linyu/local.properties）：
-            //   QZXY_PREFILL_LOGIN_CODE=xxxx
-            //   QZXY_PREFILL_USER_ID=10000001
-            //   QZXY_PREFILL_ACCOUNT_ID=10000101
-            //   QZXY_PREFILL_PROJECT_ID=3356
-            //   QZXY_PREFILL_TELEPHONE=13800138000
+            // 填法（linyu/local.properties，**这个文件不入库**）：
+            //   QZXY_PREFILL_LOGIN_CODE=<登录后拿到的 32 位 loginCode>
+            //   QZXY_PREFILL_USER_ID=<userId>
+            //   QZXY_PREFILL_ACCOUNT_ID=<该板块的 accountId>
+            //   QZXY_PREFILL_PROJECT_ID=<该板块的 projectId>
+            //   QZXY_PREFILL_TELEPHONE=<手机号>
+            //
+            // ⚠️ 这里刻意只写占位符、不写真实值：本文件是公开的，
+            //    任何真实账号/手机号都不该出现在源码里。
             val prefill = Properties().apply {
                 if (localPropertiesFile.exists()) {
                     localPropertiesFile.inputStream().use(::load)
