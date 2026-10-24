@@ -482,7 +482,7 @@ class MainViewModel : ViewModel() {
                     }
                 }
                 // 进入待确认状态 → 开始每秒盯着这台设备，被别人抢先时立刻提示
-                if (modePending == null) startPreemptWatch(sn)
+                if (modePending == null) startPreemptWatch(sn, packageBilling = true)
             }
         }
     }
@@ -500,34 +500,75 @@ class MainViewModel : ViewModel() {
      * 若将来担心流量/耗电，可放宽到 2~3 秒；但「被抢」这件事用户体感上
      * 越早发现越好，1 秒是能接受的上限。上限就是 1 req/s/设备。
      */
-    fun startPreemptWatch(sn: String) {
+    /**
+     * 进入「待确认」阶段时启动每秒状态轮询，防止别人抢先使用。
+     *
+     * ## 两种计费模型查的接口不同
+     *
+     * | 计费模型 | 接口 | 占用判据 |
+     * |---|---|---|
+     * | 套餐（洗衣机/吹风机） | `washer/status` | `errorCode==307` 或 `success && data != null` |
+     * | 按量（热水器/洗手台/饮水机） | `query/rateOrder/using` | `errorCode==307` 或 `success && orderNo != null` |
+     *
+     * 两者都是**每秒一次只读请求**，都不动钱。
+     *
+     * ## 什么时候跑
+     *
+     * - 选套餐页打开 / 确认弹窗弹出
+     * - 按量计费的全屏页打开（未开始态）
+     *
+     * 一旦下单成功 / 开阀成功就停——那时设备是自己的了。
+     *
+     * ponytail: 1 req/s/设备。若将来担心流量/耗电可放宽到 2~3 秒，
+     * 但「被抢」越早发现越好，1 秒是能接受的上限。
+     *
+     * @param sn 设备序列号
+     * @param packageBilling true = 套餐设备（查 washer/status）；
+     *                       false = 按量计费设备（查 queryUsing）
+     */
+    fun startPreemptWatch(sn: String, packageBilling: Boolean) {
         preemptPollJob?.cancel()
         preemptPollJob = viewModelScope.launch {
             while (true) {
                 delay(1000L)
-                // 已有自己的单 → 停止轮询（设备是自己的了）
-                if (modePending != null) break
+                // 已有自己的单 / 已经在用水 → 设备是自己的了，停止轮询
+                if (modePending != null || isShowering) break
                 // 页面已关闭 → 停止
                 if (modeOrderDevice == null && !meteredScreenOpen) break
-                val st = try {
-                    modeOrderController.queryStatus(sn)
+
+                val busy: String? = try {
+                    if (packageBilling) {
+                        // 套餐设备：三态，Unknown 不算被抢
+                        when (val st = modeOrderController.queryStatus(sn)) {
+                            is ModeStatus.Busy -> st.reason
+                            else -> null
+                        }
+                    } else {
+                        // 按量计费设备：走 queryUsing，判据与 ShowerController 一致
+                        val q = NetworkModule.apiService.queryUsingSafe(
+                            snCode = sn, auth = NetworkModule.authFields()
+                        )
+                        val hasOrder = q.errorCode == 307 || (q.success && q.data?.orderNo != null)
+                        if (!hasOrder) null
+                        else if (q.data?.isOwner == true) "你自己的单还在进行中"
+                        else "别人的单"
+                    }
                 } catch (_: Exception) {
                     continue // 网络抖动不算"被抢占"，继续下一轮
                 }
-                if (st is ModeStatus.Busy) {
+
+                if (busy != null) {
                     val wasEmpty = preemptedByOthers == null
-                    preemptedByOthers = st.reason
+                    preemptedByOthers = busy
                     // 同步到页面横幅（两处 UI 都读这个）
-                    modeOccupiedReason = st.reason
-                    if (wasEmpty) {
-                        AppLogger.i("设备被抢先占用：$sn ${st.reason}")
-                    }
-                } else if (st is ModeStatus.Idle) {
-                    // 恢复了（对方结束了）→ 清掉抢占提示，允许下单
+                    modeOccupiedReason = busy
+                    if (wasEmpty) AppLogger.i("设备被抢先占用：$sn $busy")
+                } else {
+                    // 空闲了（对方结束了）→ 清掉提示，允许操作
                     if (preemptedByOthers != null) {
                         preemptedByOthers = null
                         modeOccupiedReason = null
-                        AppLogger.i("设备已空闲，可重新下单：$sn")
+                        AppLogger.i("设备已空闲，可重新操作：$sn")
                     }
                 }
             }
@@ -616,7 +657,7 @@ class MainViewModel : ViewModel() {
         modeOrderError = null
         pendingConfirmMode = mode
         // 弹窗期间也要盯着：用户犹豫时设备可能被抢
-        startPreemptWatch(sn)
+        startPreemptWatch(sn, packageBilling = true)
     }
 
     /** 用户在确认框里点了「取消」 */
@@ -1153,12 +1194,25 @@ class MainViewModel : ViewModel() {
             // 「开始使用」按钮在这个页面里，点了先弹确认框，
             // 用户确认后才真正 openValve——见 requestStartMetered / confirmStartMetered。
             showDeviceDetail = false
-            meteredScreenOpen = true
+            openMeteredScreen(info)
             AppLogger.i("进入按量计费全屏页：${info.displayName} fromScan=$fromScan")
         }
     }
 
     // ── 按量计费：全屏页里的「开始使用」两步走 ──
+
+    /**
+     * 进入按量计费设备的全屏页时调用（由 `routeAfterDeviceInfo` 触发）。
+     *
+     * 除了打开页面，还要**开始防抢占轮询**：按量计费设备同样会被别人抢先开走，
+     * 而用户在这个页面上可能停留很久（犹豫、找卡、接电话）。
+     * 不盯着的话，点「开始使用」才会发现 307。
+     */
+    private fun openMeteredScreen(info: DeviceInfo) {
+        meteredScreenOpen = true
+        val sn = info.snCode
+        if (!sn.isNullOrBlank()) startPreemptWatch(sn, packageBilling = false)
+    }
 
     /** 用户点了「开始使用」→ **只弹确认框**，不开阀 */
     fun requestStartMetered() {
@@ -1166,6 +1220,11 @@ class MainViewModel : ViewModel() {
         val sn = selectedDevice?.snCode
         if (sn.isNullOrBlank()) {
             toastMessage = "设备信息不完整"
+            return
+        }
+        // 已被抢占时不该弹确认框——直接告诉用户，别让他白走一遍确认流程
+        preemptedByOthers?.let {
+            toastMessage = "这台设备正被使用（$it），请稍后再试"
             return
         }
         pendingConfirmStart = true
@@ -1182,6 +1241,8 @@ class MainViewModel : ViewModel() {
         // `isStartingShower`。所以这里**不要**设 isStartingMetered 再立刻复位——
         // 那样按钮会闪一下就恢复，用户以为没点上就可能再点一次。
         // 展示用的 busy 状态直接读 `isStartingShower`（见 meteredBusy）。
+        // 已经走到开阀这一步，不用再盯"被抢"了
+        stopPreemptWatch()
         startShower(phone)
     }
 
@@ -1194,6 +1255,7 @@ class MainViewModel : ViewModel() {
     fun closeMeteredScreen() {
         meteredScreenOpen = false
         pendingConfirmStart = false
+        stopPreemptWatch()
         // 如果没在使用中，把选中设备清掉，避免下次进来看到上一个的残留
         if (!isShowering) selectedDevice = null
     }

@@ -66,6 +66,13 @@ fun MeteredDeviceScreen(
     autoDisConSec: Int = 0,
     isStopping: Boolean = false,
     startBusy: Boolean = false,
+    /**
+     * 设备被**别人**占用的原因（含剩余时间）。非 null 时禁用「开始使用」。
+     *
+     * 由每秒轮询（`MainViewModel.startPreemptWatch`）实时填充：用户在这个页面
+     * 停留时被抢，横幅会自己冒出来，不需要等他点按钮才发现。
+     */
+    occupiedReason: String? = null,
     isFavorite: Boolean = false,
     onToggleFavorite: () -> Unit = {},
     onStartClick: () -> Unit,
@@ -170,6 +177,34 @@ fun MeteredDeviceScreen(
                     }
                 }
             } else {
+                // 被占用时置顶提示：这是用户唯一能知道"机器是别人的"的地方
+                occupiedReason?.let { reason ->
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        color = AppColors.Warning.copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, AppColors.Warning.copy(alpha = 0.5f)),
+                        shadowElevation = 0.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("⏳", fontSize = 16.sp)
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text("设备正在被使用", fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold, color = AppColors.Warning)
+                                if (reason.isNotBlank()) {
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(reason, fontSize = 12.sp, color = AppColors.TextSecondary)
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(16.dp))
+                }
+
                 // ── 未开始：预扣说明 ──
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -224,7 +259,8 @@ fun MeteredDeviceScreen(
             } else {
                 Button(
                     onClick = onStartClick,
-                    enabled = !startBusy,
+                    // 被占用时禁用：「别人的机器，扣的是自己的钱」
+                    enabled = !startBusy && occupiedReason == null,
                     modifier = Modifier.fillMaxWidth().height(56.dp),
                     shape = CircleShape,
                     colors = ButtonDefaults.buttonColors(
@@ -239,6 +275,9 @@ fun MeteredDeviceScreen(
                         Spacer(Modifier.width(8.dp))
                         Text("正在开启…", color = Color.White, fontSize = 17.sp,
                             fontWeight = FontWeight.Bold)
+                    } else if (occupiedReason != null) {
+                        Text("设备使用中", color = Color.White, fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
                     } else {
                         Text("开 始 使 用", color = Color.White, fontSize = 18.sp,
                             fontWeight = FontWeight.Bold, letterSpacing = 4.sp)

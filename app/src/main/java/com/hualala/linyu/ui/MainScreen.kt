@@ -271,6 +271,8 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
                         location = dev.locationOnly,
                         preDeductYuan = MoneyFormat.format(dev.withholdMoney),
                         inUse = false,
+                        // 每秒轮询来的「被占用」状态：非空时禁用开始按钮并显示横幅
+                        occupiedReason = viewModel.modeOccupiedReason,
                         isFavorite = viewModel.isFavorite(dev.macAddress),
                         onToggleFavorite = { viewModel.toggleFavoriteCurrent() },
                         onStartClick = { viewModel.requestStartMetered() },
