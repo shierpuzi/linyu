@@ -1207,13 +1207,6 @@ private fun AboutCard() {
             Text("制作者：${repo?.ownerLogin?.takeIf { it.isNotBlank() } ?: REPO_OWNER}",
                 color = AppColors.TextSecondary, fontSize = 13.sp)
 
-            Spacer(Modifier.height(6.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("联系方式：", color = AppColors.TextSecondary, fontSize = 13.sp)
-                Text(CONTACT_EMAIL, color = AppColors.Accent, fontSize = 13.sp,
-                    modifier = Modifier.clickable { sendEmail(context) })
-            }
-
             Spacer(Modifier.height(14.dp))
             Button(
                 onClick = { openUrl(context, repo?.htmlUrl ?: GithubApi.REPO_URL) },
@@ -1225,22 +1218,8 @@ private fun AboutCard() {
     }
 }
 
-/** 项目联系方式（点一下会调起邮件应用） */
-private const val CONTACT_EMAIL = "2276391153@qq.com"
-
 /** 本仓库 owner（GitHub API 拉不到时用它兜底，见「关于项目」） */
 private const val REPO_OWNER = "shierpuzi"
-
-/** 点击邮箱调起系统邮件应用 */
-private fun sendEmail(context: android.content.Context) {
-    runCatching {
-        context.startActivity(
-            android.content.Intent(android.content.Intent.ACTION_SENDTO,
-                android.net.Uri.parse("mailto:$CONTACT_EMAIL"))
-                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
-    }
-}
 
 /** 打开外部链接（失败静默，不影响使用） */
 private fun openUrl(context: android.content.Context, url: String) {
