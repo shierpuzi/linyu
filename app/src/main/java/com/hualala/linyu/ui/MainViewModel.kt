@@ -205,7 +205,32 @@ class MainViewModel : ViewModel() {
     var lastDeviceSnCode by mutableStateOf("")
     var lastDeviceEmoji by mutableStateOf("🚿")
 
-    var selectedDevice by mutableStateOf<DeviceInfo?>(null)
+    /**
+     * 当前打开的设备。
+     *
+     * ## 为什么 setter 里挂余额加载
+     *
+     * 设备页要显示的是**这台设备所属板块**的钱包余额，不是当前板块的
+     * （见 [DeviceBoardPolicy]）。这个赋值点有 5 处以上：扫码、点附近设备、
+     * 点收藏、点「上次使用」、从活跃订单恢复……以前是每个入口各自调一次
+     * [loadDeviceBoardWallet]，结果**漏了两处**——从收藏进入时余额还是错的。
+     *
+     * 收口到 setter 里，以后新增入口不会再漏。代价是赋值时会顺带发一次请求，
+     * 但只在跨板块时才会真发（同板块直接复用 [walletBalance]）。
+     *
+     * ⚠️ 底层仍是 mutableStateOf：只写普通字段的话界面不会重组，
+     *    设备页会一直停在上一台设备的内容上。
+     */
+    private var selectedDeviceState by mutableStateOf<DeviceInfo?>(null)
+
+    var selectedDevice: DeviceInfo?
+        get() = selectedDeviceState
+        set(value) {
+            selectedDeviceState = value
+            // null 是「页面关掉了」，不该再去取余额
+            if (value != null) loadDeviceBoardWallet(value)
+        }
+
     var showDeviceDetail by mutableStateOf(false)
 
     /**
@@ -1224,7 +1249,7 @@ class MainViewModel : ViewModel() {
         meteredScreenOpen = true
         val sn = info.snCode
         if (!sn.isNullOrBlank()) startPreemptWatch(sn, packageBilling = false)
-        loadDeviceBoardWallet(info)
+        // 余额不在这里取：selectedDevice 的 setter 已经统一负责（见那里的注释）
     }
 
     /**
@@ -1357,7 +1382,28 @@ class MainViewModel : ViewModel() {
 
     /** 收藏列表里点某项 → 按计费模型分流（和扫码/列表点击同一个入口） */
     fun openFavorite(fav: FavoriteDevice) {
+        // 先把快照还原成 DeviceInfo 再走统一入口。快照里带 projectId（见 FavoriteDevice），
+        // 所以设备页能按正确板块取余额；不带的话会退回当前板块、显示错的钱包。
         routeAfterDeviceInfo(fav.toDeviceInfo(), fromScan = true)
+        // ⚠️ 老收藏条目没有 projectId（这个字段是后加的，Gson 会留成 null）。
+        //    此时上面那次路由拿不到设备归属，余额会退回当前板块。
+        //    这里补一次台账查询把归属校正回来：只影响老数据，新收藏不受影响；
+        //    查失败也不影响用户正常使用（余额按当前板块显示，和改之前一样）。
+        if (fav.projectId == null) {
+            sessionScope().launch {
+                try {
+                    val info = DeviceInfoCache.load(fav.mac).data
+                    // 用户可能已经退出这个页面/换了设备，别把结果盖到新状态上
+                    if (info?.projectId != null && selectedDevice?.macAddress == fav.mac) {
+                        // 赋值即触发余额重算（setter 里统一处理）
+                        selectedDevice = selectedDevice?.copy(
+                            projectId = info.projectId,
+                            projectName = info.projectName
+                        )
+                    }
+                } catch (_: Exception) {}
+            }
+        }
     }
 
     /**
@@ -1500,7 +1546,9 @@ class MainViewModel : ViewModel() {
                 try {
                     val resp = DeviceInfoCache.load(order.deviceMac)
                     if (resp.success && resp.data != null) {
-                        selectedDevice = resp.data; startShower(phone)
+                        // 赋值即触发余额重算（setter 里统一处理，按设备所属板块）
+                        selectedDevice = resp.data
+                        startShower(phone)
                     } else {
                         toastMessage = "获取设备信息失败"
                     }
@@ -1515,7 +1563,8 @@ class MainViewModel : ViewModel() {
             try {
                 val resp = DeviceInfoCache.load(mac)
                 if (resp.success && resp.data != null) {
-                    selectedDevice = resp.data; startShower(phone)
+                    selectedDevice = resp.data
+                    startShower(phone)
                 } else {
                     toastMessage = "获取设备信息失败"
                 }
@@ -1552,6 +1601,7 @@ class MainViewModel : ViewModel() {
                     val resp = DeviceInfoCache.load(order.deviceMac)
                     val info = resp.data
                     if (resp.success && info != null) {
+                        // 赋值即触发余额重算（setter 里统一处理，按设备所属板块）
                         selectedDevice = info
                         if (info.isPackageBilling) {
                             enterModeOrderPicker(info)

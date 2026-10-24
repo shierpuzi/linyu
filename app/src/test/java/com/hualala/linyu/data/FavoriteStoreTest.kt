@@ -3,6 +3,7 @@ package com.hualala.linyu.data
 import com.hualala.linyu.model.DeviceInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -189,5 +190,49 @@ class FavoriteStoreTest {
         // 所以这里只断言「有可读的名字」，不断言原文——那是 rawName 的职责
         assertTrue("格式化后的名字不能为空，离线要能显示", f.displayName.isNotBlank())
         assertEquals("rawName 保留原始名（寝室筛选用）", "洗手台-3号楼-1层", f.rawName)
+    }
+
+    // ── 设备归属（projectId）──
+    //
+    // 这一组锁的是一个真 bug：从收藏进设备页时余额显示成了**当前板块**的钱。
+    // 根因是 FavoriteDevice 没存 projectId，toDeviceInfo() 还原出 null，
+    // 于是回退到当前板块。判错不崩不报错，只是安静地显示另一个板块的余额。
+
+    @Test
+    fun `收藏保留设备归属并还原回 DeviceInfo`() {
+        val src = DeviceInfo(
+            deviceId = 1, deviceName = "洗浴热水-3号宿舍楼-6层-609房",
+            snCode = "AABBCCDDEE01", macAddress = "AA:BB:CC:DD:EE:01",
+            withholdMoney = 5.0, onlineStatusId = 1,
+            bigTypeId = 4, bigTypeName = "热水器", smallTypeId = 1, smallTypeName = "热水表",
+            projectId = 4000L, projectName = "安徽三联学院洗浴"
+        )
+        val back = src.toFavorite(nowMs = 1L).toDeviceInfo()
+        assertEquals(4000L, back.projectId)
+        assertEquals("安徽三联学院洗浴", back.projectName)
+    }
+
+    @Test
+    fun `归属经过 JSON 往返仍在`() {
+        val src = DeviceInfo(
+            deviceId = 1, deviceName = "洗衣机", snCode = "S1", macAddress = "AA:BB:CC:DD:EE:02",
+            withholdMoney = 0.0, onlineStatusId = 1, bigTypeId = 6, smallTypeId = 3,
+            projectId = 3356L, projectName = "安徽三联学院洗衣饮水吹风"
+        )
+        val json = FavoriteStore.encode(listOf(src.toFavorite(1L)))
+        val decoded = FavoriteStore.decode(json)
+        assertEquals(1, decoded.size)
+        assertEquals(3356L, decoded[0].projectId)
+        assertEquals(3356L, decoded[0].toDeviceInfo().projectId)
+    }
+
+    /** 老收藏条目没有 projectId：解析不能崩，只留 null 让上层退回旧行为 */
+    @Test
+    fun `老数据没有 projectId 也不崩`() {
+        val json = """[{"mac":"AA:BB:CC:DD:EE:03","snCode":"S3","displayName":"旧设备","rawName":"旧设备"}]"""
+        val list = FavoriteStore.decode(json)
+        assertEquals(1, list.size)
+        assertNull(list[0].projectId)
+        assertNull(list[0].toDeviceInfo().projectId)
     }
 }

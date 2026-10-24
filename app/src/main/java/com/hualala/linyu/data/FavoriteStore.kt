@@ -45,6 +45,24 @@ data class FavoriteDevice(
     val smallTypeId: Int?,
     /** 预扣金额（元）。按量计费设备用得到 */
     val withholdMoney: Double = 0.0,
+    /**
+     * 设备所属板块（`/device/info/mac` 的 `projectId`）。
+     *
+     * ## 为什么必须存
+     *
+     * 设备页要显示**这台设备所属板块**的钱包余额，而不是「当前板块」的
+     * （见 [DeviceBoardPolicy] 与 `MainViewModel.loadDeviceBoardWallet`）。
+     * 收藏是**离线快照**，不存这个字段的话，从收藏进设备页时
+     * `toDeviceInfo()` 还原出 `projectId = null`，就会退回当前板块——
+     * 于是又显示错的钱包（"上次使用"那条路要联网查台账，所以它是对的，
+     * 两条路表现不一致，正是这个原因）。
+     *
+     * ⚠️ 老数据没有这个字段：Gson 会把它留成 null，此时行为退回旧逻辑
+     * （按当前板块），不会崩。
+     */
+    val projectId: Long? = null,
+    /** 设备所属板块名，仅用于显示 */
+    val projectName: String? = null,
     /** 收藏时刻（毫秒），用于排序 */
     val savedAtMs: Long = 0L
 ) {
@@ -59,7 +77,10 @@ data class FavoriteDevice(
         bigTypeId = bigTypeId,
         bigTypeName = typeName,
         smallTypeId = smallTypeId,
-        smallTypeName = typeName
+        smallTypeName = typeName,
+        // 余额要按设备自己的板块取，不能丢（见上面的注释）
+        projectId = projectId,
+        projectName = projectName
     )
 }
 
@@ -80,6 +101,9 @@ fun DeviceInfo.toFavorite(nowMs: Long): FavoriteDevice = FavoriteDevice(
     bigTypeId = bigTypeId,
     smallTypeId = smallTypeId,
     withholdMoney = withholdMoney,
+    // 设备归属也要存：从收藏进设备页时靠它决定显示哪个板块的钱包
+    projectId = projectId,
+    projectName = projectName,
     savedAtMs = nowMs
 )
 
