@@ -44,3 +44,7 @@ tools/_capture*/
 tools/_freeze_*/
 tools/__pycache__/
 tools/*.pyc
+
+# ── 图标预览产物（tools/preview_vector.py 生成，临时）──
+# 要长期留存的对比图请拷到 docs/icons/
+_icon_preview/
