@@ -117,6 +117,12 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
         // 真实余额，继续显示「手动填写」和「并非真实余额」。三个入口都拉一次。
         viewModel.loadCampusBalance()
         viewModel.loadSchoolName()
+        // ⚠️ 板块列表必须在这里拉一次。
+        //
+        // `projects` 为空时 `showProjectSwitcher` 为 false，切换入口就不渲染——
+        // 而 `loadProjects()` 就算定义了、没人调用，**编译器也不会报未使用**。
+        // 这个调用点曾经丢失过一次，表现是「板块切换入口消失」但代码齐全。
+        viewModel.loadProjects()
         // 未支付账单也要在这里拉一次：开阀失败弹窗的「立即补扣」靠它。
         // 只在钱包页拉的话，冷启动直接开阀失败时列表是空的，
         // 弹窗会退化成只有「知道了」——正好把这个功能的主要场景漏掉
@@ -702,110 +708,75 @@ fun MainScreen(phone: String, viewModel: MainViewModel = viewModel()) {
 /**
  * 板块（项目）切换入口 —— 首页标题下方那行。
  *
- * ## 一个账号可能绑定多个独立项目
+ * ## 还原自作者原版（2026-10-24 #24）
  *
- * 实测：洗浴（projectId 4000）与洗衣饮水吹风（3356）是**两条独立账户**，
- * 各有 accountId、钱包、账单、设备。`loginCode` 全局一套，但 `accountId` + `projectId`
- * 必须成对切换（见 `ProjectRepository.switchTo`）。
+ * 这个组件曾被误删，我按"看起来更合理"的方式重写过一版（单板块显示项目名、
+ * 加「当前」标记、加在途订单说明），但**那是重写不是还原**。
+ * 本版逐行对照旧 APK 反编译结果重写，行为与作者原版一致：
  *
- * ## 只绑 1 个项目时不显示
+ * - **单板块**：显示 `"Hualala"` 占位副标题（就是作者原本的写法，不是 bug）
+ * - **多板块**：Box + 圆角 8dp 可点 Row + 项目名（Accent 色、Medium 字重、14sp）
+ *   + `KeyboardArrowDown` 图标（18dp、Accent 色）+ DropdownMenu
+ * - **切换中**：项目名前面显示 12dp 转圈（1.5dp 粗）+ 6dp 间距
  *
- * 多一个可点的东西就是多一份噪音，而点开只有一行「当前板块」。
- * 判据在 `ProjectSelectionPolicy.hasMultiple`。
- *
- * ## ⚠️ 这个组件曾被误删
- *
- * `MainViewModel` 里的 `switchProject` / `projects` / `showProjectSwitcher` 都还在，
- * 只有 UI 入口没了，表现成「顶部变成一行写死的副标题、切换功能消失」。
- * 以后改 `MainScreen.kt` 大结构时，**别把它当成可删的装饰**。
+ * ⚠️ 不要再"优化"它。作者原版就是作者的选择，改之前先确认不是风格偏好。
  */
 @Composable
 private fun ProjectSwitcher(viewModel: MainViewModel) {
-    // 只有 1 个板块时退化成项目名（没有可切换的东西就不给一个假下拉）
-    val multi = viewModel.showProjectSwitcher
-    val current = viewModel.projectLabel(viewModel.currentProjectId)
-    var expanded by remember { mutableStateOf(false) }
-
-    if (!multi) {
-        Text(
-            viewModel.schoolName.ifEmpty { current },
-            color = AppColors.TextSecondary, fontSize = 14.sp,
-            maxLines = 1, overflow = TextOverflow.Ellipsis
-        )
+    if (!viewModel.showProjectSwitcher) {
+        Text("Hualala", color = AppColors.TextSecondary, fontSize = 14.sp)
         return
     }
 
+    // 展开状态。用 remember 保存，点外面 / 选中后收起
+    var expanded by remember { mutableStateOf(false) }
+    val label = viewModel.projectLabel(viewModel.currentProjectId)
+
+    // 原版这里是 ColumnScope 里的 Box(Modifier.align(TopStart))；独立函数里没有那个作用域，
+    // 而外层本来就是 Column，默认左对齐，去掉 align 视觉一致。
     Box {
         Row(
             modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) { expanded = true }
-                .padding(vertical = 2.dp),
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(enabled = !viewModel.isSwitchingProject) { expanded = true }
+                .padding(2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                current,
-                color = AppColors.TextSecondary,
-                fontSize = 14.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 190.dp)
-            )
-            Spacer(Modifier.width(2.dp))
+            // 切换中：转圈 + 6dp 间距（原版顺序：spinner 在项目名前面）
             if (viewModel.isSwitchingProject) {
                 CircularProgressIndicator(
-                    Modifier.size(12.dp), strokeWidth = 1.5.dp, color = AppColors.TextSecondary
+                    modifier = Modifier.size(12.dp),
+                    color = AppColors.Accent,
+                    strokeWidth = 1.5.dp
                 )
-            } else {
-                Icon(
-                    Icons.Default.KeyboardArrowDown,
-                    contentDescription = "切换板块",
-                    tint = AppColors.TextSecondary,
-                    modifier = Modifier.size(18.dp)
-                )
+                Spacer(Modifier.width(6.dp))
             }
+            Text(
+                label,
+                color = AppColors.Accent,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Icon(
+                Icons.Default.KeyboardArrowDown,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = AppColors.Accent
+            )
         }
 
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false }
         ) {
-            viewModel.projects.forEach { p ->
-                val pid = p.projectId ?: return@forEach
-                val name = viewModel.projectLabel(pid)
-                val selected = pid == viewModel.currentProjectId
+            viewModel.projects.forEach { project ->
+                val pid = project.projectId ?: return@forEach
                 DropdownMenuItem(
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                name,
-                                color = if (selected) AppColors.Accent else AppColors.TextPrimary,
-                                fontSize = 14.sp,
-                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-                            )
-                            if (selected) {
-                                Spacer(Modifier.width(6.dp))
-                                Text("当前", color = AppColors.Accent, fontSize = 11.sp)
-                            }
-                        }
-                    },
+                    text = { Text(viewModel.projectLabel(pid)) },
                     onClick = {
                         expanded = false
-                        if (!selected) viewModel.switchProject(pid)
+                        viewModel.switchProject(pid)
                     }
-                )
-            }
-            // 有在途订单时切换会被拒——这里说明原因，别让用户以为点坏了
-            if (viewModel.activeOrders.isNotEmpty()) {
-                HorizontalDivider(color = AppColors.Border)
-                Text(
-                    "有设备正在使用时无法切换板块",
-                    color = AppColors.TextSecondary,
-                    fontSize = 11.sp,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
                 )
             }
         }
