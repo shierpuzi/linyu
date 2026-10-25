@@ -20,7 +20,7 @@
 
 ## 📱 预览
 
-<img src="assets/preview.png" width="880" alt="趣智Lite 界面总览：首页 / 余额与趋势 / 我的账号 / 设置 / 洗衣机套餐 / 吹风机套餐 / 饮水机准备就绪" />
+<img src="assets/overview.png" width="880" alt="趣智Lite 界面总览：首页 / 余额与趋势 / 我的账号 / 设置 / 洗衣机套餐 / 吹风机套餐 / 饮水机准备就绪 / 登录页" />
 
 | 首页 | 余额与消费趋势 | 我的账号 | 设置 |
 |---|---|---|---|
@@ -33,6 +33,17 @@
 | 洗衣机 · 选套餐（扣全款、不可退） | 吹风机 · 选套餐 | 饮水机 · 准备就绪（按量、可中途关） |
 |---|---|---|
 | <img src="assets/mode_order_washer.png" width="230" alt="洗衣机选套餐"> | <img src="assets/mode_order_dryer.png" width="230" alt="吹风机选套餐"> | <img src="assets/metered_device.png" width="230" alt="饮水机准备就绪 · 占用态"> |
+
+### 三种登录方式
+
+默认短信验证码登录；也可用密码；已抓过包的话还能直接用 **loginCode + userId** 跳过验证码。
+
+| loginCode + userId 登录 |
+|---|
+| <img src="assets/login.png" width="270" alt="登录页 · loginCode + userId 直登"> |
+
+> loginCode 与 userId **必须成对**（服务端只认两个一起，少一个就回 `errorCode=8`）。
+> 这两个值怎么抓见 [WIKI-抓包获取loginCode.md](docs/WIKI-抓包获取loginCode.md)。
 
 ### 背景装扮
 
@@ -249,10 +260,18 @@ cd linyu
 
 ## 🙏 感谢
 
-感谢每一位为本项目做出贡献的朋友，是你们让「趣智Lite」从想法一步步变成今天的样子：
+### 特别鸣谢：本项目的基础框架来自 [@yehu-imei](https://github.com/yehu-imei)
+
+「趣智Lite」不是从零写的。**整个项目的底子——原始代码框架、热水器开阀 / 关阀与结算链路、
+短信登录的 secret 逆向、MQTT 协议、一卡通余额代理接口的发现——都来自
+[yehu-imei](https://github.com/yehu-imei) 的原始项目**。
+
+没有那份基础框架，这个项目不可能存在。本仓库是在它之上继续做多板块、套餐计费、
+蓝牙水表、界面与图标改造的，原作者的开创性工作值得单独记在这里。
 
 | 贡献者 | 贡献内容 |
 |---|---|
+| **[@yehu-imei](https://github.com/yehu-imei)** | **★ 基础框架与全部原始实现**：热水表开阀 / 关阀 / 结算链路、MQTT、短信 secret 算法、一卡通余额接口 |
 | [@Cainite07](https://github.com/Cainite07) | 短信登录的实现 |
 | [@SubmergeDQ](https://github.com/SubmergeDQ) | 蓝牙阀控制的实现 |
 | [@f3ngka0](https://github.com/f3ngka0) | 蓝牙水表 28 字节状态帧支持（[PR #11](https://github.com/shierpuzi/linyu/pull/11)） |

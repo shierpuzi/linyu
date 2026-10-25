@@ -1070,6 +1070,19 @@ buildTypes {
 
 ---
 
+## 致谢
+
+| 贡献者 | 内容 |
+|---|---|
+| **[yehu-imei](https://github.com/yehu-imei)** | **★ 本项目的原始作者：基础框架与全部原始实现**——热水表开阀 / 关阀 / 结算链路、MQTT 协议、短信 `secret` 算法、一卡通余额代理接口。本仓库是在他的代码基础上继续开发的 |
+| [@Cainite07](https://github.com/Cainite07) | 短信登录的实现 |
+| [@SubmergeDQ](https://github.com/SubmergeDQ) | 蓝牙阀控制的实现 |
+| [@f3ngka0](https://github.com/f3ngka0) | 蓝牙水表 28 字节状态帧支持 |
+| [@Asyreale](https://github.com/Asyreale) | 蓝牙表广播地址与小组件状态修复 |
+| [@XiaoLoad](https://github.com/XiaoLoad) | 项目优化的建议 |
+
+---
+
 ## 免责声明
 
 本项目仅供学习和研究用途。使用者应自行遵守趣智校园及相关服务的使用条款。

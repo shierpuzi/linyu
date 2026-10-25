@@ -1,7 +1,8 @@
-"""把用户提供的 7 张真机截图加工成 README 用图（Pillow，无外部依赖）。
+"""把用户提供的真机截图加工成 README 用图（Pillow，无外部依赖）。
 
 产出（写入 assets/）：
-  preview.png            总览拼图（4 列 × 2 行，7 张）
+  overview.png           总览拼图（4 列 × 2 行，8 张齐全）
+  login.png              登录页（loginCode + userId 方式）
   home.png               首页 / 收藏设备
   wallet.png             余额 + 消费趋势（合并）
   account.png            我的账号（使用码 / 绑定寝室）
@@ -10,10 +11,12 @@
   mode_order_dryer.png   吹风机选套餐
   metered_device.png     饮水机「准备就绪」（占用态）
 
-单图统一缩到宽 540（README 里按 230~260 显示，2x 屏够清晰），
-拼图用浅灰底、图间留白，和原 assets/preview.png 的观感一致。
+单图统一缩到宽 540（README 里按 200~260 显示，2x 屏够清晰），
+拼图用浅灰底、图间留白。
 
-一次性脚本：README 图片改好后可以删，或留着方便重跑。
+⚠️ 拼图文件名是 `overview.png` 而不是 `preview.png`：GitHub 的 camo 图片代理
+按 URL 缓存，同名替换后页面会继续显示旧图（实测踩过——仓库里已经是新图，
+github.com 上还是改名前的「淋浴」截图）。换名字才能让缓存失效。
 """
 
 from pathlib import Path
@@ -32,10 +35,23 @@ SHOTS = {
     "Screenshot_2026-10-25-12-23-39-23_b06158dd5f867a.jpg": "mode_order_washer.png",
     "Screenshot_2026-10-25-12-23-44-45_b06158dd5f867a.jpg": "mode_order_dryer.png",
     "Screenshot_2026-10-25-12-23-51-48_b06158dd5f867a.jpg": "metered_device.png",
+    "Screenshot_2026-10-25-12-25-43-83_b06158dd5f867a.jpg": "login.png",
 }
 
+# 拼图顺序：功能页在前，登录页放最后一格（第 8 格刚好填满 4×2）
+PREVIEW_ORDER = [
+    "home.png",
+    "wallet.png",
+    "account.png",
+    "settings.png",
+    "mode_order_washer.png",
+    "mode_order_dryer.png",
+    "metered_device.png",
+    "login.png",
+]
+
 SINGLE_W = 540          # 单图宽度
-COLS, ROWS = 4, 2       # 拼图网格（7 张，第 8 格留空）
+COLS, ROWS = 4, 2       # 拼图网格（8 张，刚好满格）
 CELL_W = 340            # 拼图里每格图宽
 GAP = 24                # 格间距 / 边距
 BG = (244, 245, 247)    # 和 App 浅色底接近
@@ -56,9 +72,10 @@ def save_single(im: Image.Image, name: str) -> None:
     print(f"  {name:22s} {SINGLE_W}x{h}")
 
 
-def build_preview(images: list[Image.Image]) -> None:
+def build_preview() -> None:
     cells = []
-    for im in images:
+    for name in PREVIEW_ORDER:
+        im = Image.open(OUT / name)
         h = round(im.height * CELL_W / im.width)
         cells.append(im.resize((CELL_W, h), Image.LANCZOS))
     cell_h = max(c.height for c in cells)
@@ -71,21 +88,19 @@ def build_preview(images: list[Image.Image]) -> None:
         x = GAP + col * (CELL_W + GAP)
         y = GAP + row * (cell_h + GAP)
         sheet.paste(c, (x, y))
-    sheet.save(OUT / "preview.png", optimize=True)
-    print(f"  {'preview.png':22s} {w}x{h}")
+    sheet.save(OUT / "overview.png", optimize=True)
+    print(f"  {'overview.png':22s} {w}x{h}")
 
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    loaded = []
     for src_name, dst_name in SHOTS.items():
         p = SRC / src_name
         if not p.is_file():
             raise SystemExit(f"找不到截图：{p}")
         im = crop_status_bar(Image.open(p).convert("RGB"))
         save_single(im, dst_name)
-        loaded.append(im)
-    build_preview(loaded)
+    build_preview()
     print("完成 →", OUT)
 
 
