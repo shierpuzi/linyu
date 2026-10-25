@@ -1,6 +1,10 @@
 # 趣智校园第三方客户端开发指南
 
-本文档介绍如何通过趣智校园 API 开发自己的第三方校园热水器客户端。基于淋浴 (LinYu) 项目的逆向工程成果。
+本文档介绍如何通过趣智校园 API 开发自己的第三方校园客户端。基于淋浴 (LinYu) 项目的逆向工程成果。
+
+> 覆盖面：**洗浴热水表**（按量计费）、**洗衣机 / 吹风机**（按套餐计费）、**饮水机**（按量计费，同套餐设备同项目）、
+> **蓝牙水表**（手机当网关）、**多项目（板块）切换**、**残留账单代扣**。
+> v3.1.0 起后四类都是新增的，接口详解见 4.12 ~ 4.16。
 
 ---
 
@@ -26,7 +30,7 @@
 |---|---|
 | Base URL | `https://v3-api.china-qzxy.cn` |
 | 协议 | HTTPS |
-| 数据格式 | JSON（GET 请求参数在 URL 中，POST 请求为 form-urlencoded） |
+| 数据格式 | JSON（GET 请求参数在 URL 中，POST 请求为 form-urlencoded）。**唯一例外**：`/order/thirdTrade/single/json/pay` 的 body 是 JSON，见 [4.14](#414-残留账单与手动代扣) |
 | 认证方式 | 基于 loginCode 的会话认证 |
 
 ### 接口列表
@@ -52,11 +56,23 @@
 | 短信验证码登录 | POST | `/user/registerAndLogin` | ✅ | 用验证码注册/登录 |
 | 账号信息 | GET | `/account/info` | ✅ | 姓名 / 学号 / 校园卡绑定状态（v3.0.0 新增） |
 | **一卡通真实余额** | GET | `/settlement/campus/userInfo` | ✅ | 真实校园卡余额，不需破签名（v3.0.0 新增） |
-| 一卡通签约状态 | GET | `/settlement/withhold/sign/status` | ✅ | 免密支付是否已签约 |
+| 一卡通签约状态 | GET | `/settlement/withhold/sign/status` | ✅ | 免密支付是否已签约。⚠️ **本项目未实现**（直接用 `userInfo` 的 `signStatus`），见 [4.9](#四9-账号信息与一卡通) |
 | 项目信息 | GET | `/project/info/triple` | ✅ | 学校名 `projectName` 在这里（v3.0.0 新增） |
 | 更换手机号 | POST | `/user/phone/update` | ✅ | 验证码发到**新**号（v3.0.0 新增） |
 | 修改密码 | POST | `/user/password/update` | ✅ | 需要旧密码（v3.0.0 新增） |
 | **重置密码** | POST | `/user/password/forget` | ✅ | 只需短信验证码，**不需要旧密码**（v3.0.0 新增） |
+| 已绑卡账号信息 | GET | `/account/card/getBindCardInfo` | ✅ | `/account/info` 的**超集**，姓名/学号兜底（v3.0.1 新增，见 [4.16](#416-已绑卡信息兜底)）|
+| 绑定项目列表 | GET | `/user/project/list` | ✅ | 一个手机号绑的多个**独立项目**，给 `projectId`+`accountId` 配对（v3.1.0 新增，见 [4.12](#412-多项目板块通道)）|
+| 项目业务模块 | GET | `/project/module/list` | ✅ | 当前项目启用了哪些业务，`isUse == 1` 才显示。⚠️ 必须用**该项目自己**的上下文调 |
+| 套餐列表 | GET | `/device/mode/list` | ✅ | 洗衣机 `smallTypeId=3` / 吹风机 `=5`，价格单位**厘**（v3.1.0 新增）|
+| **按套餐下单** | POST | `/order/tcpDevice/downRate/modeOrder` | ✅ | 洗衣机/吹风机，**一发出就扣全款、不可退**（v3.1.0 新增，见 [4.13](#413-按套餐计费的设备)）|
+| 套餐设备状态 | POST | `/order/tcpDevice/washer/status` | ✅ | 空闲 `data:null`；占用 `errorCode=307` + `expireTimes` 剩余秒数。⚠️ **吹风机也调它** |
+| 按 MAC 查最近一单 | GET | `/order/query/lastOrder/byMac` | ✅ | **开发期免费拿 orderNo**。⚠️ 有时间窗口（实测介于 1 小时~19 天之间），不能当「设备空闲」判据 |
+| 未支付账单 | POST | `/order/weixinScorePay/unPay/queryBill` | ✅ | 「残留账单」列表，**扁平结构**，不套 `consumeBillDTO`（v3.0.1 新增，见 [4.14](#414-残留账单与手动代扣)）|
+| **手动代扣** | POST | `/order/thirdTrade/single/json/pay` | ✅ | ⚠️ **body 是 JSON**（全项目唯一），且用 `consumeDate` 定位账单。**真扣钱** |
+| 蓝牙表下发费率 | POST | `/order/downRate/bluetooth/rateOrder` | ✅ | 手机当网关，响应 `downData` 是**要写进设备的费率包**（v3.1.0 新增，见 [4.15](#415-蓝牙水表通道)）|
+| 蓝牙表上传消费 | POST | `/order/upload/bluetooth/data` | ✅ | 结算，`errorCode` 206/209 也算成功 |
+| 蓝牙表上报失败 | POST | `/order/upload/bluetooth/fail` | ✅ | **必须实现**：蓝牙通道没有服务端兜底，不报这单会一直挂在预扣状态 |
 
 ---
 
@@ -79,7 +95,7 @@ telephone=13800001111
 &password=A1B2C3D4E5          ← MD5 后取后 10 位大写
 &phoneSystem=android
 &type=0
-&version=6.5.24
+&version=6.5.28
 ```
 
 ### 登录响应
@@ -121,7 +137,7 @@ telephone=13800001111
 **GET 请求**：认证参数作为 URL Query 参数传递
 
 ```
-GET /account/wallet?loginCode=xxx&userId=xxx&accountId=xxx&projectId=xxx&telephone=xxx&phoneSystem=android&version=6.5.24
+GET /account/wallet?loginCode=xxx&userId=xxx&accountId=xxx&projectId=xxx&telephone=xxx&phoneSystem=android&version=6.5.28
 ```
 
 **POST 请求**：认证参数作为 Form 字段传递（与业务参数一起）
@@ -130,7 +146,7 @@ GET /account/wallet?loginCode=xxx&userId=xxx&accountId=xxx&projectId=xxx&telepho
 POST /order/tcpDevice/downRate/rateOrder
 Content-Type: application/x-www-form-urlencoded
 
-xfModel=0&snCode=xxx&loginCode=xxx&userId=xxx&accountId=xxx&projectId=xxx&telephone=xxx&telPhone=xxx&phoneSystem=android&version=6.5.24
+xfModel=0&snCode=xxx&loginCode=xxx&userId=xxx&accountId=xxx&projectId=xxx&telephone=xxx&telPhone=xxx&phoneSystem=android&version=6.5.28
 ```
 
 ### 完整认证参数 Map
@@ -144,13 +160,23 @@ fun authFields(): Map<String, String> = mapOf(
     "telephone" to telephone,
     "telPhone" to telephone,      // ⚠️ 两个都要传，值相同
     "phoneSystem" to "android",
-    "version" to "6.5.24"
+    "version" to "6.5.28"
 )
 ```
 
 > ⚠️ `telephone` 和 `telPhone` **两个都必须传**，值相同——这是趣智校园 API 的历史遗留设计。
 > **GET 请求也一样**，而且更隐蔽：少传 `telPhone` 时 `/settlement/campus/userInfo`
 > 会返回 `errorCode=1 手机号不能为空`，**HTTP 依然是 200**。详见 [9.8](#98-get-请求也要补-telphone)。
+
+> ⚠️ **这三个参数不是常量**（v3.1.0 多板块后）：`accountId` 和 `projectId` **必须成对切换**，
+> 只换 `projectId` 会报「没有项目权限，请确认身份」。
+> `loginCode` / `userId` / `telephone` 是全局的。详见 [4.12](#412-多项目板块通道)。
+
+> ⚠️ **唯一例外**：`/order/thirdTrade/single/json/pay` 的认证参数在 **JSON body** 里，
+> 且 `phoneSystem` 传 `"WeChat"`（不是 `android`）。见 [4.14](#414-残留账单与手动代扣)。
+
+> 💡 `version` 传什么：本项目硬编码 **`6.5.28`**（官方 App 抓包偶尔是 `6.5.29`），
+> 两者实测都能正常调通。**照抄一个能用的值即可，别自己编。**
 
 ### 挤号检测
 
@@ -188,6 +214,35 @@ fun encryptPassword(password: String): String {
 ---
 
 ## 4. API 接口详解
+
+### 两种计费通道：`rateOrder` 与 `modeOrder` 不是一回事
+
+v3.1.0 之前项目只有热水表一条路。现在多了洗衣机 / 吹风机，**它们走的是完全不同的一串接口**，
+混用会静默出错（最典型：拿 `closeOrder` 去停洗衣机，接口返回成功但设备照转，钱也不退）。
+
+分流依据**是计费模型，不是设备类型**（`ModeOrderPolicy.billingModel`，有单测）：
+
+| | 按量计费（`METERED`） | 套餐计费（`PACKAGE`） |
+|---|---|---|
+| 哪些设备 | 热水器 / 洗手台 / **饮水机** | 洗衣机（`bigTypeId=6`）/ 吹风机（`bigTypeId=7`） |
+| 下单接口 | `POST /order/tcpDevice/downRate/rateOrder` | `POST /order/tcpDevice/downRate/modeOrder` |
+| `xfModel` 传什么 | 固定 `0` | **套餐的 `modeId`**（不是 `id`） |
+| 扣费方式 | 先预扣，按实际用量结算 | **一次性扣套餐全款，不可退** |
+| 能否中途停 | ✅ `closeOrder` | ❌ **服务端没有任何** stop / close / cancel / refund 接口 |
+| 状态接口 | `POST /order/tcpDevice/query/rateOrder/using` | `POST /order/tcpDevice/washer/status` |
+| `orderNo` 来源 | `query/downRateResult` 直接给（见 4.3.1） | 响应恒 `data:null`，只能 MQTT 或 `lastOrder/byMac` |
+| 结束方式 | 用户主动 `closeOrder` | **服务端到点自动关停**，客户端只做本地倒计时 |
+| 界面 | `ShowerScreen`（已用时长 + 结束按钮） | `ModeOrderScreen`（选套餐 + 剩余倒计时 + 无停止按钮） |
+
+> ⚠️ **饮水机是例外中的例外**：它在洗衣饮水吹风项目（3356）里，和洗衣机吹风机同一个 `projectId`，
+> 但计费是**按量**——账单实测 `preDeduct=2.0` 而 `consumeMoney=0.1/0.44`（**不相等**），
+> 而洗衣/吹风是 `preDeduct == consumeMoney`（相等）。
+> 判据一律用 `bigTypeId` / `smallTypeId` 数字，**不要看设备名**（服务端在台账里叫「洗衣机」、
+> 账单里叫「洗烘设备」，同一个 `bigTypeId=6` 两个名字）。
+
+> ⚠️ **两条通道的占用判据也不能混**：按量设备的 `data` **永远非空**（带 `orderNo`/`isOwner`），
+> 空闲时只是 `orderNo == null`；套餐设备空闲时 `data` 就是 `null`。
+> 照搬套餐的 `data != null` 会让热水器**永远显示被占用**。
 
 ### 4.1 钱包余额
 
@@ -643,7 +698,7 @@ MD5("185" + "3960" + "klcx")
 POST /user/registerAndLogin
 Content-Type: application/x-www-form-urlencoded
 
-telephone={手机号}&smsCode={验证码}&type=5&phoneSystem=android&version=6.5.24
+telephone={手机号}&smsCode={验证码}&type=5&phoneSystem=android&version=6.5.28
 ```
 
 | 参数 | 值 | 说明 |
@@ -651,7 +706,7 @@ telephone={手机号}&smsCode={验证码}&type=5&phoneSystem=android&version=6.5
 | `smsCode` | 6 位数字 | 收到的短信验证码 |
 | `type` | `5` | 固定值 |
 | `phoneSystem` | `android` | |
-| `version` | `6.5.24` | 与密码登录保持一致 |
+| `version` | `6.5.28` | 与密码登录保持一致 |
 
 > ⚠️ 这个接口**不需要** `loginCode` / `userId` 等认证参数——它本身就是用来换取这些的。
 
@@ -748,9 +803,14 @@ GET /settlement/campus/userInfo?projectId=905&telPhone={手机号}&userId=xxx&ac
 GET /settlement/withhold/sign/status
 ```
 
-返回是否已签约代扣。签约/解约对应：
-`POST /settlement/campus/agreement/open`（需要 `campusAccount` + `campusPassword`，即学校统一身份认证账密）、
-`POST /settlement/campus/agreement/close`。
+返回是否已签约代扣。
+
+> ⚠️ **本项目没有实现这个接口**（`QzxyService.kt` 里没有它）——签约与否是直接读
+> `/settlement/campus/userInfo` 的 `signStatus` 字段判断的（见上一节）。
+> 解约 / 签约要调 `POST /settlement/campus/agreement/open`（需要 `campusAccount` +
+> `campusPassword`，即学校统一身份认证账密）和 `POST /settlement/campus/agreement/close`，
+> 这两个我们**同样没实现，也从没实测过**——它们来自早期抓包目录，字段与返回结构均无样本。
+> 列在这里只为了说明「这条路上还有什么」，**不要照抄去实现**。
 
 #### 学校名
 
@@ -913,6 +973,496 @@ snCode=QZXY20230001&orderNo=13200000000000000001&loginCode=xxx&userId=xxx&...
 > ——那几个是 `downRateResult` 的字段，别混。客户端早期版本照隔壁接口的模型解析这个响应，
 > 属于没样本时的猜测。
 
+### 4.12 多项目板块通道
+
+v3.1.0 新增。**一个手机号可以绑定多个完全独立的项目**，不是「一个项目里的多个板块」。
+
+实测某校（同一个 `userId`）：
+
+| 板块 | `projectId` | `accountId` | 业务 | 计费 |
+|---|---|---|---|---|
+| 洗浴 | **4000** | 3987（实测，见下方 JSON） | 热水表 | 按量 |
+| 洗衣饮水吹风 | **3356** | 15384（实测，见下方 JSON） | 洗烘 / 饮水 / 吹风机 | 套餐（饮水机除外） |
+
+**两个钱包独立、账单独立、设备独立**，`loginCode` 全局只有一套。
+
+> ⚠️ **`accountId` 一律运行时从 `/user/project/list` 读，不要硬编码。**
+> 上面那两个值是本次核实账号的，换账号就变；而且 `docs/交接文档.md` 第二节里记的
+> 是另一组数字（`4000 → 10000002`、`3356 → 10000101`），与这里的实拉 JSON 对不上。
+> 以接口返回为准——本项目代码也从不硬编码它。
+
+#### 绑定项目列表
+
+```
+GET /user/project/list
+# 认证参数由拦截器自动追加
+```
+
+**响应 `data`**（2026-10-24 00:38 在线实测，原样摘录两条）：
+
+```json
+[{"userId":10000001,"projectId":3356,"accountId":15384},
+ {"userId":10000001,"projectId":4000,"accountId":3987}]
+```
+
+| 字段 | 说明 |
+|---|---|
+| `projectId` | 项目（学校/板块）ID，**不同项目不同** |
+| `accountId` | 该账号在**这个项目下**的账户 ID。⚠️ 同一账号在两个项目下的 `accountId` **不同**，别硬编码 |
+| `userId` | 全局用户 ID，两个项目相同 |
+
+> ⚠️⚠️ **`projectId` 和 `accountId` 必须成对切换。**
+> 只换 `projectId` 不换 `accountId`，服务端回「**没有项目权限，请确认身份**」；
+> 而这种错误在界面上只表现为「数据是空的」，极难排查。
+> 配对逻辑必须收口在一处（本项目是 `ProjectSelectionPolicy.resolve()`），找不到配对就**放弃切换**，
+> 绝不能拿当前板块的 `accountId` 去配新的 `projectId`。
+
+> 💡 这个接口还顺带能**验证 loginCode 是否有效**：实测只带 `loginCode` 时任何接口都返回
+> `errorCode=8 未获取到用户信息`，`loginCode + userId` 才拿得到板块列表。
+> 服务端把这两个当**一对**识别会话，而 `loginCode` 是 32 位随机 hex，反推不出 `userId`。
+
+#### 项目业务模块
+
+```
+GET /project/module/list
+# 同样由拦截器带上 projectId/accountId
+```
+
+**实测（`projectId=3356`）返回 8 个模块，只有 3 个启用**：
+
+> **未采到样本**：仓库里没有留存这个接口的原始响应报文，下面这张表是逐条在线核对出来的
+> 模块/启用情况，字段名来自客户端模型而非响应样例。
+
+| `moduleId` | `moduleName` | `isUse` |
+|---|---|---|
+| 3 | 洗烘 | ✅ 1 |
+| 4 | 饮水 | ✅ 1 |
+| 5 | 吹风机 | ✅ 1 |
+| 1 / 2 / 6 / 7 / 8 | 公寓洗澡 / 澡堂洗澡 / 无线澡堂 / 充电 / 远传水电表 | ❌ 0 |
+
+官方 App 首页那排图标就是按它渲染的，`isUse == 1` 才显示。
+用它判断「这个学校有没有洗衣机业务」，比硬编码 `bigTypeId` 更靠谱。
+
+| 字段 | 说明 |
+|---|---|
+| `moduleId` | 模块 ID |
+| `moduleName` | 模块名（洗烘 / 饮水 / 吹风机 …） |
+| `isUse` | `1` = **模块启用**；`0` 或其它 = 不启用。⚠️ 这个字段和设备侧的 `isUse` 不是一回事：设备台账里的 `isUse` **反直觉**，空闲设备也是 `1`，**两个都不能拿来判断「设备是否正在使用」** |
+| `projectId` | 归属项目 |
+| `bigTypeIds` | 模块对应的大类 id 列表，**服务端实测为 `null`，别依赖** |
+| `moduleKey` / `openUseParagraph` / `restraintType` / `restraintContext` | 客户端未使用 |
+
+> ⚠️ **必须用该项目自己的 `projectId`+`accountId` 调。**
+> 实测拿 4000 调这个接口返回「没有项目权限，请确认身份」，
+> 所以不能靠它判断板块业务——要用就必须先切到目标板块。
+
+### 4.13 按套餐计费的设备
+
+v3.1.0 新增，覆盖**洗衣机 / 吹风机**。四个接口自成一套，和 [两种计费通道](#两种计费通道rateorder-与-modeorder-不是一回事) 里那条按量通道没有任何交集。
+
+#### 套餐列表
+
+```
+GET /device/mode/list?smallTypeId=3      # 洗衣机
+GET /device/mode/list?smallTypeId=5      # 吹风机
+```
+
+| 参数 | 值 |
+|---|---|
+| `smallTypeId` | 洗衣机 `3`，吹风机 `5`（设备台账的 `smallTypeId` 原样传） |
+
+**响应**（洗衣机，抓包原文，第 1 档 + 其余 3 档结构相同）：
+
+```json
+{"success":true,"errorCode":0,"errorMessage":"成功","data":[
+  {"projectId":3356,"id":2835,"modeId":33,"smallTypeId":3,
+   "modeName":"标准洗","modeDesc":"一般日常的洗涤衣物",
+   "modeMoney":4000,"modeMoneyYuan":4.0,
+   "modeTimeMinute":"35","modeTimeQuantity":2100,
+   "typeValue":"4.0元/35分钟","isSelected":1,
+   "positionId":null,"goodsId":null}
+]}
+```
+
+| 设备 | `modeId` | 名称 | 价格（厘） | 时长 |
+|---|---|---|---|---|
+| 洗衣机 | 33 / 34 / 35 / 36 | 标准洗 / 快速洗 / 单脱水 / 大件洗 | 4000 / 3000 / 1000 / 5000 | 2100 / 1500 / 600 / 2700 秒 |
+| 吹风机 | 29 / 30 / 31 | 电吹风模式一 / 二 / 三 | 600 / 1000 / 2000 | 180 / 300 / 600 秒 |
+
+| 字段 | 说明 |
+|---|---|
+| `modeId` | **下单时当 `xfModel` 传这个**，不是 `id` |
+| `id` | 套餐记录行号，和 `modeId` 是两回事 |
+| `modeMoney` | 价格，**单位厘**（1000 厘 = 1 元）。换算用 `MoneyFormat.milliToYuan()` |
+| `modeMoneyYuan` | 同价格，单位元（Double）。冗余字段 |
+| `modeTimeQuantity` | 时长，**秒** |
+| `modeTimeMinute` | 时长，**字符串**分钟。冗余字段但界面要用 |
+| `typeValue` | 官方展示串，如 `"0.6元/3分钟"` |
+| `isSelected` | `1` = 官方默认高亮这一档 |
+
+> ⚠️ **空列表不能当「这台设备没有套餐」**：断网时同样拿到空列表，
+> 而两种情况处理完全不同（一个让用户重试，一个让他找管理员）。
+
+#### 按套餐下单（★ 扣钱）
+
+```
+POST /order/tcpDevice/downRate/modeOrder
+Content-Type: application/x-www-form-urlencoded
+
+xfModel=29&snCode=C47F0E2351BE&isHaier=0&loginCode=xxx&userId=xxx&...
+```
+
+| 参数 | 说明 |
+|---|---|
+| `xfModel` | **套餐的 `modeId`**（不是 `id`，也不是固定 `0`） |
+| `snCode` | 设备序列号 |
+| `isHaier` | 固定 `"0"`（客户端默认值） |
+
+**响应（实测，吹风机 0.6 元那单，00:12:24）**：
+
+```json
+{"success":true,"errorCode":0,"errorMessage":"成功","data":null}
+```
+
+> ⚠️⚠️ **`data` 恒为 `null`，`orderNo` 不在这里。**
+> `orderNo` 只有下面几条路（本项目用了前两条）：
+>
+> | 路径 | 说明 |
+> |---|---|
+> | MQTT `app_downRate_{phone}` | 最快（实测几十毫秒）。实测推送原文含 `orderNo` / `preDeductMoney` / `deviceSnCode` / `consumeSceneType:4` |
+> | `GET /order/query/lastOrder/byMac` | 兜底，免费但慢（时间窗口实测介于 1 小时~19 天之间） |
+> | `GET /order/query/account/bill/detail` | 无时间窗口，**本项目未接入**（手机时钟与服务端时钟差几十秒就查不到，要 ±2 分钟试探） |
+>
+> 而且 MQTT broker 实测换过（洗衣机 `47.107.37.60` / 吹风机 `39.108.147.136`），
+> 连不上就一条推送都收不到——**byMac 这条兜底不是可选项**。
+
+> ⚠️⚠️⚠️ **这是一发出就扣套餐全款、且不可退的接口，服务端没有任何 stop/close/cancel/refund。**
+> 调用方必须自己做三件事（客户端替你做不了）：
+>
+> 1. **二次确认 UI**：点之前让用户看清「X 元 / N 分钟」，明说「立即扣款、不可退款、到点自动结束」
+> 2. **防重复点击**：本地「已有进行中的单」能挡，但**挡不住双击造成的两次并发请求**
+> 3. **文案不写「停止」**：没有这个功能，写「到点自动结束」
+>
+> 另外**请求超时/抛异常时不能报失败**：钱可能已经扣了，报失败会引导用户再点一次 = **扣第二份钱**。
+> 正确做法是进入「已扣款、单号待补」状态，让界面显示「正在获取订单信息」并允许稍后重试。
+
+> 💡 判断 byMac 查到的是不是**这一单**，要比对 `xfModel`（套餐档位）和 `consumeDate`
+> （服务端时间，允许 5 分钟倒挂）——否则会把半小时前那单的单号贴到这次消费上。
+
+#### 套餐设备状态
+
+```
+POST /order/tcpDevice/washer/status
+Content-Type: application/x-www-form-urlencoded
+
+snCode=C47F0E2351BE&isHaier=0&loginCode=xxx&userId=xxx&...
+```
+
+> ⚠️ 名字叫 `washer`，但**吹风机也调它**，不是洗衣机专用。
+
+**响应（空闲，实测）**：
+
+```json
+{"success":true,"errorCode":0,"errorMessage":"成功","data":null}
+```
+
+**响应（被占用，2026-10-24 09:51 实测样本，洗衣机被别人用着）**：
+
+```json
+{"success":true,"errorCode":307,"errorMessage":"设备正在使用中",
+ "data":{"expireTimes":729,"orderNo":null,"isOwner":false,"accountId":null,
+         "xfModelName":null,"preDeductMoney":null,"modeMoney":null,"modeTime":null,
+         "liquidOrderNo":null,"liquidOrderStatus":null,"liquidModeName":null,
+         "liquidConsumeMoney":null,"liquidOrderStatusDisplay":null,
+         "leftGoodsModel":null,"rightGoodsModel":null,
+         "leftModeMoney":null,"rightModeMoney":null,"leftModeName":null,"rightModeName":null,
+         "leftGoodsName":null,"rightGoodsName":null,"relatePreDeductMoney":null}}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `errorCode` | `307` = 设备正在使用中。⚠️ 此时 **`success` 仍然是 `true`**，只看 `success` 会误判 |
+| `expireTimes` | **剩余秒数**。实测三轮 `729 → 649 → 589` 递减，与「快速洗 25 分钟」那单的到期时刻吻合到 2 秒 |
+| `orderNo` | 别人的单这里是 **`null`**（服务端不给他人单号）。**别指望从这里取 orderNo** |
+| `isOwner` | `false` = 别人的单。**自己的单未采样**（推测 `true`） |
+| 其余字段 | 这一版服务端全填了 `null`，不要假设哪个字段一定有值 |
+
+判据必须写成**三态**（`ModeOrderController.queryStatus()`）：
+
+| 响应 | 含义 |
+|---|---|
+| `errorCode == 307` 或 `success && data != null` | **占用中** |
+| `success` 且 `data == null` | **空闲** |
+| 请求本身失败 / `success == false` | **不确定** —— 绝不能当成空闲 |
+
+> ⚠️ **「不确定」绝不能返回空闲。** 断网时把「不知道」当「空闲」，会让用户站在别人正在用的机器前
+> 看到「可使用」，点下去就扣他的钱。
+>
+> ⚠️ 本接口的 `data != null` 判据**不能套到按量设备上**：热水器的 `queryUsing` 空闲时 `data` 也非空
+> （只是 `orderNo == null`），照搬会让热水器永远显示被占用。
+
+#### 按 MAC 查最近一单
+
+```
+GET /order/query/lastOrder/byMac?macAddress=C47F0E2351BE&isHaier=0
+```
+
+| 参数 | 说明 |
+|---|---|
+| `macAddress` | 设备 MAC。⚠️ 两种写法实测都能查到：本项目传 12 位**不带冒号**（`snCode == mac 去冒号`）；官方 App 抓包传带冒号的形式（URL 里编码成 `C4%3A7F%3A0E%3A23%3A51%3ABE`） |
+| `isHaier` | 固定 `0` |
+
+**响应（实测，抓包原文）**：
+
+```json
+{"success":true,"errorCode":0,"errorMessage":"成功","data":{
+  "orderId":11868418,"orderNo":"13202610240012244626","accountId":15384,
+  "deviceId":1252,"smallTypeId":5,"macAddress":"C47F0E2351BE",
+  "deviceName":"吹风机-吹风机-3号宿舍楼-6层-东边卫生间-1",
+  "preDeductMoney":600,"xfModel":29,
+  "consumeDate":"2026-10-24 00:12:24",
+  "modeName":"电吹风模式一","modeMoney":600,"modeTime":180,
+  "liquidModeName":null,"liquidConsumeMoney":null,"liquidOrderNo":null,"liquidOrderStatus":null}}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `orderNo` | **20 位订单号**，关阀/结算/对账用的是它 |
+| `orderId` | 账单**序号**（`11868418`）。⚠️ 和 `orderNo` 不是一回事，别互相比 |
+| `preDeductMoney` / `modeMoney` | 单位**厘**（`600` = 0.6 元） |
+| `modeTime` | 套餐时长，**秒** |
+| `consumeDate` | `yyyy-MM-dd HH:mm:ss`，**服务端时间**（MQTT 里是紧凑格式，不是一回事） |
+| `xfModel` | 套餐 `modeId`，用来核对「查到的是不是刚下这一单」 |
+
+> ⚠️ **有时间窗口，不能当「设备空闲」判据。** 实测：1 小时前的单查得到，
+> 19 天前的单返回 `data: null`，**乱填一个不存在的 MAC 也返回同样的 `null`**（不做错误区分）。
+>
+> 💡 **开发期「免费神器」**：不用真的下单就能拿到真实 `orderNo` / 套餐名 / 金额，
+> 足以把解析和界面全部验证完。新设备类型接入时先调这个，能省掉反复花钱试错。
+
+### 4.14 残留账单与手动代扣
+
+v3.0.1 新增。12 点后结束用水、或一卡通余额不足时，服务端结算没扣成，
+账单会留在**待扣状态**——俗称「残留账单」。两个接口一个查、一个扣。
+
+#### 未支付账单列表
+
+```
+POST /order/weixinScorePay/unPay/queryBill
+Content-Type: application/x-www-form-urlencoded
+
+loginCode=xxx&userId=xxx&accountId=xxx&projectId=xxx&telephone=xxx&telPhone=xxx&phoneSystem=android&version=6.5.28
+```
+
+> **未采到样本**：仓库里没有留存这个接口的完整原始响应，下面只有客户端解析的字段
+> 和实测结论。字段名以实际抓包为准，别把这张表当响应样例。
+
+**`data` 是扁平数组**（不像账单列表那样套一层 `consumeBillDTO`，两个模型不通用）：
+
+| 字段 | 说明 |
+|---|---|
+| `consumeDate` | **最重要**：代扣接口唯一能定位一张账单的字段。为空的账单根本发不出去 |
+| `consumeMoney` | 欠款金额（字符串，元） |
+| `orderId` / `orderNo` | 账单序号 / 订单号，仅用于显示与匹配 |
+| `description` | 账单描述（设备名） |
+
+> ⚠️ **哪些账单能扣，由服务端说了算**，别去猜账单里 `consumeMoneyReal` / `upState` 那些字段的含义
+> ——它们看着像，但都是猜的。
+
+#### 手动代扣（JSON body）
+
+```
+POST /order/thirdTrade/single/json/pay
+Content-Type: application/json; charset=utf-8
+```
+
+**这是全项目唯一一个非 form 的 POST**，照抄别的写法会失败。实测请求体（2026-09，抓包原文）：
+
+```json
+{"deductType":7,"consumeDate":"2026-09-16 21:03:17",
+ "projectId":"905","accountId":"10000","loginCode":"...","userId":"10000000",
+ "phoneSystem":"WeChat"}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `consumeDate` | **账单定位字段**（不是 `orderNo`），值来自未支付列表 |
+| `deductType` | 固定 `7`。**只有一个样本，不保证是常量**——若服务端按渠道变，会返回错误码而不是扣错钱 |
+| `projectId` / `accountId` / `loginCode` / `userId` | 认证参数，从当前会话取 |
+| `phoneSystem` | **`"WeChat"`**，不是 `android`。这个接口是官方 App 里那个 H5 页面调的，和原生请求不是一条路 |
+
+> ⚠️ **`phoneSystem` 照抄 `WeChat` 的原因**：服务端万一校验这个字段，传 `android` 就会被拒；
+> 照抄成功过的那份最稳。
+>
+> ⚠️ **值必须转义**，所以用 Gson 拼 JSON，不要字符串模板。
+
+**响应**：成功为 `{"success":true}`（`data` 无业务含义，按 `Unit` 解析）。
+本次未留存完整原始报文——**成功判据只看 `success`**。
+
+> ⚠️ **这是动钱的接口，防重是第一要务。** 客户端必须分**三态**，不能只有成功/失败：
+>
+> | 结果 | 处置 |
+> |---|---|
+> | `success == true` | 成功，立刻把这条从未支付集合里摘掉（**不等网络往返**，否则刷新失败按钮还挂着，用户会以为没扣又点一次） |
+> | 服务端明确拒绝（余额不足 / 账户异常…） | 失败，可以放心重试，并把服务端原文显示给用户 |
+> | **超时 / 断连 / 协程被取消** | **结果未知**——不能报失败，也不能让用户重试，只能重查一次未支付列表来定夺 |
+>
+> 另外：请求进行中直接拒绝新请求、按钮置灰文案变「扣款中…」、点按钮先弹确认框显示金额。
+
+> 实测故障样本（2026-09-16 00:02）：返回 `errorCode: -1`、`errorMessage`「账户异常」。
+> **不是代码问题**——同一时刻 `/settlement/campus/userInfo` 也返回 `-1`、`接口请求异常`，
+> 整个一卡通子系统在报错（疑似日终维护）。次日同一接口正常后立刻扣成功。
+
+### 4.15 蓝牙水表通道
+
+v3.1.0 新增。部分学校的表**不联网**，只能由**手机当网关**：
+服务端只下发费率包，阀由手机通过 BLE 写进设备。
+
+> ⚠️ **怎么识别一台表是蓝牙表**：服务端字段 `isBle`（`/device/info/mac`）。
+> 但代码里记了实测结论——**某些学校压根不下发这个字段**，于是判据恒为 `false`，
+> 这类设备会退回云端通道并收到 `306 设备不在线`。
+> **别用 `smallTypeId == 1` 当蓝牙特征**：那个值的含义是「热水表」通用类型名，
+> 实测某校 162 条设备全是 `smallTypeId == 1` 却都是正常的 4G 表，误判会导致**全校开不了阀**。
+> 漏判只是少一个功能，误判是全校不可用——两者代价不对称，宁漏勿误。
+
+| | `tcpDevice/*`（4G 表） | `bluetooth/*`（蓝牙表） |
+|---|---|---|
+| 控制通道 | 云端把指令推给设备 | **手机 BLE 直连** |
+| 服务端角色 | 直接控制设备 | 只下费率包、记账 |
+| 设备要求 | 自带 4G | **没有 4G** |
+| 断连后果 | 云端能兜 | **设备可能停在「开了但没记账」** |
+| 额外依赖 | 无 | BLE 帧协议 + 请求签名（纯 Kotlin，不需要 `.so`） |
+
+> ⚠️ 对蓝牙表调 `tcpDevice/*` 必然回 `306 设备不在线`——两条通道不能混用。
+
+三个接口的签名算法见 `utils/KlcxkjSigner`（嵌套 MD5，
+内层 `MD5(raw + "&key=" + loginCode)`、外层 `MD5(内层 + "&key=sign-kailu-…")`），
+**各接口参与签名的字段不一样**，写错就被判签名无效：
+
+| 接口 | 参与签名的字段 |
+|---|---|
+| `downRate/bluetooth/rateOrder` | `telephone`、`deviceId`、`xfModel`、`randomNumber` |
+| `upload/bluetooth/data` | `loginCode`、`telephone`、`xfData` |
+| `upload/bluetooth/fail` | `consumeDate`、`loginCode`、`telephone` |
+
+签名原文按 **key 字典序升序**拼成 `key1value1key2value2…`，`value` 为 `null` 时**整个字段跳过**
+（不是当空串）。
+
+#### 下发费率（开阀第一步）
+
+```
+POST /order/downRate/bluetooth/rateOrder
+Content-Type: application/x-www-form-urlencoded
+
+deviceId=1252&macAddress=C47F0E2351BE&macType={type}{a1}
+&bigTypeId=7&smallTypeId=5&protocolType={状态帧}&randomNumber={状态帧 8 位 hex}
+&xfModel=0&signature=xxxx&loginCode=xxx&...
+```
+
+| 参数 | 说明 |
+|---|---|
+| `deviceId` | 台账里的设备 ID（`/device/info/mac` 的 `deviceId`） |
+| `macAddress` | 设备 MAC |
+| `macType` | 由设备状态帧的**两个字节**拼成：`%02x%02x`（协议版本 `type` + `a1`），**小写** |
+| `protocolType` / `randomNumber` | **都必须用设备状态帧里给的**，本地生成的会被服务端判 `226 加密校验失败` |
+| `bigTypeId` / `smallTypeId` | 设备台账里的数字类型 |
+| `xfModel` | 蓝牙表这条链路沿用 `0`，与 4G 表一致 |
+| `signature` | 见上方签名表 |
+
+**响应 `data`**（客户端解析的字段；**完整原始响应未采到样本**，仓库里没留存报文）：
+
+| 字段 | 说明 |
+|---|---|
+| `downData` | ⭐ **要写进设备的费率包原文（HEX 字符串）**。必须原样 hex 解码后交给 BLE 层；解析失败或为空时**绝不能继续开阀** |
+| `consumeDate` | 结算用的消费时间戳。⚠️ **失败上报要的就是它**，所以开阀成功时就要存下来 |
+| `orderNo` | 蓝牙通道的单号（部分学校口径下可能落在 `liquidOrderNo`，两个都空也出现过） |
+| `liquidOrderNo` | 上面那条的备用字段 |
+| `perMoney` / `rate` | 费率，仅用于显示 / 日志 |
+
+> ⚠️ **费率包必须来自服务端。** 自己造一个写进设备，后果不是「失败」，而是**可能多扣钱或损坏设备**。
+
+#### 上传消费数据（结算）
+
+```
+POST /order/upload/bluetooth/data
+Content-Type: application/x-www-form-urlencoded
+
+protocolType={状态帧}&randomNumber={状态帧}&xfData=80xxxx（小写 hex）&signature=xxxx&loginCode=xxx&...
+```
+
+| 参数 | 说明 |
+|---|---|
+| `protocolType` / `randomNumber` | 取自设备状态帧 |
+| `xfData` | 从设备采集到的消费数据（HEX）。⚠️ **必须小写**：签名用小写、上传字段也得小写，否则服务端重算签名对不上 → `170 签名错误` |
+
+**响应 `data`**（结算结果；**完整原始响应未采到样本**）：
+
+| 字段 | 说明 |
+|---|---|
+| `clData` | 设备域加密数据，解密后 `0x86` 写回设备清记录。本流程一般用不到 |
+| `upMoney` | 本次消费金额。⚠️ 服务端在不同接口/学校用过 `upMoney` 和 `consumeMoney` 两个名字，两个都要接；**单位未确认**（无实测样本，显示前先跑一次真实结算并用账单列表交叉验证） |
+| `upLeadMoney` | 结算后剩余的预扣额（别名 `preDeductMoneyAfter`） |
+| `perMoney` | 预扣金额（别名 `preDeductMoney`） |
+| `fishTime` | 消费时间（别名 `consumeTime`） |
+
+**哪些错误码算成功**：实测 `0` / `206` / `209` 三种都被服务端当作成功（历史口径不一）。
+
+> ⚠️ 已知的两个坑：
+> - `170` = 签名与上传字段不一致（根因是 `xfData` 大小写，2026-09-29 定案）
+> - `226` = 加密校验失败。**关阀后不能在同一连接里立刻采集**，必须断开重连再采集，
+>   否则账单会停在 `0.0`（实测同一笔订单 97547 对比确认）
+>
+> 上传前还要校验消费体：长度不足或首字节不是成功标记 `0x80` 时**不要上传**——
+> 半截数据会被服务端当成一条消费记录，轻则报错重则记错账。
+
+#### 上报失败订单
+
+```
+POST /order/upload/bluetooth/fail
+Content-Type: application/x-www-form-urlencoded
+
+consumeDate={开阀时服务端给的}&signature=xxxx&loginCode=xxx&...
+```
+
+| 参数 | 说明 |
+|---|---|
+| `consumeDate` | 开阀时从费率响应里存下来的那个。**为空就别发**（发也定位不到单）。⚠️ 具体格式未见样本，原样透传、不要自己重组 |
+| `signature` | 见上方签名表 |
+
+**响应**：只判 `success`（`data` 无业务含义）。**完整原始响应未采到样本**；幂等性由服务端保证，
+上报失败只记日志，**不能因此把已经关好的阀又「报成失败」**。
+
+> ⚠️ **这个是必须实现的，不是可选项。** 蓝牙开阀**没有服务端兜底**：
+> 费率包下发后如果没能正常结算（断连、采集失败、用户走远），
+> 设备侧可能停在「开了但没记账」的状态，得靠它告诉服务端这一单作废。
+
+### 4.16 已绑卡信息兜底
+
+```
+GET /account/card/getBindCardInfo
+```
+
+**存在的意义是兜底，不是替代 `/account/info`。** `/account/info` 的 `name` 要学校把学籍数据同步过来才有，
+没同步的账号（实测同学的两个号都是）返回 `null`；这两个接口**数据来源不同**，一个没有另一个可能有。
+
+字段是 [4.9 `/account/info`](#49-账号信息与一卡通) 的**超集**：姓名、学号都在，
+还多了 `lastConsumeTime` / `useCount` / `cardCost`（本项目未用）。
+
+> 客户端复用 `AccountInfo` 模型解析（Gson 只映射存在的字段），不另建模型。
+
+| 字段 | 说明 |
+|---|---|
+| `name` | 姓名。和 `/account/info` 一样**可能为 `null`** |
+| `idCardNumber` | **学号**（不是身份证号） |
+| `lastConsumeTime` / `useCount` / `cardCost` | 上次消费时间 / 消费次数 / 卡消费额，本项目未用 |
+
+> **未采到样本**：仓库里没留存这个接口的完整原始响应，只有「姓名/学号能拿到」这一条实测结论。
+> 所以字段表是按客户端模型列的，**不是响应样例**。
+
+> 💡 姓名实际有**三个来源**，谁有值用谁：`/account/info` → `/account/card/getBindCardInfo`
+> → `/settlement/campus/userInfo`（后者的 `studentName`）；学号同理（`idCardNumber` / `studentNumber`）。
+> 收口在一个函数里统一写 Prefs **和**界面 State——只写 Prefs 不会触发重组，数据回来了界面也不刷新。
+
 ---
 
 ## 5. MQTT 实时推送
@@ -926,15 +1476,29 @@ snCode=QZXY20230001&orderNo=13200000000000000001&loginCode=xxx&userId=xxx&...
 | 认证 | 无（匿名连接） |
 | ClientId | 随机生成 |
 
+> ⚠️ **broker 不止一个。** 实测：洗衣机抓包是 `47.107.37.60:1883`，
+> **吹风机抓包是 `39.108.147.136:1883`**。可能是按学校/项目分片，也可能旧地址已下线。
+> 本项目客户端硬编码了前者，所以吹风机那条路上**很可能一条推送都收不到**——
+> 这也是 [4.13](#413-按套餐计费的设备) 里 `lastOrder/byMac` 兜底不是可选项的原因。
+
 ### 订阅主题
 
 开始洗澡后，需要订阅以下三个主题（`{phone}` 替换为用户手机号）：
 
 | 主题 | 说明 |
 |---|---|
-| `app_downRate_{phone}` | 开始洗澡事件推送 |
+| `app_downRate_{phone}` | 开始洗澡事件推送。⚠️ **套餐下单（洗衣机/吹风机）的 `orderNo` 也发在这个 topic 上**，见下 |
 | `app_shutdownOrder_{phone}` | 停止洗澡事件推送 |
 | `app_uploadData_{phone}` | 实时消费金额推送 |
+
+> ⚠️ **同一个 topic 上混着两种单**：热水器的 `rateOrder` 和洗衣/吹风的 `modeOrder`
+> 都推到 `app_downRate_{phone}`。如果只按 topic 收，会把水单的单号记到洗衣机头上。
+>
+> 过滤规则（按可靠性排序，本项目 `ModeOrderController.onMqttMessage`）：
+>
+> 1. 推送里有 `deviceSnCode` → 必须等于本机记着的那个 `snCode`（服务端给的设备标识最可信）
+> 2. 没有 `deviceSnCode` → 退到 `consumeSceneType == 4`（唯一一个吹风机样本的取值）
+> 3. 都判不了 → **丢弃**，让 `lastOrder/byMac` 兜底。**记错单号比暂时没有单号更糟**
 
 ### 消息格式
 
@@ -959,6 +1523,11 @@ snCode=QZXY20230001&orderNo=13200000000000000001&loginCode=xxx&userId=xxx&...
 1. **获取 orderNo**：调用 `downRate` 后，MQTT 会推送包含 `orderNo` 的消息
 2. **实时更新余额**：`app_uploadData` 主题会推送 `consumeMoney` 更新
 3. **HTTP 轮询兜底**：如果 MQTT 连接失败，应使用 HTTP 轮询 `queryUsing` 作为备选方案
+
+> ⚠️ **套餐设备（洗衣机 / 吹风机）的用法不一样**：它们**没有 `queryUsing` 这样的兜底**，
+> 只有 MQTT 和 `lastOrder/byMac` 两条路；而且套餐单**全程不轮询**
+> （实测 180 秒里 App 一个业务请求都没发），倒计时是**纯本地**的，服务端到点自己关停。
+> 「结束」这个事件在服务端没有可等的东西。详见 [4.13](#413-按套餐计费的设备)。
 
 ---
 
@@ -1004,6 +1573,9 @@ scanner.startScan(null, settings, object : ScanCallback() {
 2. 调用 GET /device/info/mac?macAddress=xxx → 获取设备详情（snCode、名称等）
 3. 调用 POST /order/tcpDevice/query/rateOrder/using → 检查是否有进行中订单
 ```
+
+> 💡 v3.1.0 起 BLE **不只是发现**：蓝牙水表（`isBle` 为真）的**开阀 / 关阀 / 结算全靠 BLE 直连**，
+> 手机是网关。控制流程见 [4.15](#415-蓝牙水表通道)，帧协议在项目的 `ble/` 包。
 
 ---
 
@@ -1140,12 +1712,17 @@ scanner.startScan(null, settings, object : ScanCallback() {
 |---|---|
 | `0` | 成功 |
 | `1` | 参数缺失（如 `手机号不能为空`），**HTTP 仍是 200** |
+| `8` | 未获取到用户信息（`loginCode` 与 `userId` 不成对，见 [4.12](#412-多项目板块通道)） |
 | `12` | 手机号或密码错误 |
 | `29` | 验证码已失效 |
 | `39` | 该手机号已绑定其他账号 |
 | `46` | 验证码错误 |
 | `53` | 请勿频繁获取验证码 |
-| `307` | 设备正在使用中 |
+| `170` | 签名错误（蓝牙通道，根因是 `xfData` 大小写，见 [4.15](#415-蓝牙水表通道)） |
+| `206` / `209` | 蓝牙上传消费**算成功**的错误码（历史口径不一） |
+| `226` | 蓝牙加密校验失败（关阀后必须断开重连再采集） |
+| `306` | 设备不在线（对蓝牙表调 `tcpDevice/*` 就是这个） |
+| `307` | 设备正在使用中。**按量与套餐两条通道都用它**，且 `success` 可能仍是 `true` |
 | `4004` | 设备不存在 |
 
 ---
@@ -1241,7 +1818,7 @@ interface QzxyService {
         @Field("password") password: String,
         @Field("phoneSystem") phoneSystem: String = "android",
         @Field("type") type: Int = 0,
-        @Field("version") version: String = "6.5.24"
+        @Field("version") version: String = "6.5.28"
     ): Call<ResponseBody>
 
     @GET("/account/wallet")
@@ -1398,7 +1975,106 @@ interface QzxyService {
         @Field("smsCode") smsCode: String,
         @Field("type") type: Int = 5,
         @Field("phoneSystem") phoneSystem: String = "android",
-        @Field("version") version: String = "6.5.24"
+        @Field("version") version: String = "6.5.28"
+    ): Call<ResponseBody>
+
+    // ══════ v3.1.0 新增（多板块 / 套餐计费 / 蓝牙表 / 代扣），详见 4.12~4.16 ══════
+
+    /** 已绑卡账号信息：`/account/info` 的超集，姓名/学号兜底（4.16） */
+    @GET("/account/card/getBindCardInfo")
+    fun getBindCardInfo(): Call<ResponseBody>
+
+    // ── 多项目（板块）通道（4.12）──
+    // loginCode 全局一套，但 projectId 与 accountId 必须成对切换
+
+    /** 账号绑定的项目列表，给 projectId/accountId 配对 */
+    @GET("/user/project/list")
+    fun getUserProjectList(): Call<ResponseBody>
+
+    /** 当前项目启用的业务模块。⚠️ 必须用该项目自己的 projectId+accountId 调 */
+    @GET("/project/module/list")
+    fun getProjectModuleList(): Call<ResponseBody>
+
+    // ── 按套餐计费的设备：洗衣机 / 吹风机（4.13）──
+    // 与 tcpDevice/downRate/rateOrder（按量）是两条完全不同的路
+
+    /** 套餐列表。洗衣机 smallTypeId=3 / 吹风机 =5 */
+    @GET("/device/mode/list")
+    fun getModeList(@Query("smallTypeId") smallTypeId: String): Call<ResponseBody>
+
+    /** 按套餐下单：一发出就扣全款，响应恒为 data:null，orderNo 要另找 */
+    @FormUrlEncoded
+    @POST("/order/tcpDevice/downRate/modeOrder")
+    fun modeOrder(
+        @Field("xfModel") xfModel: String,        // 套餐的 modeId，不是 id
+        @Field("snCode") snCode: String,
+        @Field("isHaier") isHaier: String = "0",
+        @FieldMap auth: Map<String, String>
+    ): Call<ResponseBody>
+
+    /** 套餐设备状态。⚠️ 吹风机也调它；占用时 success 仍为 true + errorCode=307 */
+    @FormUrlEncoded
+    @POST("/order/tcpDevice/washer/status")
+    fun washerStatus(
+        @Field("snCode") snCode: String,
+        @Field("isHaier") isHaier: String = "0",
+        @FieldMap auth: Map<String, String>
+    ): Call<ResponseBody>
+
+    /** 按 MAC 查最近一单。⚠️ 有时间窗口，且乱填 MAC 也返回 null */
+    @GET("/order/query/lastOrder/byMac")
+    fun lastOrderByMac(
+        @Query("macAddress") mac: String,
+        @Query("isHaier") isHaier: String = "0"
+    ): Call<ResponseBody>
+
+    // ── 残留账单的手动代扣（4.14）──
+
+    /** 未支付账单列表。⚠️ 扁平结构，不套 consumeBillDTO */
+    @FormUrlEncoded
+    @POST("/order/weixinScorePay/unPay/queryBill")
+    fun queryUnpaidBills(@FieldMap auth: Map<String, String>): Call<ResponseBody>
+
+    /** 手动代扣。⚠️ body 是 **JSON**（全项目唯一），账单用 consumeDate 定位 */
+    @POST("/order/thirdTrade/single/json/pay")
+    fun requestDeduct(@Body body: RequestBody): Call<ResponseBody>
+
+    // ── 蓝牙水表通道（4.15）：手机当网关，服务端只下发费率包 ──
+
+    /** 下发费率。响应 downData 是要写进设备的费率包（HEX），consumeDate 留着失败上报用 */
+    @FormUrlEncoded
+    @POST("/order/downRate/bluetooth/rateOrder")
+    fun bluetoothRateOrder(
+        @Field("deviceId") deviceId: String,
+        @Field("macAddress") macAddress: String,
+        @Field("macType") macType: String,            // %02x%02x（状态帧的 type + a1）
+        @Field("bigTypeId") bigTypeId: String,
+        @Field("smallTypeId") smallTypeId: String,
+        @Field("protocolType") protocolType: String,  // 设备状态帧给的
+        @Field("randomNumber") randomNumber: String,  // 设备状态帧给的，不能用本地的
+        @Field("xfModel") xfModel: String,
+        @Field("signature") signature: String,
+        @FieldMap auth: Map<String, String>
+    ): Call<ResponseBody>
+
+    /** 上传消费数据（结算）。⚠️ xfData 必须小写，否则 170 签名错误 */
+    @FormUrlEncoded
+    @POST("/order/upload/bluetooth/data")
+    fun bluetoothUploadData(
+        @Field("protocolType") protocolType: String,
+        @Field("randomNumber") randomNumber: String,
+        @Field("xfData") xfData: String,
+        @Field("signature") signature: String,
+        @FieldMap auth: Map<String, String>
+    ): Call<ResponseBody>
+
+    /** 上报失败订单。⚠️ 必须实现：蓝牙通道没有服务端兜底 */
+    @FormUrlEncoded
+    @POST("/order/upload/bluetooth/fail")
+    fun bluetoothFailOrder(
+        @Field("consumeDate") consumeDate: String,
+        @Field("signature") signature: String,
+        @FieldMap auth: Map<String, String>
     ): Call<ResponseBody>
 
     companion object {
