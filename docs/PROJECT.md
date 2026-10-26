@@ -422,7 +422,15 @@ res/
   钱包、账单、设备；`loginCode` + `userId` 全局一套
 - `projectId` + `accountId` **必须成对切换**（`ui/ProjectSelectionPolicy.kt` 收口配对逻辑），
   只换 projectId 服务端返回「没有项目权限」，界面上只表现为"数据是空的"
-- `ProjectRepository.withBoardContext()` 临时借另一板块认证参数跑只读逻辑，**finally 必定还原**
+- `ProjectRepository.withBoardContext()` 临时借另一板块认证参数跑**只读**逻辑，**finally 必定还原**
+- `ProjectRepository.withDeviceBoard()` 临时借另一板块认证参数跑**设备操作**（开阀/关阀/下单/结算），
+  同样 finally 还原。与前者有两点不同：**失败也照样执行**（不让按钮静默失效）、
+  **同板块/判断不出时直接透传**（零开销）
+- ⚠️ **设备操作必须按设备自己的 `projectId` 走**：服务端校验设备归属，拿错板块回
+  `errorCode=534 设备信息和项目信息不匹配`。详见「已知限制」P0 与
+  [API-qzxy.md](API-qzxy.md) 的 534 说明
+- ⚠️ **各校 projectId 编码不同**（不一定是 4000/3356），所以 `DeviceBoardPolicy` 只比较
+  相不相等，**不含任何硬编码 id**；曾经有的 `BATH_PROJECT_ID = 4000L` 兜底已删除
 - ⚠️ 已知技术债：合并/借板块期间认证参数是**全局的**，其他请求可能带错参数
   （已有 `isMerging` 挡重入 + 只发 GET + 失败静默降级，但没根治）
 
@@ -714,6 +722,7 @@ buildTypes {
 
 | 限制 | 说明 |
 |---|---|
+| **跨板块设备操作需真机验证（#35）** | 设备操作现在按设备自己的 `projectId` 借板块认证参数，修掉了 `errorCode=534 设备信息和项目信息不匹配`。**「服务端是否真的接受借来的板块参数」尚未真机实测**——这是该修复的成败点。需验：① 洗浴板块开饮水机 ② 关阀能结算 ③ 洗浴板块给洗衣机下单 |
 | **MQTT broker 硬编码不匹配** | `utils/MqttManager.kt` 硬编码 `tcp://47.107.37.60:1883`，而吹风机实测 broker 是 `39.108.147.136:1883`。后果是套餐设备的 orderNo 拿不到 MQTT 推送，只能退到 `lastOrder/byMac`（慢几秒，功能不挂） |
 | **ColorOS 流体云胶囊需用户手动开权限** | 代码无法代劳。没在系统设置 → 通知与状态栏 → 流体云里给本 App 开「实时动态」权限，就**完全没有胶囊**。已加文字兜底 + 30 秒 / 1 秒重发，胶囊本体的真机表现仍待验证 |
 | **无 release keystore → 已发布的 v3.1.0-dev 是 debug 签名** | `local.properties` 缺 `KEYSTORE_FILE` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD`，走「Release APK 保持未签名」分支，测试分发用 debug 签名。**不能上应用商店，也不能覆盖安装到其它签名的同包名应用上** |

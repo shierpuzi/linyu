@@ -1812,7 +1812,40 @@ C 是「复用你手上已有的会话」，不调任何登录接口：
 | `226` | 蓝牙加密校验失败（关阀后必须断开重连再采集） |
 | `306` | 设备不在线（对蓝牙表调 `tcpDevice/*` 就是这个） |
 | `307` | 设备正在使用中。**按量与套餐两条通道都用它**，且 `success` 可能仍是 `true` |
+| **`534`** | **`设备信息和项目信息不匹配`** —— 设备不属于当前认证参数里的 `projectId`。见下方说明 |
 | `4004` | 设备不存在 |
+
+#### ⚠️ 534：设备归属校验（2026-10-26 实测）
+
+**服务端会校验「这台设备属于哪个项目」**，设备操作类的接口全部受这条约束：
+
+| 接口 | 受 534 影响 | 后果 |
+|---|---|---|
+| `POST /order/tcpDevice/downRate/rateOrder` | ✅ | **开不了阀** |
+| `POST /order/tcpDevice/closeOrder` | ✅ | **关不掉阀**（更严重：水还在流、钱还在扣） |
+| `POST /order/tcpDevice/downRate/modeOrder` | ✅ | 点击下单没反应 |
+| `POST /order/tcpDevice/query/rateOrder/using` | ✅ | 被误判成「空闲 / 未知」 |
+| `POST /order/consumeOrder/result/query` | ✅ | 查不到消费金额 |
+| `GET /device/info/mac` | ❌ | 不受影响（**这就是为什么"能查到设备"不代表"能操作"**） |
+
+实测原文（同一账号，设备属于 3356，请求带 4000）：
+
+```json
+// GET /device/info/mac?macAddress=...  → 设备自报归属
+{"success":true,"data":{"deviceName":"饮水机-饮水机-3号宿舍楼-6层-东边卫生间-2",
+ "bigTypeId":5,"smallTypeId":2,"projectId":3356,...}}
+
+// POST /order/tcpDevice/downRate/rateOrder   ← 用的是当前板块 4000
+{"success":false,"errorCode":534,"errorMessage":"设备信息和项目信息不匹配","data":null}
+```
+
+**正确做法**：设备操作必须用**设备自己 `projectId` 对应的一组认证参数**
+（`projectId` + `accountId` 成对切换），不能用用户当前停留的板块。
+多项目场景见 [4.12](#412-多项目板块通道)。
+
+> 💡 **别只借"查余额"那一次。** 余额查询和指令下发是两套独立调用，
+> 本项目历史上就是只借对了余额、指令全用当前板块，
+> 于是出现「余额显示正确，但一开阀就报 534」这种极难自洽的现象。
 
 ---
 
