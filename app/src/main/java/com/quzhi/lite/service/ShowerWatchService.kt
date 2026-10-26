@@ -10,6 +10,7 @@ import com.quzhi.lite.api.queryUsingSafe
 import com.quzhi.lite.data.CloseDisposition
 import com.quzhi.lite.data.CloseOutcome
 import com.quzhi.lite.data.KeyedTaskRegistry
+import com.quzhi.lite.data.ProjectRepository
 import com.quzhi.lite.data.ShowerController
 import com.quzhi.lite.data.ShowerEvents
 import com.quzhi.lite.data.closeDisposition
@@ -159,13 +160,21 @@ class ShowerWatchService : Service() {
      * 凭空发一条「使用结束」并把小组件切回空闲，而水其实还在流。
      */
     private suspend fun orderRunning(snCode: String): Boolean? = try {
-        val q = NetworkModule.apiService.queryUsingSafe(
-            snCode = snCode, auth = NetworkModule.authFields()
-        )
-        when {
-            q.errorCode == 307 || (q.success && q.data?.orderNo != null) -> true
-            q.success -> false
-            else -> null
+        // ⚠️ 按设备所属板块问：拿错板块服务端会回 534，被判成「不确定」，
+        //    结果水一直在流而监控永远等不到结束。
+        val boardId = PrefsHelper.getActiveOrders().find { it.snCode == snCode }?.projectId
+        ProjectRepository.withDeviceBoard(
+            deviceProjectId = boardId,
+            currentProjectId = ProjectRepository.currentProjectId()
+        ) {
+            val q = NetworkModule.apiService.queryUsingSafe(
+                snCode = snCode, auth = NetworkModule.authFields()
+            )
+            when {
+                q.errorCode == 307 || (q.success && q.data?.orderNo != null) -> true
+                q.success -> false
+                else -> null
+            }
         }
     } catch (_: Exception) {
         null
@@ -181,7 +190,10 @@ class ShowerWatchService : Service() {
         val startedAt = PrefsHelper.getStartedAt(snCode)
         val elapsed = elapsedSec(startedAt)
         val deviceName = deviceNameFor(snCode)
-        val orderNo = ShowerController.activeOrderFor(snCode)?.orderNo ?: ""
+        val activeOrder = ShowerController.activeOrderFor(snCode)
+        val orderNo = activeOrder?.orderNo ?: ""
+        // 设备归属（结算要按它选板块；老订单没有这个字段 → 退回当前板块）
+        val boardId = activeOrder?.projectId
 
         // ⚠️ 顺序要紧：先清本地状态，小组件的 isRunning() 才会变 false。
         // 以前没有这一步，所以自动关停后小组件永远停在「使用中」。
@@ -194,7 +206,11 @@ class ShowerWatchService : Service() {
         Notifier.showSettling(this, Notifier.ID_AUTO_CLOSED, "设备已自动关停 · $deviceName", elapsed)
 
         val money = try {
-            SettlementEngine.settleAmount(orderNo, startedAt, snCode, deviceName)
+            // ⚠️ 结算按设备所属板块查：账单接口按账户查，拿错板块只会「查不到金额」
+            ProjectRepository.withDeviceBoard(
+                deviceProjectId = boardId,
+                currentProjectId = ProjectRepository.currentProjectId()
+            ) { SettlementEngine.settleAmount(orderNo, startedAt, snCode, deviceName) }
         } catch (_: Exception) { null }
         LinYuWidget.refreshAll(this)
 
@@ -247,18 +263,29 @@ class ShowerWatchService : Service() {
         // 本地清理会把活跃订单删掉，之后就再也读不到（`queryUsing` 也问不出来了，
         // 因为订单已经没了）。而开阀后 orderNo 是异步轮询补上的，
         // 「开完水马上停」时本地存的还是空串，那就白丢了结算用的那个直答接口。
-        val orderNo = ShowerController.resolveOrderNo(snCode)
+        //
+        // ⚠️ 整段（取 orderNo + 关阀）都在**设备所属板块**下执行：
+        // 服务端校验设备归属，拿错板块会回 534，关不掉比开不了更糟。
+        // 板块从活跃订单里取（关阀前读得到），订单里没有就退回当前板块。
+        val orderBoard = PrefsHelper.getActiveOrders()
+            .find { it.snCode == snCode }?.projectId
+        val (orderNo, closeResult) = ProjectRepository.withDeviceBoard(
+            deviceProjectId = orderBoard,
+            currentProjectId = ProjectRepository.currentProjectId()
+        ) {
+            val no = ShowerController.resolveOrderNo(snCode)
 
-        // 先暂时清掉本地状态，让小组件显示「正在关闭」。如果关阀失败，下面会把
-        // 订单和计时完整恢复；App 只有在确认成功后才会收到结束事件。
-        ShowerController.markFinished(snCode)
-        // ⚠️ 这里**故意不清 busy**：清了小组件会立刻变成「空闲」，
-        // 用户在关阀那 5 秒里看不到任何"正在进行"的反馈。
-        // 留着它，卡片会一直显示「正在关闭…」，等关阀完再一起清（见下）。
-        LinYuWidget.refreshAll(this)
+            // 先暂时清掉本地状态，让小组件显示「正在关闭」。如果关阀失败，下面会把
+            // 订单和计时完整恢复；App 只有在确认成功后才会收到结束事件。
+            ShowerController.markFinished(snCode)
+            // ⚠️ 这里**故意不清 busy**：清了小组件会立刻变成「空闲」，
+            // 用户在关阀那 5 秒里看不到任何"正在进行"的反馈。
+            // 留着它，卡片会一直显示「正在关闭…」，等关阀完再一起清（见下）。
+            LinYuWidget.refreshAll(this)
 
-        // 关阀结果决定后续分支；失败和未确认都不能进入结算或完成通知。
-        val closeResult = ShowerController.closeValve(snCode, orderNo)
+            // 关阀结果决定后续分支；失败和未确认都不能进入结算或完成通知。
+            no to ShowerController.closeValve(snCode, no)
+        }
 
         when (closeDisposition(closeResult)) {
             CloseDisposition.RESTORE_FAILED -> {

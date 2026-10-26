@@ -470,57 +470,52 @@ class MainViewModel : ViewModel() {
 
         val smallTypeId = device.smallTypeId ?: return
         sessionScope().launch {
-            // 套餐列表
-            try {
-                val modes = modeOrderController.loadModes(sn, smallTypeId)
-                modeModes = modes
-                selectedModeId = ModeOrderPolicy.pickDefaultMode(modes)?.modeId
-            } catch (e: Exception) {
-                modeOrderError = "套餐列表获取失败，请检查网络后重试"
-                AppLogger.w("套餐列表获取失败：${e.message}")
-            }
-            // 余额（拿不到就不显示，不影响下单）。
-            // ⚠️ 必须按**设备所属板块**取：用户可能停在洗衣板块去开洗浴的热水器
-            //    （或反之），照当前板块取就是拿错钱包，显示的是另一个板块的钱。
-            //    判定见 DeviceBoardPolicy，借参数见 ProjectRepository.withBoardContext。
-            try {
-                val boardId = DeviceBoardPolicy.resolve(device.projectId, currentProjectId)
-                val sameBoard = boardId == null || !DeviceBoardPolicy.needsBorrow(boardId, currentProjectId)
-                val w = if (sameBoard) {
-                    NetworkModule.apiService.getWalletSafe()
-                } else {
-                    ProjectRepository.withBoardContext(boardId!!) {
-                        NetworkModule.apiService.getWalletSafe()
-                    }
+            // ⚠️ 进套餐页之后的**所有**请求都在设备所属板块下执行（同板块时零开销）：
+            //    套餐列表、余额、占用状态都按设备/项目查，拿错板块会回 534 或拿到错的钱包。
+            val boardId = boardProjectIdFor(sn) ?: device.projectId
+            ProjectRepository.withDeviceBoard(boardId, currentProjectId) {
+                // 套餐列表
+                try {
+                    val modes = modeOrderController.loadModes(sn, smallTypeId)
+                    modeModes = modes
+                    selectedModeId = ModeOrderPolicy.pickDefaultMode(modes)?.modeId
+                } catch (e: Exception) {
+                    modeOrderError = "套餐列表获取失败，请检查网络后重试"
+                    AppLogger.w("套餐列表获取失败：${e.message}")
                 }
-                modeOrderWalletYuan = w?.data?.money?.takeIf { it.isNotBlank() }
-            } catch (_: Exception) { }
+                // 余额（拿不到就不显示，不影响下单）。
+                // 这里已经在设备板块上下文里了，直接查即可——以前要单独借一次。
+                try {
+                    val w = NetworkModule.apiService.getWalletSafe()
+                    modeOrderWalletYuan = w.data?.money?.takeIf { it.isNotBlank() }
+                } catch (_: Exception) { }
 
-            // 设备占用检查。
-            //
-            // ⚠️ 这一步以前在详情框里靠 `refreshDeviceStatus` + `isDeviceActive` 粗判，
-            // 现在套餐设备**跳过详情框**了，用户看不到任何占用提示就会直接进选套餐页。
-            // 所以必须在这里查一次 `washer/status`，把「别人正在用」明确说出来。
-            //
-            // 三态照抄 ModeOrderController.queryStatus 的语义：
-            //   Busy    → 展示占用 + 剩余时间，**禁用下单按钮**
-            //   Idle    → 正常
-            //   Unknown → 不拦（断网不该阻止用户看到套餐），但提示网络异常
-            if (modePending == null) {
-                when (val st = modeOrderController.queryStatus(sn)) {
-                    is ModeStatus.Busy -> {
-                        modeOccupiedReason = st.reason
-                        AppLogger.i("套餐设备占用中：$sn ${st.reason}")
-                    }
-                    is ModeStatus.Idle -> modeOccupiedReason = null
-                    is ModeStatus.Unknown -> {
-                        modeOccupiedReason = null
-                        modeOrderError = "网络状态不佳，暂时无法确认设备是否空闲"
+                // 设备占用检查。
+                //
+                // ⚠️ 这一步以前在详情框里靠 `refreshDeviceStatus` + `isDeviceActive` 粗判，
+                // 现在套餐设备**跳过详情框**了，用户看不到任何占用提示就会直接进选套餐页。
+                // 所以必须在这里查一次 `washer/status`，把「别人正在用」明确说出来。
+                //
+                // 三态照抄 ModeOrderController.queryStatus 的语义：
+                //   Busy    → 展示占用 + 剩余时间，**禁用下单按钮**
+                //   Idle    → 正常
+                //   Unknown → 不拦（断网不该阻止用户看到套餐），但提示网络异常
+                if (modePending == null) {
+                    when (val st = modeOrderController.queryStatus(sn)) {
+                        is ModeStatus.Busy -> {
+                            modeOccupiedReason = st.reason
+                            AppLogger.i("套餐设备占用中：$sn ${st.reason}")
+                        }
+                        is ModeStatus.Idle -> modeOccupiedReason = null
+                        is ModeStatus.Unknown -> {
+                            modeOccupiedReason = null
+                            modeOrderError = "网络状态不佳，暂时无法确认设备是否空闲"
+                        }
                     }
                 }
-                // 进入待确认状态 → 开始每秒盯着这台设备，被别人抢先时立刻提示
-                if (modePending == null) startPreemptWatch(sn, packageBilling = true)
             }
+            // 进入待确认状态 → 开始每秒盯着这台设备，被别人抢先时立刻提示
+            if (modePending == null) startPreemptWatch(sn, packageBilling = true)
         }
     }
 
@@ -574,21 +569,29 @@ class MainViewModel : ViewModel() {
                 if (modeOrderDevice == null && !meteredScreenOpen) break
 
                 val busy: String? = try {
-                    if (packageBilling) {
-                        // 套餐设备：三态，Unknown 不算被抢
-                        when (val st = modeOrderController.queryStatus(sn)) {
-                            is ModeStatus.Busy -> st.reason
-                            else -> null
+                    // ⚠️ 占用检查也要在设备所属板块下问：拿错板块问「这台设备」，
+                    //    服务端同样会回 534（被当成 Unknown/空闲），于是别人的单查不出来，
+                    //    用户点下去才在开阀那一步失败。
+                    ProjectRepository.withDeviceBoard(
+                        deviceProjectId = boardProjectIdFor(sn),
+                        currentProjectId = currentProjectId
+                    ) {
+                        if (packageBilling) {
+                            // 套餐设备：三态，Unknown 不算被抢
+                            when (val st = modeOrderController.queryStatus(sn)) {
+                                is ModeStatus.Busy -> st.reason
+                                else -> null
+                            }
+                        } else {
+                            // 按量计费设备：走 queryUsing，判据与 ShowerController 一致
+                            val q = NetworkModule.apiService.queryUsingSafe(
+                                snCode = sn, auth = NetworkModule.authFields()
+                            )
+                            val hasOrder = q.errorCode == 307 || (q.success && q.data?.orderNo != null)
+                            if (!hasOrder) null
+                            else if (q.data?.isOwner == true) "你自己的单还在进行中"
+                            else "别人的单"
                         }
-                    } else {
-                        // 按量计费设备：走 queryUsing，判据与 ShowerController 一致
-                        val q = NetworkModule.apiService.queryUsingSafe(
-                            snCode = sn, auth = NetworkModule.authFields()
-                        )
-                        val hasOrder = q.errorCode == 307 || (q.success && q.data?.orderNo != null)
-                        if (!hasOrder) null
-                        else if (q.data?.isOwner == true) "你自己的单还在进行中"
-                        else "别人的单"
                     }
                 } catch (_: Exception) {
                     continue // 网络抖动不算"被抢占"，继续下一轮
@@ -714,7 +717,14 @@ class MainViewModel : ViewModel() {
         stopPreemptWatch()
         sessionScope().launch {
             try {
-                when (val r = modeOrderController.placeOrder(sn, mode)) {
+                // ⚠️ 下单是**扣钱**的动作，同样必须在设备所属板块下执行：
+                //    拿错板块服务端会回 534「设备信息和项目信息不匹配」，
+                //    用户看到的就是「选了套餐、点了确认，提示设备信息和项目信息不匹配」。
+                val r = ProjectRepository.withDeviceBoard(
+                    deviceProjectId = device.projectId,
+                    currentProjectId = currentProjectId
+                ) { modeOrderController.placeOrder(sn, mode) }
+                when (r) {
                     is PlaceOrderResult.Placed -> {
                         // 拿到 orderNo：进入使用中
                         refreshPendingFrom(sn, mode)
@@ -1217,6 +1227,9 @@ class MainViewModel : ViewModel() {
         PrefsHelper.lastDeviceName = info.displayName
         PrefsHelper.lastDeviceRawName = info.deviceName
         PrefsHelper.lastDeviceEmoji = info.typeEmoji
+        // ⚠️ 设备归属也要记：桌面小组件那条路只有 snCode，没有 DeviceInfo，
+        //    开阀/关阀时全靠这个值把请求放进正确的板块（否则跨板块设备回 534）
+        PrefsHelper.lastDeviceProjectId = info.projectId
 
         selectedDevice = info
         if (info.isPackageBilling) {
@@ -1269,6 +1282,18 @@ class MainViewModel : ViewModel() {
         private set
 
     /**
+     * 关阀 / 查订单这类**手上只有 snCode** 的场景，去哪找这台设备的板块。
+     *
+     * 顺序：活跃订单里存的（最可靠，随订单一起落盘）→ 当前打开的设备的 → null（不知道）。
+     *
+     * ⚠️ 不能只靠 `selectedDevice`：关阀时它可能已经被清空，或者用户已经切到别的设备了。
+     * 订单里那个值是开阀时就记下的，跟订单同生命周期。
+     */
+    private fun boardProjectIdFor(snCode: String): Long? =
+        activeOrders.find { it.snCode == snCode }?.projectId
+            ?: selectedDevice?.takeIf { it.snCode == snCode }?.projectId
+
+    /**
      * 按**设备自己的板块**取钱包余额。
      *
      * 三步：
@@ -1282,10 +1307,13 @@ class MainViewModel : ViewModel() {
             deviceProjectId = info.projectId,
             currentProjectId = currentProjectId
         ) ?: run {
-            // 设备没报板块、当前板块也没有：退回洗浴兜底。
-            // ponytail: 兜底是硬编码（本项目实测校 4000 洗浴），换学校可能不对——
-            //           但比显示一个确定错误的钱包好，且只在服务端不下发 projectId 时才会走到。
-            deviceBoardProjectId = DeviceBoardPolicy.BATH_PROJECT_ID
+            // 设备没报板块、当前板块也没有 → **不显示余额**，也不猜一个板块。
+            //
+            // ⚠️ 以前这里会兜底成 BATH_PROJECT_ID（硬编码 4000，本实测校的洗浴）。
+            // 换学校就是错的 id：要么查出一个不存在的板块（一直加载中），
+            // 要么显示别的学校的钱包。**宁可这一行不显示**——界面本来就支持
+            // deviceBoardWallet == null 时不渲染该行，这是有意的降级。
+            deviceBoardProjectId = null
             deviceBoardWallet = null
             return
         }
@@ -1494,7 +1522,13 @@ class MainViewModel : ViewModel() {
 
     private suspend fun refreshDeviceStatus(snCode: String) {
         try {
-            val q = NetworkModule.apiService.queryUsingSafe(snCode = snCode, auth = NetworkModule.authFields())
+            // 按设备所属板块问（同板块时零开销）
+            val q = ProjectRepository.withDeviceBoard(
+                deviceProjectId = boardProjectIdFor(snCode),
+                currentProjectId = currentProjectId
+            ) {
+                NetworkModule.apiService.queryUsingSafe(snCode = snCode, auth = NetworkModule.authFields())
+            }
             if (q.errorCode == 307 || (q.success && q.data?.orderNo != null)) {
                 activeDeviceSnCodes.add(snCode)
                 // ⚠️ 按 snCode 记录归属（不能写全局变量：异步响应会串到别的设备上）
@@ -1505,7 +1539,13 @@ class MainViewModel : ViewModel() {
                     val orderNo = q.data?.orderNo ?: ""
                     val deviceInfo = nearbyDevices.find { it.deviceInfo?.snCode == snCode }?.deviceInfo
                     if (deviceInfo != null) {
-                        activeOrders.add(ActiveOrder(snCode, orderNo, deviceInfo.displayName, deviceInfo.macAddress, deviceInfo.typeEmoji, deviceInfo.withholdMoney))
+                        activeOrders.add(
+                            ActiveOrder(
+                                snCode, orderNo, deviceInfo.displayName, deviceInfo.macAddress,
+                                deviceInfo.typeEmoji, deviceInfo.withholdMoney,
+                                projectId = deviceInfo.projectId
+                            )
+                        )
                         saveOrders()
                     }
                 }
@@ -1673,7 +1713,16 @@ class MainViewModel : ViewModel() {
                 // 「查询是否已有订单 → 开阀 → 轮询确认 → 落盘」这套流程在 ShowerController 里，
                 // 桌面小组件也走同一份逻辑；这里只负责 MQTT、界面状态与结果提示
                 mqttManager?.connect(phone)
-                val outcome = ShowerController.openValve(snCode, device)
+                // ⚠️ **必须在设备所属板块的认证参数下开阀**。
+                //    服务端校验设备归属：拿 4000（洗浴）的参数去开属于 3356 的饮水机，
+                //    `downRate/rateOrder` 会回 `errorCode=534 设备信息和项目信息不匹配`。
+                //    以前只有「查余额」那条路借了板块，真正下发指令的这条路没借，
+                //    结果就是「收藏的饮水机点开能看、余额也对，一开阀就报设备信息和项目信息不匹配」。
+                //    同板块时 withDeviceBoard 直接透传，零额外开销。
+                val outcome = ProjectRepository.withDeviceBoard(
+                    deviceProjectId = device.projectId,
+                    currentProjectId = currentProjectId
+                ) { ShowerController.openValve(snCode, device) }
 
                 when (outcome) {
                     is OpenOutcome.Resumed -> {
@@ -1938,7 +1987,13 @@ class MainViewModel : ViewModel() {
                 delay(800)
                 if (currentOrderNo != null) break
                 try {
-                    val p = NetworkModule.apiService.queryUsingSafe(snCode = snCode, auth = NetworkModule.authFields())
+                    // 按设备所属板块问（同板块时零开销）
+                    val p = ProjectRepository.withDeviceBoard(
+                        deviceProjectId = boardProjectIdFor(snCode),
+                        currentProjectId = currentProjectId
+                    ) {
+                        NetworkModule.apiService.queryUsingSafe(snCode = snCode, auth = NetworkModule.authFields())
+                    }
                     if (p.errorCode == 307 || (p.success && p.data?.orderNo != null)) {
                         currentOrderNo = p.data?.orderNo
                         updateOrderNo(snCode, currentOrderNo ?: "")
@@ -2178,12 +2233,23 @@ class MainViewModel : ViewModel() {
         appContext?.let { Notifier.showStopping(it, lastDeviceName.ifEmpty { "热水器" }) }
         sessionScope().launch {
             try {
-                // ⚠️ orderNo 必须在**关阀之前**敲定：关阀成功后订单就没了，
-                // `queryUsing` 再也问不出来。而开阀后 orderNo 是异步轮询补上的，
-                // 「开完水马上停」时本地可能还是空串——那就白丢了结算用的那个直答接口。
-                val settledNo = ShowerController.resolveOrderNo(snCode).ifEmpty { oNo }
-                // 关阀 + 确认 + 清本地状态都在 ShowerController 里，小组件的「停止使用」走同一份逻辑
-                val outcome = ShowerController.closeValve(snCode, settledNo)
+                // ⚠️ 同开阀：关阀也必须在**设备所属板块**下执行。
+                //    否则跨板块设备会回 534，而「关不掉」的后果比开不了更严重
+                //    （水还在流、钱还在扣，用户点几次都没反应）。
+                //    orderNo 的解析也放进同一个上下文，因为它同样按设备查。
+                val closed = ProjectRepository.withDeviceBoard(
+                    deviceProjectId = boardProjectIdFor(snCode),
+                    currentProjectId = currentProjectId
+                ) {
+                    // ⚠️ orderNo 必须在**关阀之前**敲定：关阀成功后订单就没了，
+                    // `queryUsing` 再也问不出来。而开阀后 orderNo 是异步轮询补上的，
+                    // 「开完水马上停」时本地可能还是空串——那就白丢了结算用的那个直答接口。
+                    val settledNo = ShowerController.resolveOrderNo(snCode).ifEmpty { oNo }
+                    // 关阀 + 确认 + 清本地状态都在 ShowerController 里，小组件的「停止使用」走同一份逻辑
+                    ShowerController.closeValve(snCode, settledNo) to settledNo
+                }
+                val outcome = closed.first
+                val settledNo = closed.second
                 checkKick(outcome.kickHint)
 
                 if (outcome is CloseOutcome.Failed) {
@@ -2216,12 +2282,20 @@ class MainViewModel : ViewModel() {
                             "使用结束 · ${lastDeviceName.ifEmpty { "热水器" }}", elapsed0
                         )
                     }
-                    val amount = SettlementEngine.settleAmount(
-                        settledNo,
-                        startTime,
-                        snCode,
-                        lastDeviceName
-                    )
+                    // ⚠️ 结算同样要在**设备所属板块**下查：`consumeOrderResult` 和账单列表
+                    //    都按设备/账户查，拿错板块只会得到「查不到金额」，
+                    //    用户看到的就是「已停止，消费金额稍后可在账单中查看」——永远稍后。
+                    val amount = ProjectRepository.withDeviceBoard(
+                        deviceProjectId = boardProjectIdFor(snCode),
+                        currentProjectId = currentProjectId
+                    ) {
+                        SettlementEngine.settleAmount(
+                            settledNo,
+                            startTime,
+                            snCode,
+                            lastDeviceName
+                        )
+                    }
                     toastMessage = when {
                         // null = 两条路都没拿到金额，是「还不知道」而不是「没花钱」
                         amount == null -> "已停止，消费金额稍后可在账单中查看"
@@ -3254,10 +3328,19 @@ class MainViewModel : ViewModel() {
         return BillMerger.shortProjectName(name, pid)
     }
 
-    /** 已知板块 id → 业务名（仅用于真名还没拿到时的显示兜底） */
+    /**
+     * 已知板块 id → 业务名（**仅用于真名还没拿到时的显示兜底**，不参与任何判定）。
+     *
+     * ⚠️ 这里写死两个 id 是安全的，因为它的作用**只是「名字好不好看」**：
+     * - 换学校时命中不了任何分支 → 返回 null → 界面走「项目 {id}」兜底，功能完全不受影响
+     * - **绝不要**把这种映射用在判定上（比如「projectId==4000 就当洗浴处理」）——
+     *   那是换学校就崩的写法。判定一律走 `DeviceBoardPolicy`（只比相不相等）。
+     *
+     * 真名会在用户第一次切到那个板块时由 `/project/info/triple` 取回来并落盘
+     * （见 `PrefsHelper.rememberProjectName`），之后就不再需要这里的兜底了。
+     */
     private fun knownBoardName(projectId: Long?): String? = when (projectId) {
-        // 某某大学：4000 洗浴 / 3356 洗衣饮水吹风。
-        // 别的学校 id 不同，会走「项目 id」兜底——不影响正确性，只是不够好看。
+        // 本实测校：4000 洗浴 / 3356 洗衣饮水吹风。别的学校 id 不同，走「项目 id」兜底。
         4000L -> "洗浴"
         3356L -> "洗衣饮水吹风"
         else -> null
@@ -3373,12 +3456,26 @@ class MainViewModel : ViewModel() {
                     val info = resp.data; val i = nearbyDevices.indexOfFirst { it.mac == mac }
                     if (i >= 0) nearbyDevices[i] = nearbyDevices[i].copy(deviceInfo = info)
                     try {
-                        val q = NetworkModule.apiService.queryUsingSafe(snCode = info.snCode, auth = NetworkModule.authFields())
+                        // 按设备所属板块问（扫描到的设备可能不属于当前板块）
+                        val q = ProjectRepository.withDeviceBoard(
+                            deviceProjectId = info.projectId,
+                            currentProjectId = currentProjectId
+                        ) {
+                            NetworkModule.apiService.queryUsingSafe(
+                                snCode = info.snCode, auth = NetworkModule.authFields()
+                            )
+                        }
                         if (q.errorCode == 307 || (q.success && q.data?.orderNo != null)) {
                             activeDeviceSnCodes.add(info.snCode)
                             val owner = q.data?.isOwner ?: true
                             if (owner && activeOrders.none { it.snCode == info.snCode }) {
-                                activeOrders.add(ActiveOrder(info.snCode, q.data?.orderNo ?: "", info.displayName, info.macAddress, info.typeEmoji, info.withholdMoney))
+                                activeOrders.add(
+                                    ActiveOrder(
+                                        info.snCode, q.data?.orderNo ?: "", info.displayName,
+                                        info.macAddress, info.typeEmoji, info.withholdMoney,
+                                        projectId = info.projectId
+                                    )
+                                )
                                 saveOrders()
                             }
                         }

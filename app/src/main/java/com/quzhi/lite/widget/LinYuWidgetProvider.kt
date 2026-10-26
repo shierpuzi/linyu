@@ -12,6 +12,7 @@ import com.quzhi.lite.api.NetworkModule
 import com.quzhi.lite.data.CloseOutcome
 import com.quzhi.lite.data.OpenOutcome
 import com.quzhi.lite.data.PickResult
+import com.quzhi.lite.data.ProjectRepository
 import com.quzhi.lite.data.ShowerController
 import com.quzhi.lite.model.DeviceInfo
 import com.quzhi.lite.service.ShowerWatchService
@@ -246,7 +247,12 @@ open class LinYuWidgetProvider : AppWidgetProvider() {
             //
             // 所以在这里接住，转成和「开阀失败」同一套反馈：卡片提示 + 横幅通知。
             val outcome = try {
-                ShowerController.openValve(snCode)
+                // ⚠️ 小组件手上只有 snCode，拿不到 DeviceInfo，所以靠 PrefsHelper
+                //    里记下的「上次使用设备的板块」。拿错板块会回 534 开不了。
+                ProjectRepository.withDeviceBoard(
+                    deviceProjectId = PrefsHelper.lastDeviceProjectId,
+                    currentProjectId = ProjectRepository.currentProjectId()
+                ) { ShowerController.openValve(snCode) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

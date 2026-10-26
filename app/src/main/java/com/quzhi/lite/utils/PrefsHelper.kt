@@ -310,6 +310,20 @@ object PrefsHelper {
     var lastDeviceSnCode: String get() = prefs.getString("lastDeviceSnCode", "") ?: ""; set(v) = prefs.edit().putString("lastDeviceSnCode", v).apply()
     var lastDeviceEmoji: String get() = prefs.getString("lastDeviceEmoji", "🚿") ?: "🚿"; set(v) = prefs.edit().putString("lastDeviceEmoji", v).apply()
 
+    /**
+     * 上次使用设备**所属的板块**（`DeviceInfo.projectId`）。
+     *
+     * 存它是为了让「设备操作」能在正确的板块下执行：服务端校验设备归属，
+     * 拿错板块开会回 `errorCode=534 设备信息和项目信息不匹配`。
+     * 桌面小组件那条路手上只有 `snCode`，拿不到 `DeviceInfo`，
+     * 只能靠这里记下的值；`ActiveOrder.projectId` 也是从它回落。
+     *
+     * ⚠️ 0 / 空串都表示「不知道」，调用方应当退回当前板块。
+     */
+    var lastDeviceProjectId: Long?
+        get() = prefs.getLong("lastDeviceProjectId", 0L).takeIf { it > 0L }
+        set(v) = prefs.edit().putLong("lastDeviceProjectId", v ?: 0L).apply()
+
     // ── 绑定的寝室（设备筛选关键词） ──
     var boundRoom: String get() = prefs.getString("boundRoom", "") ?: ""; set(v) = prefs.edit().putString("boundRoom", v).apply()
 

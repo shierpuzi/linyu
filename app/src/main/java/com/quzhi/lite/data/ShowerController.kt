@@ -182,6 +182,16 @@ object ShowerController {
         "该设备需通过手机蓝牙开启，请在本 App 内操作（桌面小组件暂不支持）"
 
     /**
+     * 「设备信息和项目信息不匹配」的业务错误码。
+     *
+     * 服务端会校验设备归属：拿 A 板块的认证参数去操作属于 B 板块的设备就回这个。
+     * 正常路径已经由 `ProjectRepository.withDeviceBoard` 借对了板块；
+     * 走到这个错误说明板块配对拿不到（列表没拉回来 / 账号没绑），
+     * 此时给用户一句能行动的话，而不是原样抛服务端文案。
+     */
+    const val ERROR_DEVICE_PROJECT_MISMATCH = 534
+
+    /**
      * 开阀。
      *
      * @param budgetMs 确认轮询的总预算。小组件跑在广播里（`goAsync()` 约 10 秒上限），
@@ -233,7 +243,14 @@ object ShowerController {
         // 从而决定要不要引导用户改用蓝牙。丢掉它就只能去匹配文案了。
         if (!resp.success) {
             return OpenOutcome.Failed(
-                resp.displayMessage ?: "开始失败",
+                // 534 = 设备不属于当前项目。正常路径已经由 ProjectRepository.withDeviceBoard
+                // 借对了板块，走到这里说明板块配对拿不到（列表没拉回来 / 账号没绑）。
+                // 原样抛「设备信息和项目信息不匹配」用户看不懂，给一句能指导行动的话。
+                if (resp.errorCode == ERROR_DEVICE_PROJECT_MISMATCH) {
+                    "这台设备属于另一个板块，请先在首页切到对应板块再操作"
+                } else {
+                    resp.displayMessage ?: "开始失败"
+                },
                 resp.errorCode
             )
         }
@@ -516,7 +533,10 @@ object ShowerController {
                     deviceEmoji = device?.typeEmoji ?: PrefsHelper.lastDeviceEmoji,
                     // 小组件调用时 device 为 null，回落到上次记下的金额，
                     // 否则卡片上的「预扣」会一直是 ¥0.00
-                    preDeduct = device?.withholdMoney ?: PrefsHelper.lastDeviceWithholdMoney.toDouble()
+                    preDeduct = device?.withholdMoney ?: PrefsHelper.lastDeviceWithholdMoney.toDouble(),
+                    // 设备归属必须跟着订单走：关阀时手上只有 snCode，
+                    // 靠它才能把请求放进正确的板块（否则跨板块设备回 534 关不掉）
+                    projectId = device?.projectId ?: PrefsHelper.lastDeviceProjectId
                 )
             )
         }

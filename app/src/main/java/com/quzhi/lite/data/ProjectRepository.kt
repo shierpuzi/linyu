@@ -185,4 +185,94 @@ object ProjectRepository {
             )
         }
     }
+
+    /**
+     * **在设备所属板块的认证参数下跑一段设备操作**（开阀 / 关阀 / 下单 / 查状态）。
+     *
+     * ## 和 [withBoardContext] 的区别
+     *
+     * | | [withBoardContext] | 本方法 |
+     * |---|---|---|
+     * | 用途 | 只读（读余额/账单） | **写**（开阀、扣钱） |
+     * | 失败怎么办 | 返回 null，调用方降级 | **照样执行 block**（用当前板块试一把） |
+     * | 找不到配对 accountId | 返回 null | 照样执行 block |
+     *
+     * 为什么失败也要执行：设备操作的语义是「尽力去做」。
+     * 拿不到板块配对时什么都不做，用户点了「开始使用」会**毫无反应**——
+     * 那比报一个服务端错误更糟（他连重试按钮在哪都不知道）。
+     * 真拿错板块，服务端会回 534，界面能给出明确提示。
+     *
+     * ## 为什么要它
+     *
+     * 服务端校验设备归属：拿 4000（洗浴）的参数去开一台属于 3356 的饮水机，
+     * `downRate/rateOrder` 回 `errorCode=534 设备信息和项目信息不匹配`。
+     * 这个 bug 的表现正是「收藏的饮水机点开能看、余额也对，但一开阀就报错」——
+     * 余额那条路早就会借板块，**下发指令的那条路一直没借**。
+     *
+     * ## 并发风险
+     *
+     * 与 [withBoardContext] 相同（全局单例认证状态），缓解手段也一样：
+     * 调用方保证同一时刻只有一段设备操作在跑。开阀/关阀本身有 `isStartingShower` /
+     * `isStopping` 挡重入，实际并发窗口极小。
+     *
+     * ## 判据
+     *
+     * [DeviceBoardPolicy.operationBoard]：设备报了 projectId 且与当前板块不同才切；
+     * 报不出 / 就是当前板块 → 直接透传。**不依赖任何硬编码的学校 id**。
+     *
+     * @param deviceProjectId 设备自报的板块（`DeviceInfo.projectId`），null 表示不知道
+     * @param currentProjectId 当前板块 —— 与设备板块相同时**直接执行，零开销**
+     */
+    suspend fun <T> withDeviceBoard(
+        deviceProjectId: Long?,
+        currentProjectId: Long?,
+        block: suspend () -> T
+    ): T {
+        // null = 判断不出设备属于哪个板块（老数据 / 服务端不下发）→ 保持当前板块，一个字段都不动。
+        // 这一条让单板块学校、以及所有拿不到归属的场景**与修复前完全一致**。
+        val board = DeviceBoardPolicy.operationBoard(deviceProjectId, currentProjectId) ?: return block()
+        // 同板块（绝大多数情况）→ 认证参数本来就是对的，不碰全局状态
+        if (board == currentProjectId) return block()
+
+        val target = cachedProjects().ifEmpty {
+            // 缓存为空（冷启动还没拉过列表 / 刚登录）→ 现拉一次。
+            // 不拉的话，跨板块设备的第一次操作必然配不到 accountId，
+            // 只能退回当前板块 → 必吃 534。这个请求很轻（一个 GET），
+            // 而且只在这条「跨板块 + 无缓存」的罕见路径上才会发。
+            loadProjects().getOrElse { return block() }
+        }.let { ProjectSelectionPolicy.resolve(it, board) }
+        val accountId = target?.accountId
+        if (accountId == null) {
+            // 配不到那个板块（账号确实没绑 / 服务端没下发）→ 用当前板块试，
+            // 让服务端决定成败，而不是让按钮静默失效
+            AppLogger.w("设备属于板块 $board 但拿不到配对账户，按当前板块执行：可能触发 534")
+            return block()
+        }
+
+        val snapLogin = PrefsHelper.loginCode
+        val snapUser = PrefsHelper.userId
+        val snapAccount = PrefsHelper.accountId
+        val snapProject = PrefsHelper.projectId
+        val snapPhone = PrefsHelper.telephone
+
+        return try {
+            NetworkModule.updateAuth(
+                loginCode = snapLogin,
+                userId = snapUser,
+                accountId = accountId.toString(),
+                projectId = board.toString(),
+                telephone = snapPhone
+            )
+            AppLogger.i("设备操作借用板块 $board（当前 $currentProjectId，accountId=$accountId）")
+            block()
+        } finally {
+            NetworkModule.updateAuth(
+                loginCode = snapLogin,
+                userId = snapUser,
+                accountId = snapAccount,
+                projectId = snapProject,
+                telephone = snapPhone
+            )
+        }
+    }
 }
