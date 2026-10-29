@@ -407,8 +407,14 @@ private fun ClearFieldButton(onClick: () -> Unit) {
     }
 }
 
-/** 抓包拿 loginCode 的教程（仓库 wiki）。和 UserScreen 的 openUrl 同款写法，失败静默 */private const val WIKI_GET_LOGIN_CODE =
-    "https://github.com/shierpuzi/linyu/blob/master/docs/WIKI-%E6%8A%93%E5%8C%85%E8%8E%B7%E5%8F%96loginCode.md"
+/**
+ * 抓包拿 loginCode 的教程（仓库 wiki）。和 UserScreen 的 openUrl 同款写法，失败静默。
+ *
+ * ⚠️ 这个 URL **写死了仓库名**，不像其他处走 `GithubApi.REPO_SLUG`——
+ * 因为中文件名是百分号编码的，用常量拼反而更易错。改仓库名时**要手动改这里**。
+ */
+private const val WIKI_GET_LOGIN_CODE =
+    "https://github.com/shierpuzi/quzhiLite/blob/master/docs/WIKI-%E6%8A%93%E5%8C%85%E8%8E%B7%E5%8F%96loginCode.md"
 
 private fun openWiki(context: android.content.Context) {
     runCatching {

@@ -8,17 +8,27 @@
 
 ## 一、从哪下载
 
-官方只有 **GitHub** 一个渠道：
+官方只有 **GitHub** 一个源码仓库，另有 **Gitee 镜像**（同一套代码、同名 tag、同名附件）：
 
 | 渠道 | 地址 | 说明 |
 |---|---|---|
-| **GitHub**（唯一官方源） | https://github.com/shierpuzi/linyu/releases | 源码仓库，发行版在这里发布 |
+| **GitHub**（主仓库） | https://github.com/shierpuzi/quzhiLite/releases | 源码仓库，发行版在这里首发 |
+| **Gitee**（国内镜像） | https://gitee.com/shierpuzi/quzhiLite/releases | 同一份发行版，大陆下载更快 |
 
-⚠️ **Gitee 镜像已停用。** 仓库里 `api/GithubApi.kt` 的 `GITEE_REPO` 已被置为空串，App 内的「检查更新 / 下载安装包」因此走 GitHub 直链（`objects.githubusercontent.com`）。代价是大陆实测速度只有 **约 100 KB/s**——慢，但这是目前唯一能确认来源的地址。若以后恢复镜像，会先在这里和更新日志里说明。
+**为什么有 Gitee 镜像**：GitHub 的 Release 附件在大陆走 `objects.githubusercontent.com`，实测约 **100 KB/s**；Gitee 约 **2 MB/s**，差近 20 倍。所以 App 设置里有个「国内镜像下载」开关，默认开。
+
+⚠️ 但要清楚这个旁路的边界：
+
+- **检查更新永远走 GitHub API**，Gitee 只用于**下载附件**。也就是说「有没有新版本」的判据始终来自 GitHub。
+- 镜像地址是**拼出来的**（`gitee.com/<slug>/releases/download/<tag>/<附件名>`），不额外发请求。所以发版时必须保证 Gitee 侧的 **tag 名和附件名与 GitHub 完全一致**，否则镜像 404、App 回落到 GitHub 直链。
+- Gitee 仓库**必须公开**。私有仓库的 Release 附件不能匿名下载，而把令牌内置进 App 属于安全事故，本方案不做。
+
+> 📌 历史：2026-10-30 之前 `GITEE_REPO` 是空串（没有镜像），
+> 所以文档里曾写「Gitee 镜像已停用」。现在镜像已启用，那条说法作废。
 
 **除此之外的任何来源都不是我们发的。** 包括但不限于：
 
-- 第三方应用市场、网盘里别人上传的「趣智Lite.apk」或「淋浴.apk」
+- 第三方应用市场、网盘里别人上传的「趣智Lite.apk」「LinYu.apk」或「淋浴.apk」
 - 群里、贴吧里传的安装包
 - 打着「去广告版」「破解版」「优化版」旗号的版本
 
@@ -258,7 +268,9 @@ App 内置日志导出功能（方便排查问题），但**写入前会自动�
 
 ### 8. 更新包校验
 
-应用内更新**只读 GitHub Release**（`api.github.com/repos/shierpuzi/linyu/releases`），**不信任何第三方更新服务器**，也不读任何可被替换的更新地址。Gitee 镜像已置空，下载走 Release 附件直链。
+应用内更新**只读 GitHub Release**（`api.github.com/repos/shierpuzi/quzhiLite/releases`），**不信任何第三方更新服务器**，也不读任何可被替换的更新地址。
+
+Gitee 镜像只承担**下载附件**这一件事（国内更快），且它的地址是**从 GitHub 拿到的 tag 与附件名拼出来的**——所以镜像无法改变「有没有新版本」的判据，也无法把你引到别的版本上；镜像 404 时自动回落到 GitHub 直链。
 
 下载完成后会先核对附件长度；如果 GitHub Release API 提供 `sha256` 摘要，还会校验文件 SHA-256。国内网络可能访问不了 `api.github.com`，摘要取不到时不会阻止下载——但**签名校验不会因此降级**。
 
@@ -408,7 +420,10 @@ v3.1.0 起支持蓝牙水表（手机当网关）。这套协议（凯路设备�
 
 ### 3. 「检查更新」只认 GitHub Release
 
-「检查更新」读的是 `api.github.com/repos/shierpuzi/linyu/releases`，仓库路径是代码里的常量（`api/GithubApi.kt` 的 `REPO_SLUG`）。**不存在任何第三方更新服务器、也没有可被配置替换的更新地址**，所以改包的人除了改代码没有别的办法把你引到他的更新源上。安装前的包名 + 签名一致性校验见第二节。
+「检查更新」读的是 `api.github.com/repos/shierpuzi/quzhiLite/releases`，仓库路径是代码里的常量（`api/GithubApi.kt` 的 `REPO_SLUG`）。**不存在任何第三方更新服务器、也没有可被配置替换的更新地址**，所以改包的人除了改代码没有别的办法把你引到他的更新源上。安装前的包名 + 签名一致性校验见第二节。
+
+> Gitee 镜像不改变这个结论：它只影响**从哪里下载**，不影响「下载哪个版本」。
+> 版本判据与 SHA256 校验始终来自 GitHub API。
 
 v3.2.1 起还多了**双通道**（`api/GithubApi.kt` 的 `fetchReleases(devChannel)`）：dev 包只看 pre-release，正式包只看正式版。两个包看到的列表**互不相交**。
 
@@ -466,7 +481,7 @@ v3.2.1 起还多了**双通道**（`api/GithubApi.kt` 的 `fetchReleases(devChan
 
 发现安全漏洞，请通过以下方式联系：
 
-- **GitHub Issue**：https://github.com/shierpuzi/linyu/issues
+- **GitHub Issue**：https://github.com/shierpuzi/quzhiLite/issues
 - **邮箱**：2276391153@qq.com
 
 （Gitee 仓库已停用，那边的 Issue 链接不再有效。）

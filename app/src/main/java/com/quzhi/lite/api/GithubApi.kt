@@ -14,22 +14,43 @@ import java.util.concurrent.TimeUnit
  *
  * 「关于项目」的仓库链接、作者名，以及「检查更新」拉 Release 都用这一个常量，
  * 不再各处硬编码——以前 owner 与仓库名散落在 3 个文件里，改名得改好几处。
+ *
+ * ## 2026-10-30 从 `shierpuzi/linyu` 改成 `shierpuzi/quzhiLite`
+ *
+ * 项目早就不只是「淋浴」了（洗衣/吹风/饮水/备份恢复/双通道），原名成了误导。
+ *
+ * ⚠️ **改名对老用户是安全的，但依赖 GitHub 的重定向**：
+ * 已装 v3.2.1 / v3.2.2 的用户手机里存的是旧 slug，GitHub 对改名后的旧路径
+ * 返回 301 并**一直有效**（除非有人用旧名新建了仓库）。改名前实测过：
+ * `api.github.com/repos/shierpuzi/linyu` 仍返回 200 且 `full_name` 已是新名。
+ *
+ * 所以这里改了，但**不要**顺手去动 `local.properties`、签名、包名——那些和仓库名无关。
  */
-const val REPO_SLUG = "shierpuzi/linyu"
+const val REPO_SLUG = "shierpuzi/quzhiLite"
 
 /** 仓库主页（网络不通时的降级跳转目标） */
 const val REPO_URL = "https://github.com/$REPO_SLUG"
 
 /**
- * Gitee 上的镜像仓库。
+ * Gitee 上的镜像仓库（`owner/name`）。
  *
  * **检查更新仍走 GitHub API**（`api.github.com` 实测能通，0.6 秒），
  * 只有**下载安装包**这一步走这里——GitHub 的 Release 附件在大陆走
  * `objects.githubusercontent.com`，实测只有约 100 KB/s，Gitee 约 2 MB/s。
  *
- * ⚠️ 本仓库暂无 Gitee 镜像，置空即关闭该旁路（下载会回落到 GitHub 直链）。
+ * ## ⚠️ 三条硬约束（少一条这个旁路就废了）
+ *
+ * 1. **必须与 GitHub 同名 tag、同名附件**。这里不额外发请求，地址是**拼**出来的
+ *    （见 [GithubRelease.giteeApkUrl]）：`gitee.com/<slug>/releases/download/<tag>/<附件名>`。
+ *    少一个就是 404，且 App 里没有自动探测。
+ * 2. **路径大小写敏感**：`quzhiLite` ≠ `quzhilite`。填错只有真机下载时才暴露。
+ * 3. **仓库必须公开**：Gitee 私有仓库的 Release 附件**不能匿名下载**，
+ *    除非把令牌塞进 App——那是安全事故，绝对不要做。
+ *
+ * 置空即关闭该旁路（下载回落到 GitHub 直链），不会导致崩溃。
+ * 用户也可以在设置里手动切「国内镜像下载」开关（`PrefsHelper.updateUseMirror`）。
  */
-private const val GITEE_REPO = ""
+private const val GITEE_REPO = "shierpuzi/quzhiLite"
 
 /** 发行版里的一个附件（这里主要用 APK） */
 data class GithubAsset(

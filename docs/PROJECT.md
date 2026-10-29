@@ -31,7 +31,7 @@
 | 签名 | 正式版 **release**（RSA 2048 / SHA384withRSA，证书 SHA-256 `81:7F:13:F0:...:E7`，可自行核对）；dev 包仍 debug。keystore **不在仓库内** |
 | 支持的 ABI | 仅 `arm64-v8a` |
 | 后端 API | 趣智校园 `v3-api.china-qzxy.cn`（请求里伪装客户端 `version=6.5.28`） |
-| 代码仓库 | GitHub `shierpuzi/linyu`（Gitee 镜像已置空，见「已知限制」） |
+| 代码仓库 | GitHub `shierpuzi/quzhiLite`（2026-10-30 由 `linyu` 改名）；Gitee 镜像 `shierpuzi/quzhiLite` 已启用，见「已知限制」 |
 | 适用范围 | 使用趣智校园系统的学校（学校名称 / 板块列表由接口下发） |
 
 其它文档：[交接文档.md](交接文档.md)（业务模型与代码地图，**接手先读这份**）、

@@ -3,19 +3,23 @@
 [![Platform](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com)
 [![Language](https://img.shields.io/badge/Language-Kotlin-blue.svg)](https://kotlinlang.org)
 [![UI](https://img.shields.io/badge/UI-Jetpack%20Compose-purple.svg)](https://developer.android.com/jetpack/compose)
-[![Version](https://img.shields.io/badge/Version-v3.2.2-orange.svg)](https://github.com/shierpuzi/linyu/releases/latest)
+[![Version](https://img.shields.io/badge/Version-v3.2.2-orange.svg)](https://github.com/shierpuzi/quzhiLite/releases/latest)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**⬇️ [下载最新 APK (v3.2.2)](https://github.com/shierpuzi/linyu/releases/latest)**
+**⬇️ 下载最新 APK (v3.2.2)：[GitHub](https://github.com/shierpuzi/quzhiLite/releases/latest) ｜ [Gitee（国内更快）](https://gitee.com/shierpuzi/quzhiLite/releases)**
 
 > 正式版 `com.quzhi.lite`：**12.77 MB**（R8 混淆 + 资源压缩），仅支持 64 位（arm64-v8a）设备。
+>
+> 🌏 **两个下载源，同一份包**：GitHub 是主仓库，Gitee 是国内镜像（同名 tag、同名附件）。
+> App 设置里有「国内镜像下载」开关，默认开——GitHub 附件在大陆实测约 100 KB/s，Gitee 约 2 MB/s。
+> 但**检查更新永远问 GitHub**，所以「有没有新版本」的判据不受镜像影响。
 >
 > v3.2.1 起正式版使用**真正的 release 签名**（不再是 debug 签名）。证书 SHA-256 指纹
 > `81:7F:13:F0:56:B0:08:1F:...` 可以在 [SECURITY.md](docs/SECURITY.md) 第二节里核对（含验证命令）。
 >
 > ⚠️ 但请听清这句话：**签名只能证明「这个包和官方发的是同一个」**——能挡住更新时被换成别人的包，
 > 却挡不住别人用**自己的密钥**另造一个「正版」。所以**下载渠道仍然是唯一身份凭据**：
-> 只从这里、或 [Releases 页面](https://github.com/shierpuzi/linyu/releases) 下载。
+> 只从这里、或 [Releases 页面](https://github.com/shierpuzi/quzhiLite/releases) 下载。
 >
 > 🧪 想试开发中的功能，可以装 **dev 测试包** `com.quzhi.lite.dev`（`3.2.2-dev`，debug 签名，21.13 MB），
 > 它能和官方 App 共存，且**只接收测试版更新**、不会被正式版打扰。
@@ -346,6 +350,25 @@ cd linyu; python tools\verify_apk.py
 
 应当看到 store 包「✅ 干净（无凭证）」。
 
+**⑥ 别忘了 Gitee 镜像（否则国内用户还在走慢速 GitHub）**
+
+App 的「国内镜像下载」开关默认开，但它拼的地址是
+`gitee.com/shierpuzi/quzhiLite/releases/download/<tag>/<附件名>`——
+**Gitee 那边没有同名 tag + 同名附件就是 404，然后回落到 GitHub 直链**（不会崩，只是慢）。
+
+所以每次发版，GitHub 发完还要在 Gitee 补一份**完全同名**的：
+
+| 项 | 必须与 GitHub 一致 |
+|---|---|
+| tag | `v3.2.2` / `v3.2.2-dev`（**含大小写**） |
+| 附件文件名 | `quzhi-lite-v3.2.2.apk` |
+| 是否预发布 | 正式版不勾、测试版勾 pre-release |
+| 仓库可见性 | 必须**公开**（私有仓库附件不能匿名下载） |
+
+> ⚠️ Gitee 路径**大小写敏感**：`quzhiLite` ≠ `quzhilite`。
+> 填错只有真机下载时才暴露，且 App 里没有自动探测——它只会静默回落到 GitHub。
+> 改仓库名时记得同步 `api/GithubApi.kt` 的 `GITEE_REPO` 常量。
+
 ### 常见错误对照
 
 | 错误 | 结果 | 正确的做法 |
@@ -356,6 +379,8 @@ cd linyu; python tools\verify_apk.py
 | 测试版忘了 `--prerelease` | 正式用户被推向测试包 | 加 `--prerelease` |
 | 正式版勾了 `--prerelease` | 正式包看不到它 | 别勾 |
 | 没验签名就发布 | 用户「解析包时出现问题」 | 每次验 |
+| 只发 GitHub、忘了 Gitee | 国内用户走 100 KB/s 的慢速源 | 两边都发，同名 tag/附件 |
+| Gitee 仓库设成私有 | 镜像附件无法匿名下载，开关形同虚设 | 保持公开 |
 
 ---
 
@@ -422,8 +447,8 @@ cd linyu; python tools\verify_apk.py
 | **[@yehu-imei](https://github.com/yehu-imei)** | **★ 基础框架与全部原始实现**：热水表开阀 / 关阀 / 结算链路、MQTT、短信 secret 算法、一卡通余额接口 |
 | [@Cainite07](https://github.com/Cainite07) | 短信登录的实现 |
 | [@SubmergeDQ](https://github.com/SubmergeDQ) | 蓝牙阀控制的实现 |
-| [@f3ngka0](https://github.com/f3ngka0) | 蓝牙水表 28 字节状态帧支持（[PR #11](https://github.com/shierpuzi/linyu/pull/11)） |
-| [@Asyreale](https://github.com/Asyreale) | 蓝牙表广播地址与小组件状态修复（[PR #8](https://github.com/shierpuzi/linyu/pull/8)、[#9](https://github.com/shierpuzi/linyu/pull/9)） |
+| [@f3ngka0](https://github.com/f3ngka0) | 蓝牙水表 28 字节状态帧支持（[PR #11](https://github.com/shierpuzi/quzhiLite/pull/11)） |
+| [@Asyreale](https://github.com/Asyreale) | 蓝牙表广播地址与小组件状态修复（[PR #8](https://github.com/shierpuzi/quzhiLite/pull/8)、[#9](https://github.com/shierpuzi/quzhiLite/pull/9)） |
 | [@XiaoLoad](https://github.com/XiaoLoad) | 项目优化的宝贵建议 |
 | 各位同学们 | 软件的测试与体验反馈 |
 

@@ -1208,7 +1208,13 @@ private fun AboutCard() {
     }
 }
 
-/** 本仓库 owner（GitHub API 拉不到时用它兜底，见「关于项目」） */
+/**
+ * 本仓库 owner（GitHub API 拉不到时用它兜底，见「关于项目」）。
+ *
+ * ⚠️ 改仓库名时这里要和 `api/GithubApi.REPO_SLUG` 的 owner 段一起改。
+ * 它只用于「关于项目」的展示兜底，不参与更新下载，所以不会因为不同步而崩——
+ * 但也正因为不崩，漏改会一直悄悄显示成旧名字。
+ */
 private const val REPO_OWNER = "shierpuzi"
 
 /** 打开外部链接（失败静默，不影响使用） */
