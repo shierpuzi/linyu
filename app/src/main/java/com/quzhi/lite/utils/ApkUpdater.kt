@@ -337,6 +337,14 @@ object ApkUpdater {
         }
     }
 
+    /**
+     * 校验更新包是不是「本 App」的：包名 + 签名都要和已安装的一致。
+     *
+     * 包名用 [BuildConfig.APPLICATION_ID]，**不是硬编码**——dev 包是
+     * `com.quzhi.lite.dev`，store 包是 `com.quzhi.lite`，各自只认自己那份 APK。
+     * 这也顺带保证了升级通道不会被串：dev 包下下来的测试版 APK 包名对得上，
+     * store 包如果误拿到测试版 APK，这里会直接拦下。
+     */
     private fun verifyApkIdentity(context: Context, file: File): String? {
         val packageManager = context.packageManager
         val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)

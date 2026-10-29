@@ -25,11 +25,11 @@ android {
         applicationId = "com.quzhi.lite"
         minSdk = 26
         targetSdk = 36
-        // 2026-10-29 #36：3.1.0(16) → 3.2.0(17)。
+        // 2026-10-29：3.2.0(17) → 3.2.1(18)，双更新通道（dev 看测试版 / store 看正式版）。
         // ⚠️ 必须**真的变大**：App 内「检查更新」用 ApkUpdater.isNewer() 逐段比数字，
         //    tag 写成 v3.1.0-dev-2 之类数字不增的名字，老用户永远收不到更新提示。
-        versionCode = 17
-        versionName = "3.2.0"
+        versionCode = 18
+        versionName = "3.2.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -71,6 +71,11 @@ android {
             buildConfigField("String", "PREFILL_ACCOUNT_ID", "\"\"")
             buildConfigField("String", "PREFILL_PROJECT_ID", "\"\"")
             buildConfigField("String", "PREFILL_TELEPHONE", "\"\"")
+
+            // 更新通道：正式包只看**非 pre-release** 的 Release。
+            // ⚠️ 同样**必须显式写 false**，不能指望默认值——上面 PREFILL_* 那个坑
+            //    就是"以为没写就等于 false/空"。写在 defaultConfig 的话两个包都会变 true。
+            buildConfigField("boolean", "DEV_CHANNEL", "false")
         }
         create("dev") {
             dimension = "dist"
@@ -78,6 +83,9 @@ android {
             versionNameSuffix = "-dev"
             // 名字带个后缀，方便在桌面上和原版区分
             resValue("string", "app_name", "趣智Lite·测试版")
+
+            // 更新通道：测试包只看 **pre-release** 的 Release，永远收不到正式版提示。
+            buildConfigField("boolean", "DEV_CHANNEL", "true")
 
             // ── 预置登录态（**只在这个 flavor 里**）─────────────
             //

@@ -62,6 +62,7 @@ import com.quzhi.lite.api.GithubAsset
 import com.quzhi.lite.api.GithubRelease
 import com.quzhi.lite.api.GithubRepoInfo
 import com.quzhi.lite.api.NetworkModule
+import com.quzhi.lite.api.ReleaseResult
 import com.quzhi.lite.data.AuthRepository
 import com.quzhi.lite.api.forgetPasswordSafe
 import com.quzhi.lite.api.updatePasswordSafe
@@ -121,8 +122,14 @@ private fun saveHiddenCards(hidden: Set<String>, save: (String) -> Unit) {
  * 缓存后只做一次，切换 tab 就不再卡顿。
  */
 private object UserPageCache {
-    var releasesFetched: Boolean = false
-    var releases: List<GithubRelease> = emptyList()
+    /**
+     * 更新检测结果。**null 表示「还没检测过」**，和「检测失败 / 该通道没版本」是三种不同状态。
+     *
+     * 以前这里存 `List<GithubRelease>`，空列表同时代表「网络失败」和「没有版本」，
+     * 界面只好一律说「检测失败（多为网络原因）」——只发测试版时正式包看到的就是这句，
+     * 用户会以为是自己网络坏了。现在存 [ReleaseResult]，两种情况能分开。
+     */
+    var releasesResult: ReleaseResult? = null
     var repoInfoFetched: Boolean = false
     var repoInfo: GithubRepoInfo? = null
 }
@@ -419,6 +426,14 @@ private fun SettingsScreen(
             }
             Spacer(Modifier.height(16.dp))
         }
+        // 「备份 / 恢复」**固定**在卡片列表末尾、退出登录之上，不做成可排序卡片。
+        //
+        // 做成一张 UserCardType 的话，就必须同时改 UserCardLayoutPolicy.settingsDefaults
+        // 和它那份单测，否则老用户存下来的顺序里认不出这个新值，卡片永远不出现。
+        // 而这个功能的语义本来也不该变：它属于「本机数据出入口」，
+        // 放在最底部、紧挨「退出登录」这类危险操作，比夹在通知/消费趋势中间更说得通。
+        BackupCard(viewModel)
+        Spacer(Modifier.height(16.dp))
         OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp),
             colors = ButtonDefaults.outlinedButtonColors(contentColor = AppColors.Danger)) {
@@ -784,13 +799,15 @@ private fun UpdateCard() {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     // 用进程级缓存，避免每次切到「我的」都重新请求
-    var releases by remember { mutableStateOf(UserPageCache.releases) }
+    // null = 还没检测过（区别于"检测失败"和"该通道没版本"）
+    var result by remember { mutableStateOf(UserPageCache.releasesResult) }
     var checking by remember { mutableStateOf(false) }
-    var checkedOnce by remember { mutableStateOf(UserPageCache.releasesFetched) }
     var expandedTag by remember { mutableStateOf<String?>(null) }
     // 更新日志默认只列最近几个版本，其余折叠（见 ③ 处）
     var showAllReleases by remember { mutableStateOf(false) }
 
+    // 只有 Ok 分支才有列表；Failed 和"没版本"从这里就分开了
+    val releases = (result as? ReleaseResult.Ok)?.list.orEmpty()
     val currentVersion = ApkUpdater.currentVersion
     val latestRelease = releases.firstOrNull()
     val latestTag = latestRelease?.tagName
@@ -803,16 +820,16 @@ private fun UpdateCard() {
         if (checking) return
         checking = true
         scope.launch {
-            val list = GithubApi.fetchReleases()
-            UserPageCache.releases = list
-            UserPageCache.releasesFetched = true
-            releases = list
-            checkedOnce = true
+            val r = GithubApi.fetchReleases()
+            // 只缓存成功的结果：失败不进缓存，下次切回本页会自动重试
+            // （以前失败也被记成"已检测过"，网络恢复后还得手动点一次才刷新）
+            if (r is ReleaseResult.Ok) UserPageCache.releasesResult = r
+            result = r
             checking = false
             // 不自动展开任何版本（由用户手动点击展开）
         }
     }
-    LaunchedEffect(Unit) { if (!UserPageCache.releasesFetched) doCheck() }
+    LaunchedEffect(Unit) { if (UserPageCache.releasesResult == null) doCheck() }
 
     BaseCard {
         Column(Modifier.padding(20.dp)) {
@@ -825,9 +842,12 @@ private fun UpdateCard() {
             // ② 自动检测结果
             Spacer(Modifier.height(8.dp))
             val (statusText, statusColor) = when {
-                checking -> "正在检测更新…" to AppColors.TextSecondary
-                !checkedOnce -> "正在检测更新…" to AppColors.TextSecondary
-                releases.isEmpty() -> "检测失败（多为网络原因）" to AppColors.Warning
+                checking || result == null -> "正在检测更新…" to AppColors.TextSecondary
+                // 真的请求失败了（超时 / 403 / 解析炸了）
+                result is ReleaseResult.Failed -> "检测失败（多为网络原因）" to AppColors.Warning
+                // 拉取成功、但本通道确实没有版本：不是故障，别吓用户
+                releases.isEmpty() ->
+                    (if (BuildConfig.DEV_CHANNEL) "暂无测试版本" else "暂无正式版本") to AppColors.TextSecondary
                 hasUpdate -> "发现新版本 $latestTag" to AppColors.Accent
                 else -> "当前已是最新版本" to AppColors.Success
             }

@@ -342,6 +342,17 @@ fun LoginScreen(
                         )
                     }
 
+                    // 第四种进来方式：手上只有备份文件（换机 / 重装）。
+                    //
+                    // ⚠️ **不放进 loginCode 模式的判断里**，虽然它逻辑上属于那一块。
+                    //    刚重装完的人落在默认的验证码登录模式，如果这个入口只在他
+                    //    先点「通过 loginCode + userId 登录」之后才出现，那正好是
+                    //    最需要它的人看不到它。
+                    //
+                    // 恢复成功后走 [onLoginSuccess]，和「loginCode 登录成功」同一个出口
+                    // （MainActivity 那边 beginSession + isLoggedIn = true），不另开一条路。
+                    BackupRestoreEntry { phone -> onLoginSuccess(phone) }
+
                     viewModel.errorMessage?.let { msg ->
                         Spacer(Modifier.height(16.dp))
                         Surface(

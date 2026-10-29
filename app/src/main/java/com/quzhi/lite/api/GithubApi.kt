@@ -1,6 +1,7 @@
 package com.quzhi.lite.api
 
 import com.google.gson.JsonParser
+import com.quzhi.lite.BuildConfig
 import com.quzhi.lite.utils.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -46,7 +47,12 @@ data class GithubRelease(
     val publishedAt: String,
     val htmlUrl: String,
     val assets: List<GithubAsset> = emptyList(),
-    /** 预发布版本。列表里要滤掉，否则发个测试版会提示所有用户更新 */
+    /**
+     * 预发布（GitHub 上勾了 "pre-release" 的 Release）。
+     *
+     * 更新通道靠它分流：dev 包只看 true 的，正式包只看 false 的。
+     * 见 [GithubApi.fetchReleases]。
+     */
     val prerelease: Boolean = false
 ) {
     /** 发行版里的 APK 附件，取第一个 */
@@ -71,6 +77,22 @@ data class GithubRelease(
             if (tagName.isEmpty()) return null
             return "https://gitee.com/$GITEE_REPO/releases/download/$tagName/${a.name}"
         }
+}
+
+/**
+ * 一次「按通道拉 Release」的结果。
+ *
+ * ⚠️ 存在的唯一理由：**把「请求失败」和「该通道没有版本」区分开**。
+ * 以前 `fetchReleases()` 两种情况都返回 emptyList，界面只能一律显示
+ * 「检测失败（多为网络原因）」——明明只是没发版，用户以为网络坏了。
+ * 这里用 sealed 而不是 `List?`，是因为可空列表太容易被当成空列表处理，
+ * 那正是上面这个 bug 的成因。
+ */
+sealed interface ReleaseResult {
+    /** 拉取成功。[list] 可能为空：该通道确实没有版本，不是失败 */
+    data class Ok(val list: List<GithubRelease>) : ReleaseResult
+    /** 网络 / 解析失败，原因未知（国内直连 api.github.com 常这样） */
+    data object Failed : ReleaseResult
 }
 
 /** GitHub 仓库信息 */
@@ -133,20 +155,29 @@ object GithubApi {
     }
 
     /**
-     * 全部 Release（最新在前，最多 10 条）；失败返回空列表。
+     * 按更新通道拉 Release（最新在前，最多 10 条）。
      *
-     * **滤掉预发布**：调用方拿 `firstOrNull()` 当"最新版"来比对，
-     * 不过滤的话，只要发过一个标记为 pre-release 的测试版，所有人都会被提示更新到它。
+     * @param devChannel `true` 只返回 pre-release（测试版），`false` 只返回正式版。
+     *   默认取当前安装包的 [BuildConfig.DEV_CHANNEL]，所以调用方不用关心自己是哪个 flavor。
+     *
+     * 两个包看到的列表**互不相交**：测试包只认测试版，正式包只认正式版。
+     * 这也是「共存包」要求的一部分——测试版不该把普通用户拉下水，
+     * 正式版也不该被一个 pre-release 提示「有新版本」。
+     *
+     * 失败返回 [ReleaseResult.Failed]，成功但该通道没版本返回 `Ok(emptyList())`，
+     * 两者界面文案不同，别再合并成空列表。
      */
-    suspend fun fetchReleases(): List<GithubRelease> {
-        val json = getJson("/repos/$REPO/releases?per_page=10") ?: return emptyList()
+    suspend fun fetchReleases(
+        devChannel: Boolean = BuildConfig.DEV_CHANNEL
+    ): ReleaseResult {
+        val json = getJson("/repos/$REPO/releases?per_page=10") ?: return ReleaseResult.Failed
         return try {
-            JsonParser.parseString(json).asJsonArray
+            val all = JsonParser.parseString(json).asJsonArray
                 .map { el -> parseRelease(el.asJsonObject) }
-                .filterNot { it.prerelease }
+            ReleaseResult.Ok(all.filter { it.prerelease == devChannel })
         } catch (e: Exception) {
             AppLogger.e("解析 GitHub releases 失败", e)
-            emptyList()
+            ReleaseResult.Failed
         }
     }
 
