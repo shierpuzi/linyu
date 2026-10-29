@@ -3,10 +3,10 @@
 [![Platform](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com)
 [![Language](https://img.shields.io/badge/Language-Kotlin-blue.svg)](https://kotlinlang.org)
 [![UI](https://img.shields.io/badge/UI-Jetpack%20Compose-purple.svg)](https://developer.android.com/jetpack/compose)
-[![Version](https://img.shields.io/badge/Version-v3.2.2-orange.svg)](https://github.com/shierpuzi/quzhiLite/releases/latest)
+[![Version](https://img.shields.io/badge/Version-v3.2.3-orange.svg)](https://github.com/shierpuzi/quzhiLite/releases/latest)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**⬇️ 下载最新 APK (v3.2.2)：[GitHub](https://github.com/shierpuzi/quzhiLite/releases/latest) ｜ [Gitee（国内更快）](https://gitee.com/shierpuzi/quzhiLite/releases)**
+**⬇️ 下载最新 APK (v3.2.3)：[GitHub](https://github.com/shierpuzi/quzhiLite/releases/latest) ｜ [Gitee（国内更快）](https://gitee.com/shierpuzi/quzhiLite/releases)**
 
 > 正式版 `com.quzhi.lite`：**12.77 MB**（R8 混淆 + 资源压缩），仅支持 64 位（arm64-v8a）设备。
 >
@@ -21,7 +21,7 @@
 > 却挡不住别人用**自己的密钥**另造一个「正版」。所以**下载渠道仍然是唯一身份凭据**：
 > 只从这里、或 [Releases 页面](https://github.com/shierpuzi/quzhiLite/releases) 下载。
 >
-> 🧪 想试开发中的功能，可以装 **dev 测试包** `com.quzhi.lite.dev`（`3.2.2-dev`，debug 签名，21.13 MB），
+> 🧪 想试开发中的功能，可以装 **dev 测试包** `com.quzhi.lite.dev`（`3.2.3-dev`，debug 签名，21.1 MB），
 > 它能和官方 App 共存，且**只接收测试版更新**、不会被正式版打扰。
 
 趣智校园第三方 Android 客户端。相比官方 App，提供更简洁的界面和更流畅的操作体验。

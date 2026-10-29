@@ -25,13 +25,13 @@ android {
         applicationId = "com.quzhi.lite"
         minSdk = 26
         targetSdk = 36
-        // 2026-10-29：3.2.1(18) → 3.2.2(19)，更新日志 Markdown 清洗 + 发布规范文档。
+        // 2026-10-30：3.2.2(19) → 3.2.3(20)，仓库改名 quzhiLite + 启用 Gitee 镜像。
         // ⚠️ 必须**真的变大**：App 内「检查更新」用 ApkUpdater.isNewer() 逐段比数字，
         //    tag 写成 v3.2.1-dev-2 / v3.2.1-hotfix 之类数字不增的名字，
         //    解析出来仍是 [3,2,1]，和老版本相等 → 老用户永远收不到更新提示。
-        //    只有升数字段（3.2.1 → 3.2.2）才可靠。
-        versionCode = 19
-        versionName = "3.2.2"
+        //    只有升数字段（3.2.2 → 3.2.3）才可靠。
+        versionCode = 20
+        versionName = "3.2.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
