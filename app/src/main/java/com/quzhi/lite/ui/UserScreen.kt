@@ -1089,44 +1089,11 @@ private fun formatBytes(bytes: Long): String = when {
     else -> "%.1f MB".format(bytes / 1024.0 / 1024.0)
 }
 
-/**
- * 从发行版说明中只抽出「新增功能」与「修复」两类内容，其余段落（安装步骤、注意事项等）丢弃。
- * 发行版说明是 Markdown，按 `#` 标题切段落，命中关键词的段落保留整段。
- */
-private fun extractReleaseHighlights(body: String): String {
-    val out = StringBuilder()
-    var keeping = false
-    body.lines().forEach { raw ->
-        val line = raw.trimEnd()
-        if (line.trimStart().startsWith("#")) {
-            val title = plainHeading(line)
-            keeping = title.contains("新增") || title.contains("功能") ||
-                      title.contains("修复") || title.contains("BUG", ignoreCase = true)
-            if (keeping) {
-                if (out.isNotEmpty()) out.append('\n')
-                out.append(stripMarkdown(title)).append('\n')
-            }
-        } else if (keeping) {
-            out.append(stripMarkdown(line)).append('\n')
-        }
-    }
-    return out.toString().trim()
-}
-
-/**
- * 去掉 Markdown 强调标记。
- *
- * 发行版说明是按 Markdown 写的，但 App 里用的是普通 Text 渲染（没有 Markdown 解析），
- * 不处理的话 `**加粗**` 会把星号原样显示出来，`反引号` 同理。
- */
-private fun stripMarkdown(s: String): String =
-    s.replace("**", "").replace("__", "").replace("`", "")
-
-/** 去掉标题里的 `#`、表情符号和多余空白，只保留中日韩文字与 ASCII */
-private fun plainHeading(line: String): String =
-    line.trimStart().trimStart('#').trim()
-        .filter { c -> c.code in 0x4E00..0x9FFF || c.code in 0x3000..0x303F || c.code in 0x20..0x7E }
-        .trim()
+// 发行版说明的提取 / 回退逻辑已移到 ui/ReleaseNotes.kt（带单测）。
+// 原来这里有一份 private 的 extractReleaseHighlights + stripMarkdown + plainHeading，
+// 因为只认「新增/功能/修复/BUG」四种标题，导致实际发布的说明在界面上全显示成
+// 「本版本未填写更新详情」（数据是好的，是过滤器把内容吃光了）。
+// ⚠️ 不要再把这段逻辑搬回来——它需要单测，而 private 函数没法测。
 
 @Composable
 private fun ReleaseRow(
@@ -1169,7 +1136,10 @@ private fun ReleaseRow(
         }
         if (expanded) {
             Text(
-                extractReleaseHighlights(release.body).ifBlank { "本版本未填写更新详情。" },
+                // 提取与回退策略在 ReleaseNotes 里（含单测）。
+                // ⚠️ 别在这里自己写 ifBlank 兜底：那正是上一版把「规则没匹配上」
+                //    误报成「作者没写更新日志」的原因。
+                ReleaseNotes.render(release.body),
                 fontSize = 12.sp, color = AppColors.TextSecondary,
                 modifier = Modifier.padding(bottom = 6.dp)
             )
