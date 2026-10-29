@@ -3,15 +3,22 @@
 [![Platform](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com)
 [![Language](https://img.shields.io/badge/Language-Kotlin-blue.svg)](https://kotlinlang.org)
 [![UI](https://img.shields.io/badge/UI-Jetpack%20Compose-purple.svg)](https://developer.android.com/jetpack/compose)
-[![Version](https://img.shields.io/badge/Version-v3.1.0--dev-orange.svg)](https://github.com/shierpuzi/linyu/releases/latest)
+[![Version](https://img.shields.io/badge/Version-v3.2.1-orange.svg)](https://github.com/shierpuzi/linyu/releases/latest)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**⬇️ [下载最新 APK (v3.1.0-dev)](https://github.com/shierpuzi/linyu/releases/latest)**
+**⬇️ [下载最新 APK (v3.2.1)](https://github.com/shierpuzi/linyu/releases/latest)**
 
-> 安装包 22.3 MB，仅支持 64 位（arm64-v8a）设备。
+> 正式版 `com.quzhi.lite`：**12.77 MB**（R8 混淆 + 资源压缩），仅支持 64 位（arm64-v8a）设备。
 >
-> ⚠️ 当前发布的是**测试版**，使用 **debug 签名**，包名 `com.quzhi.lite.dev`，可与官方趣智校园 App 共存。
-> 签名与用例说明见 [SECURITY.md](docs/SECURITY.md)；没有配置 release keystore，所以还不能上架。
+> v3.2.1 起正式版使用**真正的 release 签名**（不再是 debug 签名）。证书 SHA-256 指纹
+> `81:7F:13:F0:56:B0:08:1F:...` 可以在 [SECURITY.md](docs/SECURITY.md) 第二节里核对（含验证命令）。
+>
+> ⚠️ 但请听清这句话：**签名只能证明「这个包和官方发的是同一个」**——能挡住更新时被换成别人的包，
+> 却挡不住别人用**自己的密钥**另造一个「正版」。所以**下载渠道仍然是唯一身份凭据**：
+> 只从这里、或 [Releases 页面](https://github.com/shierpuzi/linyu/releases) 下载。
+>
+> 🧪 想试开发中的功能，可以装 **dev 测试包** `com.quzhi.lite.dev`（`3.2.1-dev`，debug 签名，21.11 MB），
+> 它能和官方 App 共存，且**只接收测试版更新**、不会被正式版打扰。
 
 趣智校园第三方 Android 客户端。相比官方 App，提供更简洁的界面和更流畅的操作体验。
 
@@ -113,6 +120,14 @@
 - 📱 **更换手机号** — 验证码发到新号码，改完即时生效
 - 🔑 **修改密码** — 支持密码方式和**短信验证码方式**（没设过密码、或忘了密码都能用）
 - 🎫 **使用码** — 领取 / 重新领取前可先预览，「换一个」每天 20 次，确定领取才真正替换；取消不会影响正在用的码
+- 💾 **备份 / 恢复** — 换手机、重装、或者只是想留个底的时候用
+  - **可以分开备，也可以一起备**：只备收藏（纯本地数据，默认不加密，想加也行）、只备登录凭证，或者两样都备
+  - **含登录凭证的备份强制加密**（AES-256-GCM，密码用 PBKDF2 加盐派生）——这条是数据层强制的，不是界面上的提醒，改界面也写不出明文凭证
+  - **不需要任何存储权限**：用系统的文件选择器自己挑位置，App 只拿到你选的那一个文件的读写权
+  - **登录页也能恢复**：还站在登录页（换机 / 重装后）时点「从备份包恢复登录 →」，选文件输密码就行
+  - 恢复凭证前会**先拿它去问服务端还能不能用**，能用才写进本地——不会让你「恢复成功」之后一秒被踢回登录页
+  - 恢复收藏是**按设备合并**，不会覆盖掉你手机上已有的收藏
+  - ⚠️ 密码忘了就真的打不开（没有后门），备份时请顺手记在密码管理器里
 
 ### 🎨 个性化
 
@@ -126,6 +141,7 @@
 
 - 📜 **内置运行日志** — 内存 + 文件双缓冲，敏感信息自动打码，崩溃自动捕获，可一键分享导出
 - 🔄 **应用内更新** — 自动读取 GitHub Release 比对版本、展开查看更新日志，并可直接在应用内下载安装
+  - **双通道**：dev 测试包只看**测试版**（pre-release），正式包只看**正式版**——测试版不会把普通用户拉下水，正式版也不会被一个测试版提示「有新版本」
   - 更新日志默认只列最近 3 个版本，点「展开全部」看其余
   - ⚠️ 仓库暂无 Gitee 镜像（`GITEE_REPO = ""`），下载走 GitHub 直链，大陆可能较慢
 - 🔐 **加密存储** — 登录凭证加密存储（EncryptedSharedPreferences）
@@ -205,11 +221,36 @@ cd linyu
 .\gradlew.bat :app:assembleStoreDebug
 .\gradlew.bat :app:assembleDevDebug
 
+# Release（R8 混淆 + 资源压缩；配好签名后会自动签名）
+.\gradlew.bat :app:assembleStoreRelease
+.\gradlew.bat :app:assembleDevRelease
+
 # ⚠️ 测试任务名带 flavor，testDebugUnitTest 会失败
 .\gradlew.bat :app:testDevDebugUnitTest :app:testStoreDebugUnitTest
 ```
 
 打包前请把 `linyu/local.properties` 里的 `sdk.dir` 配好；该文件含签名路径与预置凭证，已在 `.gitignore` 中，**不会入库**。
+
+### 🔑 自己出签名 Release
+
+要打**可安装的** release 包，还得在同一个 `local.properties` 里补四行（生成 keystore 用 `keytool`）：
+
+```properties
+KEYSTORE_FILE=../your-key.jks
+KEYSTORE_PASSWORD=你的密钥库密码
+KEY_ALIAS=你的别名
+KEY_PASSWORD=你的密钥密码
+```
+
+> ⚠️ **这四项缺任意一项（或 keystore 文件路径不存在）时，Gradle 只打一条 warn，
+> 然后静默产出未签名的 release 包**——构建显示成功，但那个 APK 装不上。
+> 所以出包后请务必验一次签名，别等用户报「解析包时出现问题」：
+>
+> ```powershell
+> & "$env:ANDROID_HOME\build-tools\36.0.0\apksigner.bat" verify --print-certs app\build\outputs\apk\store\release\app-store-release.apk
+> ```
+>
+> 输出里应当有 `certificate SHA-256 digest`；官方的正式版是 `81:7F:13:F0:...`（你自己签的当然不一样，那是对的）。
 
 ---
 
@@ -233,6 +274,7 @@ cd linyu
 | **各校部署有差异** | 已在多所学校被实际使用，但各校网络请求接口信息可能不同 |
 | **饮水机功能未实机验证** | 饮水机识别与 UI 已实现，但作者所在学校无直饮水机，实际控制流程未验证 |
 | **洗衣机真实下单未验证** | 套餐下单全链路只实测过**吹风机**，洗衣机（`bigTypeId=6`）只到编译与单测 |
+| **备份密码忘了没有救** | 加密备份包只能靠那个密码打开，App 里**没有后门也没有找回入口**。忘了就真的打不开——备份时请存进密码管理器 |
 | **Android 12 以下仍需定位权限** | 系统对蓝牙发现的硬性规定，无法绕过；引导卡片里说明了原因 |
 | **自动填充依赖手机密码管理器** | 不同厂商 ROM 行为差异较大，未在多数机型上验证 |
 | **流体云胶囊要手动授权** | ColorOS 的实时状态需用户在「设置 → 通知 → 流体云」里给本 App 打开，代码无法代劳 |
@@ -243,7 +285,8 @@ cd linyu
 |---|---|
 | **MQTT 明文** | 趣智校园 MQTT 服务器不支持 TLS，通信内容未加密 |
 | **密码 MD5** | 趣智校园使用 MD5 取后 10 位，安全性低（官方协议限制） |
-| **v3.1.0-dev 是 debug 签名** | 测试分包，不能上架、不能覆盖安装到别的签名包上；正式版需先配 release keystore |
+| **签名≠正版** | v3.2.1 起正式版已是 **release 签名**（证书 SHA-256 `81:7F:13:F0:56:B0:08:1F:...`，可自行核对）。但**签名只能证明同源**：别人可以用自己的密钥造一个同样"签名自洽"的包，所以**下载渠道才是身份凭据**。详见 [SECURITY.md](docs/SECURITY.md) |
+| **dev 测试包仍是 debug 签名** | `com.quzhi.lite.dev` 是测试分包，可与官方 App 共存；不能上架，也不该拿来当正式版用 |
 
 完整披露见 [SECURITY.md](docs/SECURITY.md)。
 

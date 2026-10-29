@@ -23,11 +23,12 @@
 |---|---|
 | 应用名称 | 趣智Lite（dev flavor 为「趣智Lite·测试版」） |
 | 包名 | `com.quzhi.lite`（dev flavor：`com.quzhi.lite.dev`，可与官方 App 共存） |
-| 版本 | v3.1.0（versionCode 16）；dev 包版本名为 `3.1.0-dev` |
+| 版本 | **v3.2.1（versionCode 18）**；dev 包版本名为 `3.2.1-dev` |
 | 技术栈 | Kotlin + Jetpack Compose + Material 3 |
 | 最低 Android 版本 | Android 8.0 (API 26) |
 | 目标 Android 版本 | Android 16 (API 36) |
-| APK 体积 | 已发布的 `v3.1.0-dev`（dev + debug 签名）**22.3 MB**；Release 构建开了 R8 混淆 + 资源压缩会更小（未在本机构建过，无实测值） |
+| APK 体积 | 正式版 `app-store-release.apk` **12.77 MB**（R8 混淆 + 资源压缩）；dev 测试包 `app-dev-debug.apk` **21.11 MB** |
+| 签名 | 正式版 **release**（RSA 2048 / SHA384withRSA，证书 SHA-256 `81:7F:13:F0:...:E7`，可自行核对）；dev 包仍 debug。keystore **不在仓库内** |
 | 支持的 ABI | 仅 `arm64-v8a` |
 | 后端 API | 趣智校园 `v3-api.china-qzxy.cn`（请求里伪装客户端 `version=6.5.28`） |
 | 代码仓库 | GitHub `shierpuzi/linyu`（Gitee 镜像已置空，见「已知限制」） |
@@ -60,6 +61,8 @@
 | 套餐下单（洗衣机 / 吹风机） | `ui/ModeOrderScreen.kt` 同页两阶段：选套餐（价格 / 时长 / 「确认下单 ¥x.xx」）→ 使用中（剩余倒计时 + 刷新核对）。**故意没有「停止」按钮**——服务端没有停止 / 取消 / 退款接口 |
 | 下单前二次确认 | `ui/ConfirmStartDialog.kt` 两种计费共用：按量形态显示设备名 + 预扣金额，套餐形态显示设备名 + 套餐名 + 金额 + 时长。确认后才真正发请求 |
 | 收藏设备 | `data/FavoriteStore.kt`，**与「上次使用」是两回事**：多条（上限 30）、用户主动写入（附近设备长按 / 使用页右上角心形）、字段全落盘因此**离线也能渲染并分流**、杀后台保留；「上次使用」只有 1 条、每次操作被覆盖 |
+| 备份 / 恢复 | 收藏与登录凭证可**分别或一起**备份；凭证**强制加密**（PBKDF2-HMAC-SHA256 21 万次 + AES-256-GCM，数据层强制）；走 SAF 选位置，**零存储权限**；恢复收藏**按 mac 合并**不覆盖；恢复凭证**先鉴权再落盘**。两个入口：设置页卡片、登录页「从备份包恢复登录 →」。⚠️ 密码忘了没有后门 |
+| 双更新通道 | dev 测试包只看 pre-release、正式包只看正式版（`DEV_CHANNEL` buildConfigField + sealed `ReleaseResult`）。以前空列表同时表示「网络失败」和「该通道没版本」，一律提示「检测失败」 |
 | 开始洗澡 | 调用 downRate API 开启设备，并轮询确认开阀成功 |
 | 停止洗澡 | 调用 closeOrder API 关闭设备，确认关闭成功，失败有提示 |
 | 洗澡中界面 | 全屏沉浸式界面，显示计时器、预扣金额、设备位置 |
@@ -118,7 +121,7 @@
 | 卡片自定义 | 「我的」页卡片可上下排序、隐藏显示，状态持久化 |
 | 我的页改版 | 收敛为个人信息 / 使用码 / 绑定寝室；通知、背景装扮、应用信息、关于项目移到右上角设置按钮，设置页与背景页独立 |
 | 消费金额显示到厘 | `0.025` 就是 `0.025`（原先只保留两位、四舍五入成 `0.03`），全项目统一走 `MoneyFormat.milliToYuan()` |
-| 应用内更新 | 读取 GitHub Release 比对版本、折叠展示更新日志，并可在应用内下载安装。⚠️ **Gitee 镜像已置空**（`GITEE_REPO=""`），下载走 GitHub 直链，大陆实测约 100 KB/s；日志默认只列最近 3 个版本 |
+| 应用内更新 | 读取 GitHub Release 按版本比对、折叠展示更新日志，并可在应用内下载安装。**双通道**：dev 包只看 pre-release、正式包只看正式版。⚠️ **Gitee 镜像已置空**（`GITEE_REPO=""`），下载走 GitHub 直链，大陆实测约 100 KB/s；日志默认只列最近 3 个版本 |
 | 内置运行日志 | 环形缓冲 + 文件滚动 + 敏感信息脱敏 + 崩溃捕获 + 一键导出（`ui/LogViewerDialog.kt` + `utils/AppLogger.kt`） |
 | 扫码手电筒 | 扫码界面提供手电筒，开启后变暖黄 + 光晕 + 填充图标 |
 | 扫码相册识别 | 从相册选图识别二维码（`PickVisualMedia`，不需要存储权限） |
@@ -161,7 +164,7 @@ linyu/
 > `_icon_preview/`（图标预览输出）等。`_icon_preview/` 由 `tools/preview_vector.py` 生成，
 > 要长期留存的图应拷到 `docs/icons/`。
 
-### App 源码树（`app/src/main/`，共 92 个 Kotlin 文件）
+### App 源码树（`app/src/main/`，共 98 个 Kotlin 文件）
 
 ```
 app/src/main/
@@ -197,6 +200,10 @@ app/src/main/
 │   │   ├── SpendingAnalytics.kt           # 消费趋势统计（近 7 天 / 本月，按设备时区）
 │   │   ├── DeviceInfoCache.kt             # /device/info/mac 的短 TTL 缓存（60 秒）
 │   │   ├── FavoriteStore.kt               # ★ 收藏设备（多条、上限 30、字段全落盘）
+│   │   ├── BackupFormat.kt                # ★ 备份包格式（魔数 + version + 两种负载；format 无默认值）
+│   │   ├── BackupCodec.kt                 # ★ PBKDF2-HMAC-SHA256 21 万次 + AES-256-GCM（纯 JVM 可测）
+│   │   ├── BackupService.kt               # ★ 备份负载收集 / 写回 Prefs / 凭证落盘（收藏按 mac 合并）
+│   │   ├── BackupFileIo.kt                # ★ SAF 读写（零存储权限；读前挡 >16MB）
 │   │   ├── MacFormat.kt                   # 蓝牙空口广播地址 ↔ 服务端台账 MAC 换算
 │   │   ├── KeyedTaskRegistry.kt           # 带 key 的任务登记（同 key 只跑一个）
 │   │   ├── ModeOrderController.kt         # ★ 套餐下单 / orderNo 获取 / washer 状态三态
@@ -225,7 +232,8 @@ app/src/main/
 │   │   └── WidgetBleService.kt            # 小组件蓝牙开阀 / 关阀（App 被杀也能关）
 │   │
 │   ├── ui/                                # UI 层
-│   │   ├── LoginScreen.kt                 # 登录页（密码 / 验证码 / loginCode 三种 + 抓包教程链接）
+│   │   ├── LoginScreen.kt                 # 登录页（密码 / 验证码 / loginCode 三种 + 抓包教程链接
+│   │   │                                  #   + 「从备份包恢复登录」入口）
 │   │   ├── LoginViewModel.kt              # 登录状态机（isSmsMode + isCodeMode）
 │   │   ├── LoginCodePolicy.kt             # loginCode 校验 + 从抓包 URL 抠参数（纯函数，可测）
 │   │   ├── LoginSecretPolicy.kt           # 登录输入框字段清理策略
@@ -243,6 +251,8 @@ app/src/main/
 │   │   ├── TrendMergeLink.kt              # 趋势 ↔ 合并联动规则（纯函数，UI 与测试共用）
 │   │   ├── UserScreen.kt                  # 我的页面（可排序卡片 + 进程级缓存）
 │   │   ├── UserSettingsCards.kt           # 设置页卡片（通知 / 背景 / 应用信息 / 关于 / 趋势与合并）
+│   │   ├── BackupCards.kt                 # ★ 设置页「备份 / 恢复」卡片（SAF 选位置，零存储权限）
+│   │   ├── BackupRestoreScreen.kt         # ★ 登录页「从备份包恢复登录」（先鉴权再落盘）
 │   │   ├── UserCardLayoutPolicy.kt        # 卡片排序 / 隐藏的纯逻辑
 │   │   ├── UseCodeSection.kt              # 使用码卡片 + 兑换弹窗
 │   │   ├── ProjectSelectionPolicy.kt      # 板块选择纯逻辑（配对校验 + 标签兜底）
@@ -285,7 +295,7 @@ app/src/main/
 │       └── ApkUpdater.kt                  # 更新包下载 + 校验（包名 / 签名证书 / SHA-256）+ 调起安装器
 │
 ├── res/                                   # 见下表
-└── ../test/java/com/quzhi/lite/           # 纯 JVM 单测：32 个套件 / 266 用例（#36 新增 DeviceVisualTest，已实测）
+└── ../test/java/com/quzhi/lite/           # 纯 JVM 单测：34 个套件 / 286 用例（v3.2.1 实测）
 ```
 
 ### 资源目录（`app/src/main/res/`）
@@ -371,6 +381,7 @@ res/
 │  ModeOrderPolicy / DeviceBoardPolicy    │
 │  BillMerger / FavoriteStore             │
 │  SpendingAnalytics / NotifyTextPolicy   │
+│  BackupCodec / BackupFormat             │
 ├─────────────────────────────────────────┤
 │  数据层                                 │
 │  AuthRepository / NetworkModule         │
@@ -379,6 +390,7 @@ res/
 │  MqttManager / BluetoothScanner         │
 │  BleArbiter / BleSignBuilder            │
 │  BackgroundManager / Notifier           │
+│  BackupService / BackupFileIo           │
 │  AppLogger / ApkUpdater                 │
 ├─────────────────────────────────────────┤
 │  BLE 层                                 │
@@ -613,19 +625,36 @@ KEY_ALIAS=你的别名
 KEY_PASSWORD=你的密钥密码
 ```
 
-⚠️ **四项缺任意一项（或 keystore 文件不存在）时，`app/build.gradle.kts` 走
+⚠️ **四项缺任意一项（或 keystore 文件路径不存在）时，`app/build.gradle.kts` 走
 「Release APK 保持未签名」分支**——只打一条 warn 日志，Debug 与测试任务不受影响。
-本项目当前 `local.properties` **没有配置 release keystore**，所以已发布的
-`v3.1.0-dev` 是 **debug 签名包**；要发正式版必须先补齐这四项。
+**这条现在是真会咬人的**：默认 `assembleStoreRelease` 会真的签名，但配置不全时它**静默产出未签名的包**，
+构建显示 SUCCESS、装的时候报 `INSTALL_PARSE_FAILED_NO_CERTIFICATES`。所以出包后必须验一次：
+
+```powershell
+& "$env:ANDROID_HOME\build-tools\36.0.0\apksigner.bat" verify --print-certs `
+    app\build\outputs\apk\store\release\app-store-release.apk
+```
+
+**本项目的实际配置（v3.2.1 起）**：四项都已配齐，keystore 文件是 `quzhi-lite-release.jks`，
+**放在项目目录之外**（不在仓库里），别名 `quzhi-lite`，RSA 2048 / SHA384withRSA，有效期至 2054-03-16。
+正式版证书 SHA-256 指纹：
+
+```
+81:7F:13:F0:56:B0:08:1F:C2:36:83:74:31:5F:BD:7C:CD:8E:0C:8B:AC:7C:2C:04:06:7E:21:EC:A5:AE:BA:E7
+```
+
+⚠️ **不要把 keystore 密码写进任何文档 / 提交**。指纹是公开信息，可以写；密码只存在
+`local.properties`（gitignore）里，另有一份 AES-256 加密备份在私有仓库 `shierpuzi/quzhi-lite-keys`。
+**丢了这把钥匙就再也无法给已装用户发更新**——只能换包名重来。
 
 ### 两个 Flavor（`store` / `dev`）
 
 `flavorDimensions += "dist"`，产物名带 flavor 前缀：
 
-| flavor | applicationId | 应用名 | 版本名 | 用途 |
-|---|---|---|---|---|
-| `store` | `com.quzhi.lite` | 趣智Lite | `3.1.0` | 原版，**不带任何凭证**（`PREFILL_*` 显式给空串） |
-| `dev` | `com.quzhi.lite.dev` | 趣智Lite·测试版 | `3.1.0-dev` | 可与官方趣智校园 App 共存；可从 `local.properties` 注入预置登录态 |
+| flavor | applicationId | 应用名 | 版本名 | 更新通道 | 用途 |
+|---|---|---|---|---|---|
+| `store` | `com.quzhi.lite` | 趣智Lite | `3.2.1` | 只看**正式版**（`DEV_CHANNEL=false`） | 原版，**不带任何凭证**（`PREFILL_*` 显式给空串）；**release 构建 + 真签名** |
+| `dev` | `com.quzhi.lite.dev` | 趣智Lite·测试版 | `3.2.1-dev` | 只看 **pre-release**（`DEV_CHANNEL=true`） | 可与官方趣智校园 App 共存；可从 `local.properties` 注入预置登录态；debug 签名 |
 
 **为什么有 dev 包**：三个 App（官方 / 原版 / 改过的）共用同一个 `loginCode`，
 任何一个登录都会把另外两个挤下线。想一边保持官方 App 登录、一边验证第三方客户端，
@@ -657,7 +686,7 @@ QZXY_PREFILL_TELEPHONE=<手机号>
 ./gradlew :app:assembleStoreDebug        # 产物：app/build/outputs/apk/store/debug/app-store-debug.apk
 ./gradlew :app:assembleDevDebug          # 产物：app/build/outputs/apk/dev/debug/app-dev-debug.apk
 
-# Release 构建（R8 混淆 + 资源压缩；无 keystore 时产物未签名）
+# Release 构建（R8 混淆 + 资源压缩；配置齐全时自动签名）
 ./gradlew :app:assembleStoreRelease
 ./gradlew :app:assembleDevRelease
 
@@ -665,26 +694,28 @@ QZXY_PREFILL_TELEPHONE=<手机号>
 ./gradlew :app:assembleStoreRelease -x lintVitalRelease
 ```
 
-> **测试规模**（2026-10-24 末）：**29 个套件 / 235 个用例 / 0 失败**。
+> **测试规模**（**v3.2.1 实测**）：**34 个套件 / 286 个用例 / 0 失败**。
 > 这个数字**会随开发变化**，以实际运行结果为准，不要当成固定指标。
-> ⚠️ 2026-10-29（#36）新增了 `DeviceVisualTest`（8 个用例钉住设备图标与模块名的映射）。
-> **实测回填：32 个套件 / 266 用例 / 0 失败 / 0 错误**（`:app:testDevDebugUnitTest --rerun-tasks`
-> 真跑过）。上面那句 29/235 是 10-24 的快照，保留作历史对照。
+> 演进：10-24 末是 29 / 235 → #36 加 `DeviceVisualTest`(8) 后 32 / 266 →
+> #37 加 `BackupCodecTest`(17) + `BackupDecodeMessageTest`(3) 后 **34 / 286**。
 > 单测全部是纯 JVM 测试（`app/src/test/java/com/quzhi/lite/`），覆盖纯逻辑层：
 > `ModeOrderPolicyTest` / `ProjectSelectionPolicyTest` / `BillMergerTest` /
 > `FavoriteStoreTest` / `SpendingAnalyticsTest` / `NotifyTextPolicyTest` /
 > `DeviceBoardPolicyTest` / `PreemptBothBillingTest` / `SkipDetailPolicyTest` /
-> `TrendMergeLinkTest` / `AppLoggerMaskingTest` / `DeviceVisualTest` 等。
+> `TrendMergeLinkTest` / `AppLoggerMaskingTest` / `DeviceVisualTest` /
+> `BackupCodecTest` / `BackupDecodeMessageTest` 等。
 
 ### APK 输出位置
+
+实测体积（v3.2.1）：
 
 ```
 app/build/outputs/apk/
 ├── store/
-│   ├── debug/app-store-debug.apk        # 原版 Debug（未混淆、不含凭证）
-│   └── release/app-store-release.apk    # 原版 Release（已混淆；无 keystore 时未签名）
+│   ├── debug/app-store-debug.apk        # 原版 Debug（未混淆、不含凭证）        21.58 MB
+│   └── release/app-store-release.apk    # 原版 Release（R8 混淆 + 资源压缩，已签名）12.77 MB
 └── dev/
-    ├── debug/app-dev-debug.apk          # dev 包（预置登录态，可与官方 App 共存）
+    ├── debug/app-dev-debug.apk          # dev 包（预置登录态，可与官方 App 共存）21.11 MB
     └── release/app-dev-release.apk
 ```
 
@@ -753,7 +784,8 @@ buildTypes {
 | **MQTT broker 硬编码不匹配** | `utils/MqttManager.kt` 硬编码 `tcp://47.107.37.60:1883`，而吹风机实测 broker 是 `39.108.147.136:1883`。后果是套餐设备的 orderNo 拿不到 MQTT 推送，只能退到 `lastOrder/byMac`（慢几秒，功能不挂） |
 | **ColorOS 流体云胶囊需用户手动开权限** | 代码无法代劳。没在系统设置 → 通知与状态栏 → 流体云里给本 App 开「实时动态」权限，就**完全没有胶囊**。已加文字兜底 + 30 秒 / 1 秒重发，胶囊本体的真机表现仍待验证。⚠️ #36 把胶囊内容改成「模块矢量图 + 短模块名」后，**仍未真机验证**——胶囊是否真的左右配平、图标是否显示，要用户自己开权限后看 |
 | **#36 按量通知的 `setLargeIcon` 可能妨碍提升** | 用户要求通知栏右侧方图也换成模块矢量图，用的是标准样式的 `Icon.createWithResource`（OPPO 禁止的是自定义 RemoteViews，这个是合法的）。但「合法」不等于「这台 ROM 一定认」。若真机发现胶囊退化成普通通知，**删掉 `showInUse` 里 `setLargeIcon(...)` 那一行即可**，其余字段都不依赖它 |
-| **无 release keystore → 已发布的 v3.1.0-dev 是 debug 签名** | `local.properties` 缺 `KEYSTORE_FILE` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD`，走「Release APK 保持未签名」分支，测试分发用 debug 签名。**不能上应用商店，也不能覆盖安装到其它签名的同包名应用上** |
+| **签名只证明同源，不证明正版** | v3.2.1 起正式版已是 **release 签名**（证书 SHA-256 `81:7F:13:F0:...:E7`，可自行 `apksigner verify --print-certs` 核对）。但别人可以用**自己的密钥**造一个同样「签名自洽」的包，所以**下载渠道仍是唯一身份凭据**。详见 [SECURITY.md](SECURITY.md) 第二节 |
+| **`assembleStoreRelease` 缺签名配置时静默产出未签名包** | 四项 `KEYSTORE_*` 缺任意一项（或 keystore 路径不存在）时，Gradle **只 warn、然后照常 SUCCESS**，产出的 APK 装不上。出包后必须跑一次 `apksigner verify --print-certs` |
 | **饮水机未实机验证** | 识别与 UI 已实现（`bigTypeId == 5`），但作者所在学校无直饮水机，实际控制流程未验证。且它在「洗衣饮水吹风」项目里却**按量计费**，不能并进套餐通道 |
 | **Gitee 镜像已置空** | `api/GithubApi.kt` 的 `GITEE_REPO = ""`，检查更新与下载都走 GitHub 直链，大陆实测约 100 KB/s。要恢复加速需在 Gitee 用同名 tag + 同名附件发版 |
 
@@ -777,6 +809,8 @@ buildTypes {
 | `/project/module/list` 用 4000 调报「没有项目权限」 | 不能靠它判断板块业务 |
 | 老收藏条目没有 `projectId` | #29 之后新增的才有。从收藏进设备页会补查一次台账，网络不通则余额退回当前板块；取消再重新收藏一次即可彻底干净 |
 | 登录页没有「忘记密码」入口 | 只有进 App 后在设置里能改。密码登录卡住时是死路（`/user/password/forget` 接口已实现，缺入口） |
+| **备份密码忘了没有救** | 加密备份包只能用那个密码打开，App 里没有后门也没有找回入口——这是设计而不是遗漏。密码请存进密码管理器 |
+| **明文备份是真明文** | 只备份收藏、且用户没勾加密时，文件里就是明文的设备列表（不含账号，这是有意选的默认值） |
 | 蓝牙水表关阀要重连一次 | 约多 1~2 秒——设备只在**新连接**里给出可结算的记录；补结算完成后需要再点一次开阀 |
 | 蓝牙水表「离线」状态未提前提示 | 缺服务端样本，判据未确认前不做判断，以免把可用设备误标为离线 |
 | 各校部署差异 | 已在多所学校被实际使用。各校接入的设备类型、BLE 广播名、MQTT 地址可能不同：多数学校装发行版即可，少数需自行改代码 |
@@ -872,7 +906,36 @@ buildTypes {
 
 ## 版本历史
 
-### v3.1.0-dev（2026-10-24/25，当前开发线）
+### v3.2.1（2026-10-29，当前版本）
+
+**首个使用真正 release 签名的正式版。** `versionCode 18` / `versionName 3.2.1`，
+正式版 `12.77 MB`（R8 + 资源压缩），dev 测试包同步 `3.2.1-dev`。
+
+**备份 / 恢复（#37）**
+
+- `data/BackupFormat.kt` / `BackupCodec.kt` / `BackupService.kt` / `BackupFileIo.kt` 四层分工：
+  格式 / 加解密 / App 状态胶水 / 文件读写，加解密是纯 JVM 所以能单测
+- **含登录凭证的备份强制加密**：PBKDF2-HMAC-SHA256 21 万次 + AES-256-GCM，
+  IV 每次随机 12 字节、salt 每次随机 16 字节。强制在**数据层**（`encode` 直接拒绝明文凭证）
+- **SAF 读写，零存储权限**：`openOutputStream(uri,"wt")` 截断，读前挡 >16MB
+- 恢复收藏**按 mac 合并**不覆盖；恢复凭证**先鉴权再落盘**（失败一个字节都不写，且要还原网络层）
+- 两个入口：设置页 `ui/BackupCards.kt`、登录页 `ui/BackupRestoreScreen.kt`
+- 单测 `BackupCodecTest`(17) + `BackupDecodeMessageTest`(3)
+
+**双更新通道（#37）**
+
+- `DEV_CHANNEL` buildConfigField（dev=true / store=false）+ `GithubApi.fetchReleases(devChannel)`
+- sealed `ReleaseResult { Ok / Failed }` 分开「网络失败」与「该通道没版本」
+- 失败结果不进缓存
+
+**签名（#37）**
+
+- 正式版改为 **release 签名**（RSA 2048 / SHA384withRSA，有效期至 2054-03-16），
+  证书 SHA-256 `81:7F:13:F0:56:B0:08:1F:C2:36:83:74:31:5F:BD:7C:CD:8E:0C:8B:AC:7C:2C:04:06:7E:21:EC:A5:AE:BA:E7`
+- keystore **不在仓库内**，AES-256 加密备份在私有仓库；密码不入库不入文档
+- ⚠️ 缺 `KEYSTORE_*` 时 Gradle 只 warn 并静默产出未签名包，出包后必须 `apksigner verify`
+
+### v3.1.0-dev（2026-10-24/25，历史开发线）
 
 **本仓库改名后的第一个开发线，也是最大的一次功能扩展。** 从「只做洗浴的热水器客户端」
 变成覆盖洗浴 / 洗衣 / 吹风 / 饮水 / 蓝牙水表的趣智校园客户端，共 33 轮改动（开发日志 #1~#33）。
@@ -936,17 +999,18 @@ buildTypes {
 
 **已知性质**
 
-- 已发布的 `v3.1.0-dev` 测试包是 **dev flavor + debug 签名**（无 release keystore），
+- 已发布的 `v3.1.0-dev` 测试包是 **dev flavor + debug 签名**（当时无 release keystore——**v3.2.1 已补齐**），
   包名 `com.quzhi.lite.dev`、`versionCode 16` / `versionName 3.1.0-dev`、**不含任何预置凭证**
 - ⚠️ 收藏、全屏操作页、两个确认弹窗、改名后的图标与文案等**多项功能只到编译 + 单测**，
   未逐一真机验证；状态见[交接文档.md](交接文档.md) 第五节
 
-### v3.1.1（已写入 CHANGELOG，尚未升版本号）
+### v3.1.1（已写入 CHANGELOG，当时未升版本号）
 
 蓝牙水表兼容性修复，来自社区 PR（`@f3ngka0` 的 #11、`@Asyreale` 的 #8 / #9）。
 
-> ⚠️ 注意：`app/build.gradle.kts` 里仍是 `versionCode 16` / `versionName "3.1.0"`，
-> 即 **v3.1.1 的内容已进代码与 [CHANGELOG.md](CHANGELOG.md)，但版本号尚未上调**。
+> 📌 历史注记：写这一节时 `app/build.gradle.kts` 里还是 `versionCode 16` / `versionName "3.1.0"`，
+> 即 **v3.1.1 的内容已进代码与 [CHANGELOG.md](CHANGELOG.md)，但当时版本号尚未上调**。
+> **后来 v3.2.0(17) 与 v3.2.1(18) 已经把这笔账补上了**，现在版本号与内容是对齐的。
 
 - **28 字节短载荷状态帧**：部分学校近期把 `0x23` 状态查询改成 28 字节短布局，
   旧代码当作「应答过短」直接丢弃 → 表现是「蓝牙连上了、通知也正常，但点开阀没反应」，
