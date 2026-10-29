@@ -25,8 +25,11 @@ android {
         applicationId = "com.quzhi.lite"
         minSdk = 26
         targetSdk = 36
-        versionCode = 16
-        versionName = "3.1.0"
+        // 2026-10-29 #36：3.1.0(16) → 3.2.0(17)。
+        // ⚠️ 必须**真的变大**：App 内「检查更新」用 ApkUpdater.isNewer() 逐段比数字，
+        //    tag 写成 v3.1.0-dev-2 之类数字不增的名字，老用户永远收不到更新提示。
+        versionCode = 17
+        versionName = "3.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
