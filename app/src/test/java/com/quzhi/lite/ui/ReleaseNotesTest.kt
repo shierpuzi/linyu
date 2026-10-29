@@ -192,4 +192,106 @@ class ReleaseNotesTest {
             out.contains("未填写更新详情")
         )
     }
+
+    // ════════════════════════════════════════════
+    //  Markdown 噪音清洗（表格 / 引用 / 链接）
+    // ════════════════════════════════════════════
+    //
+    // 这几条对应真机反馈：「可以正常看了，但是貌似不能正常渲染 markdown」。
+    // 实测四份真实说明里表格行 8~17 行、引用 3~6 行，覆盖了大半可见内容，
+    // 不处理的话界面上满屏 `| 项 | 值 |` 和 `> ⚠️`。
+
+    /** 表格数据行要变成「a · b」，而不是原样露出竖线 */
+    @Test
+    fun `表格行要转成间隔点而不是保留竖线`() {
+        val body = """
+            ### 安装说明
+
+            | 项 | 值 |
+            |---|---|
+            | 包名 | com.quzhi.lite.dev |
+            | 大小 | 21.07 MB |
+        """.trimIndent()
+
+        val out = ReleaseNotes.render(body)
+
+        assertFalse("不该残留竖线：[$out]", out.contains("|"))
+        assertTrue("应保留单元格内容：[$out]", out.contains("包名"))
+        assertTrue("应保留单元格内容：[$out]", out.contains("com.quzhi.lite.dev"))
+        assertTrue("单元格之间应用间隔点：[$out]", out.contains("包名 · com.quzhi.lite.dev"))
+    }
+
+    /** 表格分隔行 `|---|---|` 必须整行丢弃——它没有任何内容 */
+    @Test
+    fun `表格分隔行要被丢弃`() {
+        val out = ReleaseNotes.render("| 项 | 值 |\n|:---|---:|\n| a | b |")
+
+        assertFalse("不该出现分隔行残留：[$out]", out.contains("---"))
+        assertFalse("不该出现对齐冒号：[$out]", out.contains(":"))
+    }
+
+    /** 引用行的 `>` 要去掉，改用缩进表达「这是补充说明」 */
+    @Test
+    fun `引用行去掉尖括号并保留缩进`() {
+        val body = "> ⚠️ 这是测试版，使用 debug 签名。"
+
+        val out = ReleaseNotes.render(body)
+
+        assertFalse("不该残留 > ：[$out]", out.startsWith(">"))
+        assertTrue("内容要保留：[$out]", out.contains("这是测试版"))
+        assertTrue("应以缩进表达引用：[$out]", out.startsWith("  "))
+    }
+
+    /** 链接只留文字、丢掉 URL（窄屏上 URL 会占两三行且没人会去读） */
+    @Test
+    fun `链接只保留文字丢掉 URL`() {
+        val body = "详见 [更新说明](https://github.com/shierpuzi/linyu/releases) 页面。"
+
+        val out = ReleaseNotes.render(body)
+
+        assertTrue("应保留链接文字：[$out]", out.contains("更新说明"))
+        assertFalse("不该露出 URL：[$out]", out.contains("https://"))
+        assertFalse("不该残留方括号：[$out]", out.contains("["))
+        assertFalse("不该残留圆括号语法：[$out]", out.contains("]("))
+    }
+
+    /** 列表符号要保留——它是「这是一组要点」的结构感，去掉反而更难读 */
+    @Test
+    fun `列表符号要保留`() {
+        val out = ReleaseNotes.render("- 第一条\n- 第二条")
+        assertTrue("列表符号应保留：[$out]", out.contains("- 第一条"))
+    }
+
+    /**
+     * 综合回归：用贴近真实的结构跑一遍，确认三类噪音同时消失。
+     *
+     * 这条对应真机截图里那个「满屏竖线和尖括号」的观感。
+     */
+    @Test
+    fun `真实结构综合清洗`() {
+        val body = """
+            ## 趣智Lite v3.2.0-dev（测试版）
+
+            > ⚠️ 这是**测试版**，使用 debug 签名。
+
+            ### 安装说明
+
+            | 项 | 值 |
+            |---|---|
+            | 包名 | `com.quzhi.lite.dev` |
+
+            详见 [Releases](https://github.com/x/y) 页面。
+        """.trimIndent()
+
+        val out = ReleaseNotes.render(body)
+
+        assertNotPlaceholder(out)
+        assertFalse("残留竖线：[$out]", out.contains("|"))
+        assertFalse("残留引用符：[$out]", out.contains("> "))
+        assertFalse("残留加粗标记：[$out]", out.contains("**"))
+        assertFalse("残留反引号：[$out]", out.contains("`"))
+        assertFalse("残留 URL：[$out]", out.contains("https://"))
+        assertFalse("残留标题符：[$out]", out.contains("##"))
+        assertTrue("正文要点要保留：[$out]", out.contains("com.quzhi.lite.dev"))
+    }
 }

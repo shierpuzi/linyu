@@ -82,10 +82,15 @@ object ReleaseNotes {
                     out.append(stripMarkdown(title)).append('\n')
                 }
             } else if (keeping) {
-                out.append(stripMarkdown(line)).append('\n')
+                // 与回退路径共用同一个行清洗：摘录段落里同样会有表格和引用，
+                // 只有两边都清洗，界面上才不会出现「摘录路径干净、回退路径满是竖线」
+                // 这种同一份数据两种观感的情况。
+                val rendered = renderLine(line) ?: return@forEach
+                out.append(rendered).append('\n')
             }
         }
-        return out.toString().trim()
+        // ⚠️ 只 trimEnd：引用行的「行首缩进」是层级标记，trim() 会把它吃掉
+        return out.toString().trimEnd()
     }
 
     /**
@@ -104,7 +109,8 @@ object ReleaseNotes {
             .map { it.trimEnd() }
             // 分隔线 `---` 转成纯文本就是一串短横线，没意义还可能被误读成列表
             .filterNot { it.trim() == "---" || it.trim() == "***" }
-            .map { stripHeadingMarks(stripMarkdown(it)) }
+            // 表格 / 引用 / 链接 / 标题 / 强调统一在这一步清洗（与摘录路径共用同一函数）
+            .mapNotNull { renderLine(it) }
             .toList()
 
         // 去掉开头连续空行（很多 body 以空行起头）
@@ -112,28 +118,100 @@ object ReleaseNotes {
         // 去掉结尾空行：否则「刚好 18 行 + 末尾空行」会被误判成超限而平白触发截断
         val cleaned = trimmed.dropLastWhile { it.isBlank() }
 
-        if (cleaned.size <= FALLBACK_MAX_LINES) return cleaned.joinToString("\n").trim()
+        // ⚠️ 这里只能 `trimEnd()`，**不能用 `trim()`**：
+        //    引用行是靠「行首两空格缩进」表达层级的，`trim()` 会把首行的缩进吃掉，
+        //    于是引用和正文长得一模一样（单测 `引用行去掉尖括号并保留缩进` 抓到的就是这个）。
+        if (cleaned.size <= FALLBACK_MAX_LINES) return cleaned.joinToString("\n").trimEnd()
 
         val head = cleaned.take(FALLBACK_MAX_LINES).joinToString("\n").trimEnd()
         return "$head\n\n…（完整更新说明请到 Releases 页面查看）"
     }
 
     /**
-     * 去掉行首的 `#` 系列标题符，保留文字与缩进层级之外的一切。
+     * 把**一行** Markdown 变成可读纯文本。返回 null 表示这行整行丢弃。
      *
-     * 只处理**行首**：正文里出现 `#` 的情况极少，而且行首的 # 才是真标题。
+     * ## 为什么只做这几种、不做完整 Markdown 渲染
+     *
+     * 这是一条**兜底路径**：正常的 Release 说明会被 [extractHighlights] 摘走，
+     * 根本走不到这里。只有标题没写规范的老版本才落进来。
+     *
+     * 为一个低频兜底场景引入 Markdown 渲染库（几百 KB）不值，自己写完整解析器更不值。
+     * 但**什么都不做又很难看**：实测四份真实说明里，表格行 8~17 行、引用 3~6 行，
+     * 已经覆盖了大半可见内容，界面上满屏 `| 项 | 值 |` 和 `> ⚠️`。
+     *
+     * 所以只处理「噪音占比最大、且转成纯文本后语义不丢」的三种：
+     *
+     * | 语法 | 原文 | 转成 |
+     * |---|---|---|
+     * | 表格 | `\| 包名 \| com.quzhi.lite.dev \|` | `包名 · com.quzhi.lite.dev` |
+     * | 表格分隔行 | `\|:--\|:--\|` | **整行丢弃** |
+     * | 引用 | `> ⚠️ 这是测试版` | `  ⚠️ 这是测试版`（两空格缩进） |
+     * | 链接 | `[文字](https://…)` | `文字` |
+     *
+     * 强调标记（`**` / `__` / 反引号）与标题 `#` 也在这里处理，见 [stripMarkdown]。
+     *
+     * ⚠️ **不处理**：有序/无序列表符号（`-` / `1.`）。它们转成纯文本后本来就通顺，
+     * 去掉反而丢了「这是一组要点」的结构感。缩进层级也不做——纯文本看不出层级，
+     * 硬加空格只会让窄屏更挤。
+     */
+    private fun renderLine(raw: String): String? {
+        val line = raw.trimEnd()
+        val trimmed = line.trim()
+
+        // ── 表格分隔行 `|---|:--:|` 整行丢弃 ──
+        // 它只描述对齐方式，没有任何内容；留着就是一串看不懂的短横线
+        if (TABLE_SEPARATOR.matches(trimmed)) return null
+
+        // ── 表格数据行：竖线 → 间隔点 ──
+        if (trimmed.startsWith("|") && trimmed.count { it == '|' } >= 2) {
+            val cells = trimmed.trim('|').split('|').map { stripMarkdown(it).trim() }
+            // 全空的行（比如 `| | |`）没意义，丢弃
+            if (cells.all { it.isEmpty() }) return null
+            return cells.filter { it.isNotEmpty() }.joinToString(" · ")
+        }
+
+        // ── 引用行：去掉 `>`，用缩进表达「这是补充说明」──
+        if (trimmed.startsWith(">")) {
+            val content = stripMarkdown(trimmed.trimStart('>').trimStart()).trim()
+            if (content.isEmpty()) return null
+            return "  $content"
+        }
+
+        return stripMarkdown(stripHeadingMarks(line))
+    }
+
+    /**
+     * 去掉 Markdown 强调标记与链接语法。
+     *
+     * App 里是普通 `Text` 渲染（没有 Markdown 解析器），不处理的话：
+     * - `**加粗**` 会把星号原样显示
+     * - `` `反引号` `` 同上
+     * - `[文字](https://很长的url)` 会把整串 URL 露出来，在窄屏上占两三行
+     *
+     * 链接**只保留文字、丢掉 URL**：URL 对看更新日志的人没有价值，
+     * 而提示语已经指了「去 Releases 页面查看」——那是能点的地方。
+     */
+    private fun stripMarkdown(s: String): String =
+        s.replace("**", "")
+            .replace("__", "")
+            .replace("`", "")
+            // [文字](url) / [文字](url "title") → 文字
+            .replace(LINK_REGEX, "$1")
+
+    /** `[文字](目标)` 里的「文字」 */
+    private val LINK_REGEX = Regex("""\[([^\]]*)\]\([^)]*\)""")
+
+    /** `|---|:--:|` 这类表格分隔行 */
+    private val TABLE_SEPARATOR = Regex("""^\|?[\s:|-]+\|?$""")
+
+    /**
+     * 去掉行首的 `#` 系列标题符。
+     *
+     * 只处理**行首**：行首的 # 才是真标题，正文中间出现的 `#` 极罕见，
+     * 无差别删掉会把正常文字也弄坏。
      */
     private fun stripHeadingMarks(s: String): String =
         s.trimStart().trimStart('#').trimStart()
-
-    /**
-     * 去掉 Markdown 强调标记。
-     *
-     * App 里是普通 `Text` 渲染（没有 Markdown 解析器），不处理的话 `**加粗**`
-     * 会把星号原样显示出来，`反引号` 同理。
-     */
-    private fun stripMarkdown(s: String): String =
-        s.replace("**", "").replace("__", "").replace("`", "")
 
     /**
      * 去掉标题里的 `#`、emoji 和多余空白，只保留中日韩文字与 ASCII。

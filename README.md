@@ -254,6 +254,111 @@ KEY_PASSWORD=你的密钥密码
 
 ---
 
+## 📦 发布规范（维护者必读）
+
+两个包走**两条互不相交的更新通道**，Release 说明又会被 App 解析成更新日志，
+所以发版有一套必须遵守的规则。不按这套来会出现两种故障，都已在真机上发生过：
+
+| 不守规范的后果 | 现象 |
+|---|---|
+| tag 数字没有变大 | 已安装用户点「检查更新」永远显示「当前已是最新」，**收不到这次更新** |
+| Release 说明的标题没写对 | 更新日志在 App 里显示「本版本未填写更新详情」，**用户以为你没写** |
+
+### 两种包的区别
+
+| | 正式版 | 测试版 |
+|---|---|---|
+| flavor / 构建命令 | `store` / `assembleStoreRelease` | `dev` / `assembleDevDebug` |
+| 包名 | `com.quzhi.lite` | `com.quzhi.lite.dev` |
+| 版本名 | `3.x.y` | `3.x.y-dev` |
+| 签名 | **release 密钥** | debug 密钥 |
+| 更新通道 | 只看**正式版**（非 pre-release） | 只看**测试版**（pre-release） |
+| Release 是否勾 pre-release | ❌ 不勾 | ✅ 勾 |
+
+> 两者的包名和签名都不同，**无法互相覆盖安装**，但可以同时装在一台手机上。
+
+### 发版前检查清单
+
+**① 版本号必须真的变大**
+
+```kotlin
+// app/build.gradle.kts
+versionCode = 19        // 必须比上一版大，不能重复
+versionName = "3.2.2"   // dev 包会自动变成 3.2.2-dev
+```
+
+⚠️ App 的更新判断是 `ApkUpdater.isNewer()`，它把 tag **逐段比数字**。
+
+- ✅ `v3.2.2` 比 `v3.2.1` 大 → 老用户能看到更新
+- ❌ `v3.2.1-hotfix`、`v3.2.1-dev.2` 这类「数字没变大」的命名 → `[3,2,1]` 对比 `[3,2,1]` 相等，**判定为已是最新，用户收不到更新**
+- 想靠后缀递增触发更新是行不通的，只能升数字段
+
+**② Release 说明必须让标题含关键词**
+
+App 解析更新日志时，**优先**只摘录标题里含「**新增** / **功能** / **修复** / **BUG**」的段落（让日志短而聚焦）。
+
+- 有命中 → 只显示这些段落（推荐，界面干净）
+- 一个都没命中 → **回退显示全文**（所以不会空白，但会把「安装说明」「已知问题」也显示出来，还得截断）
+
+所以规范写法是：
+
+```markdown
+## 趣智Lite v3.2.2（正式版）     ← 一级标题，随便写
+
+### 本次新增与修复                ← ✅ 含「新增」，会被摘录
+...正文...
+
+### 安装说明                     ← 不会进摘录（好，本来就只给下载页看）
+### 已知问题                     ← 不会进摘录
+```
+
+**③ 两个 Release 的设置不能搞反**
+
+```powershell
+# 正式版：不勾 --prerelease（GitHub 会自动标为 Latest）
+gh release create v3.2.2  "quzhi-lite-v3.2.2.apk" --notes-file notes.md
+
+# 测试版：必须勾 --prerelease
+gh release create v3.2.2-dev "quzhi-lite-dev-v3.2.2.apk" --notes-file notes-dev.md --prerelease
+```
+
+搞反的后果：正式版被标成 pre-release → 正式包看不到它，永远显示「暂无正式版本」；
+测试版没标 → **所有正式版用户都会被提示升级到测试包**。
+
+**④ 出包后必须验签名**
+
+```powershell
+& "$env:ANDROID_HOME\build-tools\36.0.0\apksigner.bat" verify --print-certs `
+    app\build\outputs\apk\store\release\app-store-release.apk
+```
+
+指纹必须是 `81:7F:13:F0:56:B0:08:1F:C2:36:83:74:31:5F:BD:7C:CD:8E:0C:8B:AC:7C:2C:04:06:7E:21:EC:A5:AE:BA:E7`。
+缺签名配置时 Gradle **只 warn 不报错**，会静默产出装不上的未签名包。
+
+**⑤ 正式包不含预置凭证**
+
+`local.properties` 里的 `QZXY_PREFILL_*` 只在 dev flavor 生效，store flavor 显式置空。
+出包后可用 `tools/verify_apk.py` 复核：
+
+```powershell
+cd linyu; python tools\verify_apk.py
+```
+
+应当看到 store 包「✅ 干净（无凭证）」。
+
+### 常见错误对照
+
+| 错误 | 结果 | 正确的做法 |
+|---|---|---|
+| 只改了 tag、没改 `versionCode` | 用户收不到更新 | 两个都改 |
+| tag 用 `v3.2.1-fix` 这种 | `[3,2,1]` 不比 `[3,2,1]` 大，判为最新 | 用 `v3.2.2` |
+| 说明里只有「本次更新内容」标题 | 走回退全文，旧版本日志显乱 | 标题写「本次新增与修复」 |
+| 测试版忘了 `--prerelease` | 正式用户被推向测试包 | 加 `--prerelease` |
+| 正式版勾了 `--prerelease` | 正式包看不到它 | 别勾 |
+| 没验签名就发布 | 用户「解析包时出现问题」 | 每次验 |
+
+---
+
 ## ⚠️ 已知问题与限制
 
 下面这些多数受服务器或系统限制，当前无法解决。已修复的历史问题见 [CHANGELOG](docs/CHANGELOG.md)。
