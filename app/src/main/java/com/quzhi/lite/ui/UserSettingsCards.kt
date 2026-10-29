@@ -215,6 +215,48 @@ internal fun NotifyCard() {
                     // （真扣钱、0.6 元起）。这个按钮能**不花钱**就把整条链路跑一遍：
                     // 建渠道 → 走 notify() → 系统是否真的呈现。
                     //
+                    // 三个按钮的分工（**顺序 = 使用频率**，别随手调换）：
+                    // 1. 计量（ID 1001，showInUse）：热水器/洗手台/饮水机，
+                    //    正向计时 + 图形「结束使用」按钮，最常用，所以排最前
+                    // 2. 套餐倒计时（ID 1006，showModeOrderRunning）：洗衣机/吹风机，倒计时
+                    // 3. 事件类（1007）：结束提醒/失败提示这类一次性通知
+                    //
+                    // ⚠️ 计量和套餐是**两套完全不同的 Builder**，只测其中一个不代表另一个正常。
+
+                    // ── ① 按量计量的自检 ──
+                    //
+                    // 专门为「流体云胶囊长什么样」服务：这条走真实路径（同渠道、同 ID、
+                    // 同样的 Chronometer 走秒和图形按钮），所以这里看到的形态就是真用起来
+                    // 的形态。不会扣钱，也不用等开阀。
+                    var inUseProbeResult by remember { mutableStateOf<String?>(null) }
+                    TextButton(
+                        onClick = {
+                            val r = Notifier.debugProbeInUse(context)
+                            inUseProbeResult = r.fold(
+                                // ⚠️ 不能写「手动划掉即可」：这条走的是**真实路径**，
+                                //    showInUse 里 setOngoing(true)，系统根本不让划。
+                                //    清除办法只有一个——点胶囊/通知上那个圆形按钮，
+                                //    它和真实场景一样会走 ShowerWatchService → cancelInUse。
+                                onSuccess = {
+                                    "已发送，请看状态栏胶囊 / 通知栏（会一直计时，点圆形按钮清除）"
+                                },
+                                onFailure = { "发送失败：${it.message}" }
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("发送一条测试计量通知", fontSize = 14.sp, color = AppColors.Accent)
+                    }
+                    Text(
+                        inUseProbeResult
+                            ?: "不会扣钱，模拟「正在使用」那条常驻通知（流体云胶囊）",
+                        fontSize = 11.sp,
+                        color = if (inUseProbeResult?.startsWith("发送失败") == true)
+                            AppColors.Warning else AppColors.TextSecondary
+                    )
+
+                    // ── ② 套餐倒计时的自检 ──
+                    //
                     // 它发的就是真实那条套餐倒计时通知（ID_MODE_ORDER），
                     // 所以如果这里能出来、下单时出不来，问题就精确定位在
                     // 「下单后的调用时机」而不是通知本身。
@@ -238,7 +280,7 @@ internal fun NotifyCard() {
                             AppColors.Warning else AppColors.TextSecondary
                     )
 
-                    // 事件类通知的自检：和上面那条分工，验证「普通通知」的样式。
+                    // ── ③ 事件类通知的自检 ──
                     // 普通通知（结束/失败/时间到）走标准样式，不进流体云——
                     // 用户要能零成本确认这两类都长得对。
                     var eventProbeResult by remember { mutableStateOf<String?>(null) }

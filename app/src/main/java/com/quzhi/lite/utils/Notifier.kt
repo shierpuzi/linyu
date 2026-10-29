@@ -290,11 +290,29 @@ object Notifier {
         val n = NotificationCompat.Builder(context, CHANNEL_IN_USE)
             // 胶囊左侧那个图标 = 当前模块的矢量图，不再是一律水滴
             .setSmallIcon(iconRes)
-            // ⚠️ 大图标（通知栏右侧那个方图）：用户原话「下面两个图标换成当前模块的 xml 矢量图」。
-            //    这是**标准样式的 setLargeIcon**，不是自定义 RemoteViews——OPPO 流体云
-            //    准入条件禁止的是后者。传的是矢量资源 id，系统自己按尺寸缩放。
-            //    若真机上发现它导致流体云不提升（胶囊退化成普通通知），
-            //    **删掉下面这一行即可**，其余字段都不依赖它。
+            // 大图标（展开态卡片左边那个大图）= 同一个模块的矢量图。
+            // 用户原话「两个图标换成当前模块的 xml 矢量图」。
+            // 这是**标准样式的 setLargeIcon**，不是自定义 RemoteViews——OPPO 流体云
+            // 准入条件禁止的是后者。传矢量资源 id，系统自己按卡片尺寸缩放。
+            //
+            // ## 为什么**故意**不用定尺寸位图（Icon.createWithBitmap + Canvas 渲染）
+            //
+            // 2026-10-29 第一轮真机：大图标与右侧圆形按钮「大小不一致」的观感，
+            // 根因不在图标本身——那张图是**文本按钮**排版（见 stopAction 的注释表格），
+            // 两行网格根本没生成。改成图形按钮后排版整体换一套，尺寸得重新看。
+            //
+            // 而换成位图会有两个真实的坏处：
+            // 1. **丢主题染色**：ic_device_* 是单色 #FF000000 矢量图，现在由 SystemUI
+            //    按卡片明暗染色——2026-10-29 真机截图里，深色卡片上那两个图标是**白色**的，
+            //    而源文件明明是黑色，说明染色确实发生了。
+            //    一旦烘焙成位图就没这个通道：烘焙成黑色在深色卡片上直接看不见，
+            //    烘焙成白色在浅色系统主题下又看不见。
+            // 2. **对尺寸没用**：Android 通知模板把大图标塞进固定尺寸的 ImageView，
+            //    矢量和位图都会被缩放到那个槽位，intrinsic 尺寸不影响最终大小。
+            //    真正决定「大图标 vs 圆形按钮」大小和 y 轴对齐的是 ColorOS 的卡片布局。
+            //
+            // 所以这里保持最简实现。真机上如果确实要微调，唯一有意义的旋钮是
+            // **给图标自身加内边距**（让图形占比变小），而不是改这段的位图尺寸。
             .setLargeIcon(
                 android.graphics.drawable.Icon.createWithResource(context, iconRes)
             )
@@ -728,6 +746,64 @@ object Notifier {
     }
 
     /**
+     * **自检**：不花钱发一条「按量计费」常驻通知（ID 1001，[showInUse] 那条）。
+     *
+     * ## 为什么单独要这一条
+     *
+     * [debugProbeModeOrder] 发的是**套餐倒计时**（ID 1006，洗衣机/吹风机那种倒数），
+     * 而按量那条（热水器/洗手台/饮水机，正向计时 + 「结束使用」按钮）是完全另一套
+     * Builder。2026-10-29 改完图形按钮和模块矢量图后，这条在设置页**没有任何零成本入口**——
+     * 想看它长什么样就只能真去开一次水（真扣钱）。所以补这个探针。
+     *
+     * 它走的是真实路径：同渠道 [CHANNEL_IN_USE]、同 ID [ID_IN_USE]、同样的
+     * Chronometer 与 [stopAction] 图形按钮，所以「这里看到的」就是「真用起来看到的」。
+     *
+     * ⚠️ **不起前台服务**：自检只要通知本身，[showInUse] 内部已经 `notify()` 了。
+     * 真起服务会去连 BLE / 轮询订单，反而危险。
+     *
+     * ⚠️ 这条通知**不会自己消失**（`setOngoing(true)`，模拟真实常驻），
+     * 用户看完手动划掉；再点一次按钮就是原地更新同一条。
+     */
+    fun debugProbeInUse(context: Context): Result<android.app.Notification> = runCatching {
+        AppLogger.i("通知自检（按量计量）：开始")
+        ensureChannels(context)
+
+        if (!PrefsHelper.notifyEnabled) {
+            throw IllegalStateException("通知总开关是关的（设置-通知）")
+        }
+        // ⚠️ 这里必须查，不能让 showInUse 静默返回 minimal：
+        //    `notifyInUse` 关着时 showInUse 会给一条「趣智Lite」占位通知（那是给
+        //    startForeground 兜底的），用户点完自检只会看到一条空通知，
+        //    会以为「功能坏了」而不是「开关没开」。
+        if (!PrefsHelper.notifyInUse) {
+            throw IllegalStateException("「用水状态通知」开关是关的，去设置里打开再试")
+        }
+        if (!canNotify(context)) {
+            throw IllegalStateException("系统不允许本 App 通知，去系统设置里开")
+        }
+
+        // 🚰 = 饮水机。挑这个而不是热水器，是因为饮水机的图标（ic_device_faucet）
+        // 和默认兜底的淋浴图标明显不同——这样一眼就能确认「模块矢量图真的传到位了」，
+        // 万一 emoji 没传到、兜底成热水器，肉眼看得出差别。
+        val emoji = "🚰"
+        val n = showInUse(
+            context,
+            snCode = "DEBUG_PROBE_IN_USE",
+            deviceName = "通知自检设备",
+            // 从「现在」开始计时：用户要看的就是右侧那个 00:00 起跳的正计时，
+            // 传过去的时刻会让它一上来就显示「已用 N 分钟」。
+            startedAtMs = System.currentTimeMillis(),
+            emoji = emoji
+        )
+        AppLogger.i(
+            "通知自检（按量计量）：已发出 id=$ID_IN_USE，渠道=$CHANNEL_IN_USE，" +
+                "emoji=$emoji → 模块名=${DeviceVisual.moduleName(emoji)}，" +
+                "小图标=${DeviceVisual.iconRes(emoji)}"
+        )
+        n
+    }
+
+    /**
      * **自检**：不花钱发一条套餐倒计时通知，用来确认通知链路是否正常。
      *
      * ## 为什么需要
@@ -1021,7 +1097,39 @@ object Notifier {
         )
     }
 
-    /** 「结束使用」按钮：把动作回传给正在跑的 ShowerWatchService */
+    /**
+     * 「结束使用」按钮：把动作回传给正在跑的 ShowerWatchService。
+     *
+     * ## ⚠️ 标题必须是 null —— 这是「图形按钮」，不是「文本按钮」（2026-10-29 真机定案）
+     *
+     * OPPO 流体云文档（open.oppomobile.com/documentation/page/info?id=12658）原文：
+     * > 按钮支持**文本按钮和图形按钮**，开发者只能选用其中一种，图形按钮最多支持显示 2 个
+     *
+     * 也就是说这两种是**互斥的两套排版**，区分依据就是 action 有没有文字标题：
+     *
+     * | 标题 | ColorOS 渲染 | 真机实测（RMX3888 / Android 16 / ColorOS 16） |
+     * |---|---|---|
+     * | `"结束使用"` | **文本按钮**：卡片底部一条整行宽的胶囊 | 2026-10-29 就是这个：三行列表，左大图 + 中标题/时间 + 右小图 + 底部整行按钮 |
+     * | `null` | **图形按钮**：右侧一个圆形按钮，里面画 action 图标 | 目标形态（用户给的图一） |
+     *
+     * 用户要的是图一那种两行网格（第一行 小图标+模块名 / 大号时间，第二行 大图 / 红色圆形按钮），
+     * 所以这里**必须传 null**。⚠️ 别好心把文字加回去——它不会在图形按钮上显示，
+     * 只会把整张卡片退回文本按钮排版，「胶囊不对称」的问题就复发了。
+     *
+     * ## 无障碍
+     *
+     * 图形按钮没有可见文字，`NotificationCompat.Action.Builder` 在 androidx 1.12 里
+     * **没有** setContentDescription（平台侧也没有），只能退而求其次：
+     * 1. 标题本身给 null 是**内容**问题，被读屏念出来的是图标资源的 contentDescription——
+     *    矢量图资源没有，所以读屏对这颗按钮基本说不出名字；
+     * 2. 补偿办法是把语义留在**能读的地方**：正文里的「正在使用 · 已用 N 分钟」+
+     *    通知本身的标题（模块名），用户听到通知就知道发生了什么；
+     * 3. `setSemanticAction` 在这里没有对应语义值（SEMANTIC_ACTION_NONE 是唯一选项），
+     *    加了也只是噪音，所以不加。
+     *
+     * 真机上如果发现 ColorOS 不吃图形按钮（还是渲染成文本按钮），说明这台 ROM 的
+     * SystemUI 只实现了文本按钮分支——那不是我们参数写错了，别再去调标题。
+     */
     private fun stopAction(context: Context, snCode: String): NotificationCompat.Action {
         val intent = Intent(context, com.quzhi.lite.service.ShowerWatchService::class.java).apply {
             action = ACTION_STOP_SHOWER
@@ -1032,8 +1140,16 @@ object Notifier {
             context, PrefsHelper.notifyRequestCode(snCode), intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        // ⚠️ 用带 Context 的 IconCompat 重载，不要用 `Action.Builder(资源 id, ...)`：
+        //    那个重载内部走 `IconCompat.createWithResource(null, "", id)`，包里没有包名，
+        //    图标要跨进程交给 SystemUI 解析，空包名在部分 ROM 上会解析不到。
+        //    带 Context 的版本会把本应用包名一起带上，SystemUI 才能把矢量图取出来。
         return NotificationCompat.Action.Builder(
-            R.drawable.ic_widget_stop, "结束使用", pi
+            androidx.core.graphics.drawable.IconCompat.createWithResource(
+                context, R.drawable.ic_notify_stop_filled
+            ),
+            null,        // ← 见上面注释：图形按钮 = 无标题。这一行就是「圆形按钮」的开关
+            pi
         ).build()
     }
 

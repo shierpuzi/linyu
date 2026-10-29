@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  通知「结束使用」**图形按钮**里的那个方块：白色、实心、圆角。
+
+  为什么不复用 ic_widget_stop：
+  · 那个是**描边空心**方框（strokeWidth 2.4 + fill 透明），是给桌面小组件的
+    「关」按钮做线性风格用的，在红色圆形底上看着不像「停止」；
+  · 它被 3 个小组件布局直接引用（widget_linyu_1x1 / 2x2 / 2x4），
+    改它等于把小组件一起改了——那是另一个功能的视觉，不该被通知需求带跑。
+  所以这里**新建一个**，两者互不影响。
+
+  形状：24dp 画布里居中的 14x14 实心圆角矩形（四角 r=3），
+  对应流体云圆形按钮内那枚「白色实心圆角方块」。
+  按图一量：方块边长约占红色圆的 36%，圆角约占边长的 20% → 14 * 0.2 ≈ 3。
+  ⚠️ 颜色写死 #FFFFFFFF 而不是靠 tint：图形按钮由 SystemUI 画，
+    它不一定给我们的 action 图标套 tint，写白最可控。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M8,5 L16,5 A3,3 0 0,1 19,8 L19,16 A3,3 0 0,1 16,19 L8,19 A3,3 0 0,1 5,16 L5,8 A3,3 0 0,1 8,5 Z"
+        android:fillColor="#FFFFFFFF" />
+</vector>
