@@ -15,6 +15,7 @@ import com.quzhi.lite.data.ShowerController
 import com.quzhi.lite.model.CachedBill
 import com.quzhi.lite.model.CachedDevice
 import com.quzhi.lite.model.DeviceInfo
+import com.quzhi.lite.utils.DeviceVisual
 import com.quzhi.lite.utils.PrefsHelper
 import com.quzhi.lite.utils.ScanPermission
 import com.quzhi.lite.utils.MoneyFormat
@@ -702,18 +703,13 @@ object WidgetRenderer {
      * （美术统一后 emoji 只作为数据层的取值存在）。这里要把 emoji 字符串翻译成
      * `ic_device_*` 资源 id，再交给 `setImageViewResource`。
      *
-     * 映射必须和 `ui/DeviceGlyph.deviceIconRes` **保持一致**，否则同一台设备在
-     * App 里和桌面上会显示成两个图标。改一边记得改另一边。
+     * 这层映射**不在这里写**：唯一出处是 `utils/DeviceVisual.iconRes`，
+     * App 内的 `ui/DeviceGlyph.deviceIconRes` 也转发到它。以前这里和那边各有一份
+     * `when`，改一边漏另一边就会「同一台设备在 App 里是洗衣机、桌面上是热水器」。
+     * 要加新设备类型，只改 DeviceVisual 一处。
      */
     private fun setDeviceIcon(views: RemoteViews, viewId: Int, emoji: String?) {
-        val res = when (emoji) {
-            "🪥" -> R.drawable.ic_device_sink
-            "🧺" -> R.drawable.ic_device_washer
-            "💨" -> R.drawable.ic_device_dryer
-            "♨️", "❄️", "🚰" -> R.drawable.ic_device_faucet
-            else -> R.drawable.ic_device_shower
-        }
-        views.setImageViewResource(viewId, res)
+        views.setImageViewResource(viewId, DeviceVisual.iconRes(emoji))
     }
 
     /** 早期版本写进去的是「热水器 / 洗手台 / 饮水机」这种简写，认出来就用 emoji 重推一遍 */

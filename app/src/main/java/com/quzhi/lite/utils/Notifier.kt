@@ -246,12 +246,35 @@ object Notifier {
      *
      * **即使 [PrefsHelper.notifyInUse] 关着也照样发**，只是换到静默渠道——
      * 前台服务没有通知就起不来，而它是自动关停的唯一保障。见渠道创建的注释。
+     *
+     * ## 标题为什么只剩模块名（2026-10-29 改）
+     *
+     * 以前是「正在使用 · 某小区 3号楼南 320房」。流体云胶囊左边固定画小图标、
+     * 右边塞这一长串，结果是右侧被截断、左右极不配平（用户截图的原话）。
+     * 胶囊单侧文本按 OPPO 规范必须精简，所以拆成三份：
+     *
+     * | 位置 | 内容 | 谁渲染 |
+     * |---|---|---|
+     * | 小图标 | 当前模块的 `ic_device_*` 单色矢量图 | 系统（会染白，所以只能用单色图） |
+     * | 标题 | [DeviceVisual.moduleName]：饮水机 / 洗衣机 / 热水器（2 字） | 系统 |
+     * | 正文 | 「正在使用 · 已用 N 分钟」 | 系统（不支持胶囊的 ROM 靠它兜底） |
+     * | 右侧时间 | 系统 Chronometer，`setWhen(startAt)` 自己走秒 | 系统 |
+     *
+     * ⚠️ 设备名**从文案里去掉了**：一台设备在用时它是冗余信息（用户刚从那个页面出来），
+     * 多台设备共用一个通知位置时走 [showInUseSummary]。参数保留是为了不动调用方签名
+     * （服务那边本来就拿着 `deviceName`），将来若要恢复成带设备名的标题也不用改调用方。
+     *
+     * @param deviceName 现仅占位，不再进通知文案（见上）
+     * @param emoji 当前模块的 emoji（`ActiveOrder.deviceEmoji` / `PrefsHelper.lastDeviceEmoji`），
+     *        交给 [DeviceVisual] 映射成图标与模块名；传 null 兜底成热水器。
+     * @param nowMs 当前时刻，测试可注入；生产走默认值。
      */
     fun showInUse(
         context: Context,
         snCode: String,
         deviceName: String,
         startedAtMs: Long,
+        emoji: String? = null,
         nowMs: Long = System.currentTimeMillis()
     ): android.app.Notification {
         ensureChannels(context)
@@ -263,13 +286,27 @@ object Notifier {
 
         val startAt = if (startedAtMs > 0) startedAtMs else nowMs
         val elapsedSec = (((nowMs - startAt) / 1000L).coerceAtLeast(0L)).toInt()
+        val iconRes = DeviceVisual.iconRes(emoji)
         val n = NotificationCompat.Builder(context, CHANNEL_IN_USE)
-            .setSmallIcon(R.drawable.ic_notify_shower)
-            .setContentTitle("正在使用 · ${shortName(deviceName)}")
-            // 文字兜底：按**分钟**，不精确到秒（理由见 NotifyTextPolicy.REFRESH_INTERVAL_MS）
-            // 胶囊由系统渲染，这里只是给不支持流体云的 ROM 一个大致进度
-            .setContentText(NotifyTextPolicy.elapsedLine(elapsedSec))
-            .setStyle(NotificationCompat.BigTextStyle().bigText(NotifyTextPolicy.elapsedLine(elapsedSec)))
+            // 胶囊左侧那个图标 = 当前模块的矢量图，不再是一律水滴
+            .setSmallIcon(iconRes)
+            // ⚠️ 大图标（通知栏右侧那个方图）：用户原话「下面两个图标换成当前模块的 xml 矢量图」。
+            //    这是**标准样式的 setLargeIcon**，不是自定义 RemoteViews——OPPO 流体云
+            //    准入条件禁止的是后者。传的是矢量资源 id，系统自己按尺寸缩放。
+            //    若真机上发现它导致流体云不提升（胶囊退化成普通通知），
+            //    **删掉下面这一行即可**，其余字段都不依赖它。
+            .setLargeIcon(
+                android.graphics.drawable.Icon.createWithResource(context, iconRes)
+            )
+            // 胶囊左侧文字 = 短模块名。别改回「正在使用 · 设备名」，那段见上面的表格说明
+            .setContentTitle(DeviceVisual.moduleName(emoji))
+            // 展开态副文案：被标题精简掉的「正在使用」放这里。
+            // 时间按**分钟**、不精确到秒（理由见 NotifyTextPolicy.REFRESH_INTERVAL_MS）
+            .setContentText("正在使用 · " + NotifyTextPolicy.elapsedLine(elapsedSec))
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .bigText("正在使用 · " + NotifyTextPolicy.elapsedLine(elapsedSec))
+            )
             // Chronometer 由系统自己走秒，不需要我们每秒刷新通知
             .setUsesChronometer(true)
             .setWhen(startAt)
@@ -280,8 +317,13 @@ object Notifier {
             // 点它就是想回使用页看当前状态，不是回首页
             .setContentIntent(openApp(context, tab = 0, showShower = true))
             .addAction(stopAction(context, snCode))
-            // 正向计时同理：不传 chipText，让系统渲染「已用 N 分钟」
-            // （传了会盖掉系统倒计时，变成静态串）
+            // ⚠️ 这里**故意没有「暂停」按钮**，不是漏了。
+            //    后端没有 pause 接口：按量计费只有 closeOrder，一调就真结束并结算；
+            //    套餐设备连停止接口都没有。放个点不动的按钮比没有更糟——
+            //    用户会以为水停了，其实还在计费。
+            //
+            // 正向计时：不传 chipText，让系统用 Chronometer 自己走秒。
+            // （传了会写进 shortCriticalText，把走秒盖成静态串，见 requestLiveUpdate 的优先级说明）
             .requestLiveUpdate()
             .build()
 
@@ -313,11 +355,21 @@ object Notifier {
      *
      * 有它是因为停止流程被搬到了服务里——先挂上这条，服务才是前台服务；
      * 结算完再换成带金额的结束通知。
+     *
+     * 小图标跟着当前模块走（不然点「结束使用」后胶囊图标会从饮水机跳回水滴，
+     * 视觉上像是换了台设备）。标题仍是完整设备名：这条只在结算那一两秒出现，
+     * 不会进流体云胶囊，也不存在被截断的问题。
+     *
+     * @param emoji 当前模块的 emoji，见 [DeviceVisual]；传 null 兜底成热水器。
      */
-    fun showStopping(context: Context, deviceName: String): android.app.Notification {
+    fun showStopping(
+        context: Context,
+        deviceName: String,
+        emoji: String? = null
+    ): android.app.Notification {
         ensureChannels(context)
         val n = NotificationCompat.Builder(context, CHANNEL_IN_USE)
-            .setSmallIcon(R.drawable.ic_notify_shower)
+            .setSmallIcon(DeviceVisual.iconRes(emoji))
             .setContentTitle("正在结束 · $deviceName")
             .setContentText("确认关阀并结算中…")
             .setOngoing(true)
@@ -350,6 +402,10 @@ object Notifier {
      * | 渠道不得 `IMPORTANCE_MIN` | [ensureChannels]（DEFAULT） |
      * | 用 `EXTRA_REQUEST_PROMOTED_ONGOING` 请求提升 | **本函数** |
      * | 状态栏胶囊文本 `setShortCriticalText` | **本函数** |
+     *
+     * ⚠️ 注意「标准样式」禁的是 `setCustomContentView`（自绘 RemoteViews），
+     * **不禁 `setLargeIcon` / `setStyle(BigTextStyle)`** —— 后者是系统自己渲染的标准件。
+     * 所以 [showInUse] 里传模块矢量图当 largeIcon 是合规的。
      *
      * ## 为什么用 extras 字符串键，而不是 `setRequestPromotedOngoing()`
      *
@@ -435,6 +491,11 @@ object Notifier {
      * @param endAtMs 套餐**结束时刻**的绝对墙钟时间戳。
      *        ⚠️ 传绝对时刻而不是「总时长」，是为了让重发时倒计时**不会重置**——
      *        每次重发都按 `剩余 = endAt - now` 算，用户看到的就是连续倒数。
+     * @param emoji 当前模块的 emoji（洗衣机 🧺 / 吹风机 💨），只用来换小图标。
+     *        ⚠️ **只换图标，别顺手改别的**：标题/正文/chipText/timeoutAfter 这套
+     *        套餐样式用户已经确认满意，2026-10-29 只加了这一处。
+     *        另外——套餐设备**没有停止接口**（下单即扣全款、不可退），所以这条
+     *        永远只有一个「查看」入口，不像按量那条有「结束使用」。
      */
     fun showModeOrderRunning(
         context: Context,
@@ -442,6 +503,7 @@ object Notifier {
         modeName: String,
         endAtMs: Long,
         priceYuan: String,
+        emoji: String? = null,
         nowMs: Long = System.currentTimeMillis()
     ): android.app.Notification? {
         ensureChannels(context)
@@ -461,7 +523,8 @@ object Notifier {
         // 挂了 17 分钟，Chronometer 一直往下走变成负数。
         val lingerSec = 60
         val n = NotificationCompat.Builder(context, CHANNEL_MODE_ORDER)
-            .setSmallIcon(R.drawable.ic_notify_shower)
+            // 只换图标：一条通知里最能区分「这是洗衣机还是吹风机」的就是它
+            .setSmallIcon(DeviceVisual.iconRes(emoji))
             .setContentTitle("$modeName · ${shortName(deviceName)}")
             // 正文 = 金额 + **文字剩余时间**（兜底，见上面的注释）
             .setContentText("¥$priceYuan · ${NotifyTextPolicy.remainingLine(remainingSec)} · 到点自动结束")
@@ -557,15 +620,22 @@ object Notifier {
      *
      * ⚠️ 幂等：重复调用只会重置计时节流，不会堆出多个 Handler。
      *
+     * ⚠️ **emoji 必须一路透传**（2026-10-29 补）：这个循环每次重发都重新
+     * `showModeOrderRunning(...)`，如果这里不接 emoji，第一次自刷新（30 秒后）
+     * 小图标就悄悄退回默认热水器，而且全程无报错、只有肉眼能看出来。
+     * 调用方只在开始/强制时进来这一次，后面几十次都是这个 Runnable 发的。
+     *
      * @param endAtMs 结束的绝对时刻
      * @param deviceName / [modeName] / [priceYuan] 重发时要用的文案
+     * @param emoji 当前模块的 emoji，只影响小图标；null 兜底热水器
      */
     fun startModeOrderAutoRefresh(
         context: Context,
         deviceName: String,
         modeName: String,
         endAtMs: Long,
-        priceYuan: String
+        priceYuan: String,
+        emoji: String? = null
     ) {
         stopModeOrderAutoRefresh()
         val app = context.applicationContext
@@ -595,6 +665,7 @@ object Notifier {
                     modeName = modeName,
                     endAtMs = endAtMs,
                     priceYuan = priceYuan,
+                    emoji = emoji,
                     nowMs = now
                 )
                 // 动态间隔：前段 30 秒（省电），最后 2 分钟 1 秒（秒级文本要准）
@@ -687,7 +758,11 @@ object Notifier {
             deviceName = "通知自检设备",
             modeName = "测试套餐",
             endAtMs = endAt,
-            priceYuan = "0.00"
+            priceYuan = "0.00",
+            // 自检没有真实设备，emoji 传 null（兜底热水器图标）。这里**显式写出 null**
+            // 而不是靠默认值省略：读代码的人才知道「这是刻意没有设备类型」，
+            // 不是漏传。
+            emoji = null
         )
         if (n == null) throw IllegalStateException("showModeOrderRunning 返回 null")
         // ⚠️ 必须启自动刷新：否则胶囊永远停在「3:00」、正文停在「剩余 3 分 0 秒」，
@@ -698,7 +773,8 @@ object Notifier {
             deviceName = "通知自检设备",
             modeName = "测试套餐",
             endAtMs = endAt,
-            priceYuan = "0.00"
+            priceYuan = "0.00",
+            emoji = null
         )
         AppLogger.i("通知自检：已发出 id=$ID_MODE_ORDER，渠道=$CHANNEL_MODE_ORDER，已启自动刷新")
         n

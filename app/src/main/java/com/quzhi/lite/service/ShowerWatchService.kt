@@ -81,7 +81,7 @@ class ShowerWatchService : Service() {
             finishingCount.incrementAndGet()
             watchJobs.remove(sn)?.cancel()
             // 先挂前台通知：用 startForegroundService 起的服务，5 秒内不挂就会被系统崩掉
-            attachForeground(Notifier.showStopping(this, deviceNameFor(sn)))
+            attachForeground(Notifier.showStopping(this, deviceNameFor(sn), deviceEmojiFor(sn)))
             scope.launch {
                 try {
                     doFinish(sn)
@@ -398,19 +398,30 @@ class ShowerWatchService : Service() {
                 this,
                 PrefsHelper.lastDeviceSnCode,
                 PrefsHelper.lastDeviceName.ifEmpty { "热水器" },
-                PrefsHelper.getStartedAt(PrefsHelper.lastDeviceSnCode)
+                PrefsHelper.getStartedAt(PrefsHelper.lastDeviceSnCode),
+                // 订单丢了只剩 Prefs，设备类型也只能取「上次那台」的 emoji（和上面的名字同源）
+                PrefsHelper.lastDeviceEmoji
             )
         return Notifier.showInUse(
             this,
             order.snCode,
             order.deviceName.ifEmpty { "热水器" },
-            PrefsHelper.getStartedAt(order.snCode)
+            PrefsHelper.getStartedAt(order.snCode),
+            // 订单里存着开阀时的设备类型，比 Prefs 可靠（Prefs 可能已被后一次开阀覆盖）
+            order.deviceEmoji
         )
     }
 
     private fun deviceNameFor(snCode: String): String =
         ShowerController.activeOrderFor(snCode)?.deviceName?.takeIf { it.isNotEmpty() }
             ?: PrefsHelper.lastDeviceName.ifEmpty { "热水器" }
+
+    /**
+     * 和 [deviceNameFor] 拿**同一个来源**：先活跃订单、再退回「上次设备」。
+     * 名字和图标必须成对取自同一处，否则 Prefs 已被别的设备覆盖时会「名字是洗衣机、图标是热水器」。
+     */
+    private fun deviceEmojiFor(snCode: String): String =
+        ShowerController.activeOrderFor(snCode)?.deviceEmoji ?: PrefsHelper.lastDeviceEmoji
 
     private fun ensureInit() {
         if (!PrefsHelper.isInitialized) PrefsHelper.init(applicationContext)

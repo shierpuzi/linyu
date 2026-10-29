@@ -821,7 +821,9 @@ class MainViewModel : ViewModel() {
             deviceName = dev.displayName,
             modeName = modeNameFor(p),
             endAtMs = endAtMs,
-            priceYuan = ModeOrderPolicy.formatPrice(p.modeMoneyMilli)
+            priceYuan = ModeOrderPolicy.formatPrice(p.modeMoneyMilli),
+            // 套餐下单时手上就有 DeviceInfo，直接用它的类型（洗衣/吹风的模块图标靠这个区分）
+            emoji = dev.typeEmoji
         )
         if (sent == null) {
             AppLogger.w("套餐倒计时通知未发出：showModeOrderRunning 返回 null")
@@ -843,7 +845,9 @@ class MainViewModel : ViewModel() {
                     deviceName = dev.displayName,
                     modeName = modeNameFor(p),
                     endAtMs = endAtMs,
-                    priceYuan = ModeOrderPolicy.formatPrice(p.modeMoneyMilli)
+                    priceYuan = ModeOrderPolicy.formatPrice(p.modeMoneyMilli),
+                    // ⚠️ 必须透传：自刷新循环每 30 秒重发一次通知，漏了这行图标会退回热水器
+                    emoji = dev.typeEmoji
                 )
             }
         }
@@ -2230,7 +2234,7 @@ class MainViewModel : ViewModel() {
         isStopping = true
         // 立刻把通知切成「正在结束」。关阀确认要轮询最多 5 秒，
         // 不切的话用户点完还得盯着「正在使用 · 秒数还在走」干等。
-        appContext?.let { Notifier.showStopping(it, lastDeviceName.ifEmpty { "热水器" }) }
+        appContext?.let { Notifier.showStopping(it, lastDeviceName.ifEmpty { "热水器" }, lastDeviceEmoji) }
         sessionScope().launch {
             try {
                 // ⚠️ 同开阀：关阀也必须在**设备所属板块**下执行。
@@ -2361,7 +2365,7 @@ class MainViewModel : ViewModel() {
             return
         }
         isStopping = true
-        appContext?.let { Notifier.showStopping(it, lastDeviceName.ifEmpty { "热水器" }) }
+        appContext?.let { Notifier.showStopping(it, lastDeviceName.ifEmpty { "热水器" }, lastDeviceEmoji) }
         sessionScope().launch {
             // MAC 优先取活跃订单里存的（就是开阀时用的那个），丢了再回落
             val mac = (ShowerController.activeOrderFor(snCode)?.deviceMac ?: PrefsHelper.lastDeviceMac)
@@ -2441,7 +2445,7 @@ class MainViewModel : ViewModel() {
         }
 
         isStopping = true
-        appContext?.let { Notifier.showStopping(it, lastDeviceName.ifEmpty { "热水器" }) }
+        appContext?.let { Notifier.showStopping(it, lastDeviceName.ifEmpty { "热水器" }, lastDeviceEmoji) }
 
         sessionScope().launch {
             bleProgress = "正在关闭设备…"

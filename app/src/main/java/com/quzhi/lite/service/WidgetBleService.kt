@@ -66,7 +66,12 @@ class WidgetBleService : Service() {
 
         // ⚠️ startForegroundService 起的服务，5 秒内必须挂前台通知；否则被系统直接杀。
         // 挂完再按用户的通知开关决定要不要摘掉（同 ShowerWatchService 的做法）。
-        startForeground(Notifier.ID_IN_USE, Notifier.showStopping(this, deviceName(sn)))
+        startForeground(
+            Notifier.ID_IN_USE,
+            // 这里手上只有 snCode、没有 DeviceInfo（设备查询是网络请求，5 秒内必须挂上
+            // 前台通知，等不起），所以设备类型只能取「上次那台」的 emoji，和 deviceName(sn) 同源。
+            Notifier.showStopping(this, deviceName(sn), PrefsHelper.lastDeviceEmoji)
+        )
         if (!PrefsHelper.notifyEnabled || !PrefsHelper.notifyInUse) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         }
@@ -142,14 +147,14 @@ class WidgetBleService : Service() {
                 PrefsHelper.lastDeviceSnCode = snCode
                 PrefsHelper.lastDeviceMac = mac
                 AppLogger.i("小组件蓝牙开阀成功 $snCode")
-                Notifier.showInUse(this, snCode, device.displayName, System.currentTimeMillis())
+                Notifier.showInUse(this, snCode, device.displayName, System.currentTimeMillis(), device.typeEmoji)
                 ShowerWatchService.start(this, snCode)
             }
             is BleShowerController.OpenOutcome.Resumed -> {
                 PrefsHelper.bleSessionJson = gson.toJson(outcome.session)
                 PrefsHelper.markBleDevice(snCode)
                 AppLogger.i("小组件蓝牙恢复用水 $snCode")
-                Notifier.showInUse(this, snCode, device.displayName, PrefsHelper.getStartedAt(snCode))
+                Notifier.showInUse(this, snCode, device.displayName, PrefsHelper.getStartedAt(snCode), device.typeEmoji)
                 ShowerWatchService.start(this, snCode)
             }
             // 已补结算上一笔遗留账单——提示用户重新点一次开阀
@@ -163,7 +168,6 @@ class WidgetBleService : Service() {
                 Notifier.showOpenFailed(this, name, outcome.message)
             is BleShowerController.OpenOutcome.Unconfirmed ->
                 Notifier.showOpenFailed(this, name, outcome.message)
-            null -> Notifier.showOpenFailed(this, name, "蓝牙开阀失败，请重试")
         }
     }
 

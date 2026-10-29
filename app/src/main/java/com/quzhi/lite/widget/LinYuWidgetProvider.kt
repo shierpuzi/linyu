@@ -282,7 +282,9 @@ open class LinYuWidgetProvider : AppWidgetProvider() {
                         context,
                         snCode,
                         PrefsHelper.lastDeviceName.ifEmpty { "热水器" },
-                        PrefsHelper.getStartedAt(snCode)
+                        PrefsHelper.getStartedAt(snCode),
+                        // 小组件只带 snCode，手上没有 DeviceInfo，用 Prefs 里「上次那台」的类型兜底
+                        PrefsHelper.lastDeviceEmoji
                     )
                     // 交给前台服务持续盯着：超时自动关停、被外部关闭，都要能立刻发现
                     ShowerWatchService.start(context, snCode)

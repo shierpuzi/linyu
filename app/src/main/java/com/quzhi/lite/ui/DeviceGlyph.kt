@@ -10,7 +10,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.quzhi.lite.R
+import com.quzhi.lite.utils.DeviceVisual
 
 /**
  * 设备 emoji → 图标资源。
@@ -29,16 +29,15 @@ import com.quzhi.lite.R
  * 以前饮水机那几个没有矢量图，会和别的设备图标混在同一列里。
  * 现在每种设备都有 `ic_device_*`，所以本函数**不再返回 null**：
  * 未知值兜底给热水器图标，至少显示成一台设备，而不是空白或彩色 emoji。
+ *
+ * ## ⚠️ 映射不在这里写
+ *
+ * emoji → 图标的**唯一出处是 [DeviceVisual.iconRes]**（小组件、通知也都转它）。
+ * 这里保留函数只是因为调用方太多、签名不能动。**不要在这里再写一份 `when`**，
+ * 三份映射必须一致的那个坑已经踩过了——改一处漏两处，同一台设备在 App 里是洗衣机、
+ * 在桌面和胶囊上却是热水器。
  */
-fun deviceIconRes(emoji: String?): Int = when (emoji) {
-    "🪥" -> R.drawable.ic_device_sink
-    "🧺" -> R.drawable.ic_device_washer
-    "💨" -> R.drawable.ic_device_dryer
-    // 饮水机三种取值（热水 ♨️ / 冷水 ❄️ / 未知 🚰）共用同一个饮水机图标：
-    // 26dp 单色图标塞不下冷热差异，而冷热已经由文案「正在接热水/凉水」表达
-    "♨️", "❄️", "🚰" -> R.drawable.ic_device_faucet
-    else -> R.drawable.ic_device_shower
-}
+fun deviceIconRes(emoji: String?): Int = DeviceVisual.iconRes(emoji)
 
 /**
  * 设备头像里的那个图形。

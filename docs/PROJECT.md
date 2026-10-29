@@ -74,7 +74,8 @@
 | 饮水机支持 | 按 `bigTypeId == 5` 识别直饮水机，绿主题 + ❄️/♨️ 图标 + 名称精简（未实机验证）。⚠️ 饮水机在「洗衣饮水吹风」项目里，但**计费是按量**，必须走按量通道 |
 | 桌面小组件 | 1x1 / 2x2 / 2x4 三种尺寸，桌面直接启停热水；深色液态玻璃卡片，计时由 `Chronometer` 驱动，App 不在也能走秒。列表行的设备头像仍是 emoji |
 | ColorOS 流体云胶囊 | 套餐倒计时与「正在用水」常驻通知申请提升为状态栏胶囊 + 锁屏卡片（`android.requestPromotedOngoing` + `shortCriticalText`）。⚠️ 需用户手动在系统设置里给本 App 开「流体云 / 实时动态」，没开就完全没有胶囊 |
-| 通知倒计时刷新 | 胶囊文本**永远由 App 提供**：剩余 ≥2 分钟显示分钟级（`3分`，30 秒重发一次），<2 分钟切秒级（`01:30`，1 秒重发）。ColorOS 不实现 `when` 的回退渲染，这条不能改回「交给系统」 |
+| 胶囊内容按模块区分（#36） | 「正在用水」常驻通知的小图标改成**当前模块的 `ic_device_*` 矢量图**（原先一律水滴）、标题改成**短模块名**（`饮水机` / `洗衣机` / `热水器`…），正文 `正在使用 · 已用 N 分钟`。原先标题是 `正在使用 · 一长串设备名`，胶囊单侧文本被截断、左右不配平。⚠️ **没有「暂停」按钮**：后端没有 pause 接口（按量只有 `closeOrder`，一调就结束并结算；套餐连停止接口都没有） |
+| 通知倒计时刷新 | **倒计时通知（1006）** 的胶囊文本**永远由 App 提供**：剩余 ≥2 分钟显示分钟级（`3分`，30 秒重发一次），<2 分钟切秒级（`01:30`，1 秒重发）。ColorOS 不实现 `when` 的回退渲染，这条不能改回「交给系统」。⚠️ 按量通知（1001）是**正计时**，反过来交给系统 Chronometer 走秒，**不写** `shortCriticalText`（写了会把走秒盖成静态串） |
 | 通知自检入口 | 设置 → 通知 → 详细设置里两个按钮（测试倒计时通知 / 测试事件通知），**零成本验证通知链路，不用下单花钱** |
 | 主动挤号检测 | 25 秒心跳轮询，被挤下线能及时弹提示（跟随 Activity 生命周期，退后台自动停） |
 | 后台用水监控 | 前台服务 `ShowerWatchService`：超时自动关停与订单轮询脱离界面，退出 App、划掉最近任务都不影响。⚠️ **只服务按量计费设备**，套餐设备接进来会误判 |
@@ -160,7 +161,7 @@ linyu/
 > `_icon_preview/`（图标预览输出）等。`_icon_preview/` 由 `tools/preview_vector.py` 生成，
 > 要长期留存的图应拷到 `docs/icons/`。
 
-### App 源码树（`app/src/main/`，共 91 个 Kotlin 文件）
+### App 源码树（`app/src/main/`，共 92 个 Kotlin 文件）
 
 ```
 app/src/main/
@@ -249,7 +250,7 @@ app/src/main/
 │   │   ├── AppBackgroundLayer.kt          # 自定义背景渲染层（透明度 / 模糊 / 亮度）
 │   │   ├── CustomBackgroundScreen.kt      # 背景装扮设置页（主页 / 使用页切换）
 │   │   ├── DeviceDetailDialog.kt          # 设备详情弹窗（SN、MAC、预扣金额、状态）
-│   │   ├── DeviceGlyph.kt                 # emoji → 矢量图标的渲染层映射
+│   │   ├── DeviceGlyph.kt                 # emoji → 矢量图标（#36 起只转发 utils/DeviceVisual）
 │   │   ├── LogViewerDialog.kt             # 内置日志查看器
 │   │   ├── LinYuToast.kt                  # 自定义 Toast（应用图标 + 深色背景）
 │   │   ├── TailEllipsisText.kt            # 单行文本，放不下先缩字号、再省**开头**（设备名辨识度在房号）
@@ -275,6 +276,8 @@ app/src/main/
 │       ├── KlcxkjSigner.kt                # 蓝牙指令签名（HMAC）
 │       ├── Notifier.kt                    # 系统通知（含套餐倒计时 ID 1006 / 1007、胶囊提升、勿扰查询）
 │       ├── NotifyTextPolicy.kt            # 通知文案 / 胶囊文本 / 重发节奏（纯函数，可测）
+│       ├── DeviceVisual.kt                # ★ emoji → 图标 id / 模块短名（#36 起的唯一出处，
+│       │                                  #   Compose 界面 / 小组件 / 通知三处都转发到这里）
 │       ├── AppLogger.kt                   # 运行日志（脱敏 / 滚动 / 崩溃捕获）
 │       ├── BackgroundManager.kt           # 背景图存取（主页 / 使用页两套配置）
 │       ├── BackgroundState.kt             # 背景配置状态（Compose State）
@@ -282,7 +285,7 @@ app/src/main/
 │       └── ApkUpdater.kt                  # 更新包下载 + 校验（包名 / 签名证书 / SHA-256）+ 调起安装器
 │
 ├── res/                                   # 见下表
-└── ../test/java/com/quzhi/lite/           # 纯 JVM 单测：29 个套件 / 235 个用例
+└── ../test/java/com/quzhi/lite/           # 纯 JVM 单测：32 个套件 / 266 用例（#36 新增 DeviceVisualTest，已实测）
 ```
 
 ### 资源目录（`app/src/main/res/`）
@@ -485,14 +488,35 @@ res/
 ### 通知与 ColorOS 流体云要点
 
 - 统一入口 `Notifier.requestLiveUpdate(chipText)`，所有常驻通知共用，别各处复制
+- **设备图标 / 模块名只有一个出处**：`utils/DeviceVisual`（`iconRes` / `moduleName`）。
+  `ui/DeviceGlyph`、`widget/WidgetRenderer`、`utils/Notifier` 三处**全部转发**它，
+  **不要在任何一处再写一份 `when`**——#31 就是这么出岔子的，
+  「同一台设备在 App 里是洗衣机、在桌面和胶囊上是热水器」。
+  映射放 `utils/` 而不是 `ui/` 的原因：`DeviceGlyph` 依赖 Compose，通知与 RemoteViews 碰不了 Compose
+
+**按量常驻通知（ID 1001）的内容（#36）**
+
+| 位置 | 内容 |
+|---|---|
+| 小图标 | 当前模块的 `ic_device_*` 单色矢量图（原先一律水滴 `ic_notify_shower`） |
+| 大图标 | 同一个模块矢量图（标准样式的 `setLargeIcon`，**不是**自定义 RemoteViews） |
+| 标题 | 短模块名 `饮水机` / `洗衣机` / `吹风机` / `洗手台` / `热水器`（原先 `正在使用 · 一长串设备名`，被截断且左右不配平） |
+| 正文 | `正在使用 · 已用 N 分钟` |
+| 右侧时间 | 系统 Chronometer，**不写** `shortCriticalText`（写了会把走秒盖成静态串） |
+| 操作 | 只有「结束使用」。**故意没有「暂停」**：后端没有 pause 接口，按量只有 `closeOrder`（一调就结束并结算），套餐连停止接口都没有 |
+
+- **套餐倒计时通知（ID 1006）只换了小图标**，标题/正文/chipText/`timeoutAfter` 一律不动
+  （用户已确认那套样式满意，且套餐没有停止接口）
 - 准入条件：标准样式 / `BigTextStyle` / `CallStyle` / `ProgressStyle` / `MetricStyle`；
   声明 `POST_PROMOTED_NOTIFICATIONS`（API 36.1 新增，compileSdk 36 的 android.jar 里没有，
   Manifest 只能按字符串写）；`EXTRA_REQUEST_PROMOTED_ONGOING` 请求提升；`ongoing` + 有 `contentTitle`；
   胶囊文本 **≤7 字符**
 - **胶囊要显示 + 走秒需要两条独立依赖**：① 用户在系统设置里开「流体云 / 实时动态」权限（代码无法代劳）；
   ② 通知带 `requestPromotedOngoing`（**不需要** `shortCriticalText` 也能提升）
-- 但 ColorOS 16 **不实现 `when` 的回退渲染**，所以胶囊文本**永远由 App 提供**：
-  剩余 ≥2 分钟给分钟级（`3分`，30 秒重发），<2 分钟给秒级（`01:30`，1 秒重发）
+- 但 ColorOS 16 **不实现 `when` 的回退渲染**，所以**倒计时那条**（1006）的胶囊文本**永远由 App 提供**：
+  剩余 ≥2 分钟给分钟级（`3分`，30 秒重发），<2 分钟给秒级（`01:30`，1 秒重发）。
+  ⚠️ 这条**只对倒计时成立**：按量的正计时（1001）反过来，**不能写** `shortCriticalText`，
+  否则系统 Chronometer 的走秒会被盖成静态串
 - `contentText` 里的「剩余 X 分 X 秒」是普通文本兜底，任何 ROM 都会渲染
 - 通知 ID：`1001` 用水常驻、`1002` 结束、`1003` 自动关停、`1004` 被占用、`1005` 开阀失败、
   `1006` 套餐倒计时、`1007` 套餐结束。**套餐不能复用 1001**，否则与热水器通知互相覆盖
@@ -643,11 +667,14 @@ QZXY_PREFILL_TELEPHONE=<手机号>
 
 > **测试规模**（2026-10-24 末）：**29 个套件 / 235 个用例 / 0 失败**。
 > 这个数字**会随开发变化**，以实际运行结果为准，不要当成固定指标。
+> ⚠️ 2026-10-29（#36）新增了 `DeviceVisualTest`（8 个用例钉住设备图标与模块名的映射）。
+> **实测回填：32 个套件 / 266 用例 / 0 失败 / 0 错误**（`:app:testDevDebugUnitTest --rerun-tasks`
+> 真跑过）。上面那句 29/235 是 10-24 的快照，保留作历史对照。
 > 单测全部是纯 JVM 测试（`app/src/test/java/com/quzhi/lite/`），覆盖纯逻辑层：
 > `ModeOrderPolicyTest` / `ProjectSelectionPolicyTest` / `BillMergerTest` /
 > `FavoriteStoreTest` / `SpendingAnalyticsTest` / `NotifyTextPolicyTest` /
 > `DeviceBoardPolicyTest` / `PreemptBothBillingTest` / `SkipDetailPolicyTest` /
-> `TrendMergeLinkTest` / `AppLoggerMaskingTest` 等。
+> `TrendMergeLinkTest` / `AppLoggerMaskingTest` / `DeviceVisualTest` 等。
 
 ### APK 输出位置
 
@@ -724,7 +751,8 @@ buildTypes {
 |---|---|
 | **跨板块设备操作需真机验证（#35）** | 设备操作现在按设备自己的 `projectId` 借板块认证参数，修掉了 `errorCode=534 设备信息和项目信息不匹配`。**「服务端是否真的接受借来的板块参数」尚未真机实测**——这是该修复的成败点。需验：① 洗浴板块开饮水机 ② 关阀能结算 ③ 洗浴板块给洗衣机下单 |
 | **MQTT broker 硬编码不匹配** | `utils/MqttManager.kt` 硬编码 `tcp://47.107.37.60:1883`，而吹风机实测 broker 是 `39.108.147.136:1883`。后果是套餐设备的 orderNo 拿不到 MQTT 推送，只能退到 `lastOrder/byMac`（慢几秒，功能不挂） |
-| **ColorOS 流体云胶囊需用户手动开权限** | 代码无法代劳。没在系统设置 → 通知与状态栏 → 流体云里给本 App 开「实时动态」权限，就**完全没有胶囊**。已加文字兜底 + 30 秒 / 1 秒重发，胶囊本体的真机表现仍待验证 |
+| **ColorOS 流体云胶囊需用户手动开权限** | 代码无法代劳。没在系统设置 → 通知与状态栏 → 流体云里给本 App 开「实时动态」权限，就**完全没有胶囊**。已加文字兜底 + 30 秒 / 1 秒重发，胶囊本体的真机表现仍待验证。⚠️ #36 把胶囊内容改成「模块矢量图 + 短模块名」后，**仍未真机验证**——胶囊是否真的左右配平、图标是否显示，要用户自己开权限后看 |
+| **#36 按量通知的 `setLargeIcon` 可能妨碍提升** | 用户要求通知栏右侧方图也换成模块矢量图，用的是标准样式的 `Icon.createWithResource`（OPPO 禁止的是自定义 RemoteViews，这个是合法的）。但「合法」不等于「这台 ROM 一定认」。若真机发现胶囊退化成普通通知，**删掉 `showInUse` 里 `setLargeIcon(...)` 那一行即可**，其余字段都不依赖它 |
 | **无 release keystore → 已发布的 v3.1.0-dev 是 debug 签名** | `local.properties` 缺 `KEYSTORE_FILE` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD`，走「Release APK 保持未签名」分支，测试分发用 debug 签名。**不能上应用商店，也不能覆盖安装到其它签名的同包名应用上** |
 | **饮水机未实机验证** | 识别与 UI 已实现（`bigTypeId == 5`），但作者所在学校无直饮水机，实际控制流程未验证。且它在「洗衣饮水吹风」项目里却**按量计费**，不能并进套餐通道 |
 | **Gitee 镜像已置空** | `api/GithubApi.kt` 的 `GITEE_REPO = ""`，检查更新与下载都走 GitHub 直链，大陆实测约 100 KB/s。要恢复加速需在 Gitee 用同名 tag + 同名附件发版 |
@@ -892,6 +920,11 @@ buildTypes {
 - 倒计时三处修复（#14）：负数不消失 / 胶囊不倒数 / 通知一直挂着
 - 胶囊文本**永远由 App 提供**（#18 定案）：≥2 分钟分钟级（30 秒重发）、<2 分钟秒级（1 秒重发）。
   ColorOS 16 不实现 `when` 回退渲染，这条走过六版弯路，别改回去
+- **胶囊内容按模块区分（#36）**：按量常驻通知的小图标换成当前模块的 `ic_device_*` 矢量图
+  （原先一律水滴），标题换成短模块名（`饮水机` / `洗衣机` / `热水器`…），正文 `正在使用 · 已用 N 分钟`；
+  设备 emoji → 图标/模块名的映射同时收口到 `utils/DeviceVisual.kt`（原先 `ui/DeviceGlyph` 与
+  `widget/WidgetRenderer` 各写一份、通知没接）。套餐倒计时通知只换小图标，样式一律不动。
+  ⚠️ 两种通知都**没有「暂停」按钮**——后端没有 pause 接口
 - 两个**零成本自检按钮**（设置 → 通知 → 详细设置）：不用下单就能验证通知链路
 
 **其它体验**
